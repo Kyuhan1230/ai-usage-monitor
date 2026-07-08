@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+*.pyc
+tmp_status.json
+tmp_history/
+tmp_wrapper_status.json
+tmp_wrapper_history/
+codex_usage_report.html
