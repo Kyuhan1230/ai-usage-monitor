@@ -319,3 +319,51 @@ npm test
 - poller가 존재하지 않는 Codex 실행 파일에도 죽지 않고 재시도하는지
 - mock `/status` 출력 캡처 후 `status.json` 생성
 - 합쳐진 대시보드가 잔여율과 토큰 사용량을 함께 표시하는지
+
+## 10. Windows 앱
+
+Electron 기반 compact 앱을 실행할 수 있다.
+
+```powershell
+npm run app
+```
+
+설치 파일 생성:
+
+```powershell
+npm run dist
+```
+
+출력 파일은 `dist\` 아래에 생성된다. 다른 PC에서는 설치 후 Setup 창에서 Codex CLI, Claude Code, Claude statusLine hook, uvicorn 상태를 확인한다.
+
+수정 사항을 설치 앱에 반영하려면 다시 빌드한다.
+
+```powershell
+npm test
+npm run dist
+```
+
+그 다음 `dist\Codex Claude Usage Setup 0.1.0.exe`를 다시 실행해 설치하면 된다. 개발 중 바로 확인할 때는 `npm run app`을 쓴다.
+
+앱은 시작 시 내부에서 FastAPI 대시보드 서버를 `127.0.0.1:8767`로 띄우고, 작은 always-on-top 창을 연다. 작업표시줄 트레이 아이콘에서 compact window, full dashboard, setup, quit 동작을 실행할 수 있다.
+
+compact 창 기능:
+
+- Codex, Claude 잔여율 표시
+- 항상 위 토글
+- 투명도 조절
+- 접기/펼치기
+- 전체 대시보드 열기
+- Windows 시작 시 자동 실행
+
+Setup 창 기능:
+
+- Codex CLI 설치 및 status 확인
+- Claude Code 설치 및 status 확인
+- 각 status의 마지막 갱신 시각과 오래된 값 경고
+- Codex 로그인 실행
+- Claude 인증 실행
+- Claude statusLine hook 설치
+- uvicorn 런타임 확인
+
+앱은 OpenAI, Anthropic 인증 토큰이나 브라우저 쿠키를 저장하지 않는다. 로그인 상태는 기존 CLI와 로컬 status JSON 파일로만 확인한다.

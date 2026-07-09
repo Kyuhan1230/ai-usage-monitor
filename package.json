@@ -2,9 +2,14 @@
   "name": "codex-usage-wrapper",
   "version": "0.1.0",
   "private": true,
+  "productName": "Codex Claude Usage",
+  "author": "CodexUsage",
   "description": "Local Codex CLI usage wrapper and dashboard.",
-  "main": "src/node/codex-wrapper.js",
+  "main": "src/electron/main.js",
   "scripts": {
+    "app": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
     "wrapper": "node src/node/codex-wrapper.js",
     "status-poller": "node src/node/codex-status-poller.js",
     "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 0.0.0.0 --port 8767",
@@ -14,5 +19,35 @@
   },
   "dependencies": {
     "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.codex-claude-usage",
+    "productName": "Codex Claude Usage",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "package.json",
+      "src/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

@@ -1045,6 +1045,10 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "node", "codex-status-poller.js")]);
   await run(NODE, ["--check", path.join("src", "node", "status-capture.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "main.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "renderer", "setup.js")]);
   await run("python", ["-m", "py_compile", path.join("src", "python", "codex_status_dashboard.py"), path.join("src", "python", "codex_usage_report.py"), path.join("src", "python", "claude_usage_report.py"), path.join("src", "python", "dashboard_common.py")]);
   await testParseRawStdin();
   await testDuplicateLimitsKeepFirstGeneralLimit();

@@ -89,7 +89,13 @@ function extractRemainingPercent(text) {
 
 function extractResetText(text) {
   const resetMatch = text.match(/(resets?\s+(?:in\s+)?[^,\n)]+|reset\s+(?:in\s+)?[^,\n)]+)/i);
-  return resetMatch ? normalizeResetText(resetMatch[1].trim()) : null;
+  return resetMatch ? normalizeResetText(trimResetText(resetMatch[1].trim())) : null;
+}
+
+function trimResetText(resetText) {
+  return resetText
+    .split(/\s+(?=(?:weekly|monthly|5[- ]?hour|five[- ]?hour|5h)\b|>)/i)[0]
+    .trim();
 }
 
 function normalizeResetText(resetText) {
@@ -278,6 +284,7 @@ module.exports = {
   extractRemainingPercent,
   extractResetText,
   normalizeResetText,
+  trimResetText,
   parseStatusText,
   writeJsonAtomic,
   appendHistory,
