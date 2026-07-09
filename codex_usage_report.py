@@ -10,9 +10,14 @@ import re
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+from dashboard_common import BASE_STYLE, REPORT_STYLE, FileCache, render_live_refresh_script, render_usage_table, send_body
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 TOKEN_KEYS = (
@@ -33,6 +38,27 @@ METRIC_TOOLTIPS = {
     "Total": "Codex가 해당 usage 이벤트에 대해 보고한 전체 토큰 합계입니다.",
     "Events": "집계에 포함된 usage 이벤트 수입니다. 보통 응답 또는 처리 단위별로 기록됩니다.",
 }
+
+CODEX_TODAY_MODEL_COLUMNS = [
+    ("model", "Model", None),
+    ("input_tokens", "Input", METRIC_TOOLTIPS["Input"]),
+    ("cached_input_tokens", "Cached Input", METRIC_TOOLTIPS["Cached Input"]),
+    ("output_tokens", "Output", METRIC_TOOLTIPS["Output"]),
+    ("reasoning_output_tokens", "Reasoning Output", METRIC_TOOLTIPS["Reasoning Output"]),
+    ("total_tokens", "Total", METRIC_TOOLTIPS["Total"]),
+    ("events", "Events", METRIC_TOOLTIPS["Events"]),
+]
+
+CODEX_DAILY_COLUMNS = [
+    ("date", "Date", None),
+    ("models", "Models", None),
+    ("input_tokens", "Input", METRIC_TOOLTIPS["Input"]),
+    ("cached_input_tokens", "Cached Input", METRIC_TOOLTIPS["Cached Input"]),
+    ("output_tokens", "Output", METRIC_TOOLTIPS["Output"]),
+    ("reasoning_output_tokens", "Reasoning Output", METRIC_TOOLTIPS["Reasoning Output"]),
+    ("total_tokens", "Total", METRIC_TOOLTIPS["Total"]),
+    ("events", "Events", METRIC_TOOLTIPS["Events"]),
+]
 
 
 @dataclass
@@ -217,7 +243,10 @@ def date_from_record(record: dict[str, Any], source_file: Path) -> str:
     if isinstance(timestamp, str) and timestamp:
         normalized = timestamp.replace("Z", "+00:00")
         try:
-            return datetime.fromisoformat(normalized).date().isoformat()
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(KST)
+            return parsed.date().isoformat()
         except ValueError:
             if len(timestamp) >= 10:
                 return timestamp[:10]
@@ -329,9 +358,6 @@ def compute_file_usage(path: Path) -> dict[tuple[str, str], UsageTotals]:
     return dict(result)
 
 
-FileCache = dict[Path, "tuple[tuple[float, int], dict[tuple[str, str], UsageTotals]]"]
-
-
 def aggregate_usage(sessions_dir: Path, file_cache: FileCache | None = None) -> dict[tuple[str, str], UsageTotals]:
     """세션 JSONL 파일을 날짜별, 모델별로 집계한다.
 
@@ -380,25 +406,6 @@ def format_number(value: int) -> str:
     return f"{value:,}"
 
 
-def render_th(label: str, class_name: str = "") -> str:
-    """표 헤더 셀을 렌더링하고, 지표 설명이 있으면 tooltip을 붙인다.
-
-    Args:
-        label: 표시할 컬럼명.
-        class_name: `th`에 붙일 CSS 클래스.
-
-    Returns:
-        HTML `th` 문자열.
-    """
-
-    class_attr = f' class="{html.escape(class_name)}"' if class_name else ""
-    tip = METRIC_TOOLTIPS.get(label)
-    if tip is None:
-        return f"<th{class_attr}>{html.escape(label)}</th>"
-    escaped_tip = html.escape(tip)
-    return f'<th{class_attr}><span tabindex="0" data-tip="{escaped_tip}" title="{escaped_tip}">{html.escape(label)}</span></th>'
-
-
 def format_models(models: set[str]) -> str:
     """모델 목록을 표 안에 넣기 좋은 짧은 문자열로 렌더링한다.
 
@@ -431,22 +438,22 @@ def render_rows(aggregate: dict[tuple[str, str], UsageTotals]) -> str:
         HTML `tr` 문자열.
     """
 
-    rows: list[str] = []
+    rows: list[dict[str, str]] = []
     for (date, model), totals in sorted(aggregate.items(), key=lambda item: item[0], reverse=True):
         rows.append(
-            "<tr>"
-            f"<td>{html.escape(date)}</td>"
-            f"<td>{html.escape(model)}</td>"
-            f"<td class=\"num\">{format_number(totals.input_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.cached_input_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.output_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.reasoning_output_tokens)}</td>"
-            f"<td class=\"num total\">{format_number(totals.total_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.events)}</td>"
-            f"<td class=\"num\">{format_number(len(totals.files))}</td>"
-            "</tr>"
+            {
+                "date": html.escape(date),
+                "model": html.escape(model),
+                "input_tokens": format_number(totals.input_tokens),
+                "cached_input_tokens": format_number(totals.cached_input_tokens),
+                "output_tokens": format_number(totals.output_tokens),
+                "reasoning_output_tokens": format_number(totals.reasoning_output_tokens),
+                "total_tokens": format_number(totals.total_tokens),
+                "events": format_number(totals.events),
+                "files": format_number(len(totals.files)),
+            }
         )
-    return "\n".join(rows)
+    return render_usage_table(rows, CODEX_DAILY_COLUMNS + [("files", "Files", None)])
 
 
 def render_daily_rows(aggregate: dict[tuple[str, str], UsageTotals]) -> str:
@@ -465,21 +472,21 @@ def render_daily_rows(aggregate: dict[tuple[str, str], UsageTotals]) -> str:
         merge_into(by_date[date], totals)
         models_by_date[date].add(model)
 
-    rows: list[str] = []
+    rows: list[dict[str, str]] = []
     for date, totals in sorted(by_date.items(), reverse=True):
         rows.append(
-            "<tr>"
-            f"<td>{html.escape(date)}</td>"
-            f"<td>{format_models(models_by_date[date])}</td>"
-            f"<td class=\"num\">{format_number(totals.input_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.cached_input_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.output_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.reasoning_output_tokens)}</td>"
-            f"<td class=\"num total\">{format_number(totals.total_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.events)}</td>"
-            "</tr>"
+            {
+                "date": html.escape(date),
+                "models": format_models(models_by_date[date]),
+                "input_tokens": format_number(totals.input_tokens),
+                "cached_input_tokens": format_number(totals.cached_input_tokens),
+                "output_tokens": format_number(totals.output_tokens),
+                "reasoning_output_tokens": format_number(totals.reasoning_output_tokens),
+                "total_tokens": format_number(totals.total_tokens),
+                "events": format_number(totals.events),
+            }
         )
-    return "\n".join(rows)
+    return render_usage_table(rows, CODEX_DAILY_COLUMNS)
 
 
 def render_today_model_rows(aggregate: dict[tuple[str, str], UsageTotals], today: str) -> str:
@@ -493,7 +500,7 @@ def render_today_model_rows(aggregate: dict[tuple[str, str], UsageTotals], today
         HTML `tr` 문자열.
     """
 
-    rows: list[str] = []
+    rows: list[dict[str, str]] = []
     items = [
         (model, totals)
         for (date, model), totals in aggregate.items()
@@ -501,33 +508,43 @@ def render_today_model_rows(aggregate: dict[tuple[str, str], UsageTotals], today
     ]
     for model, totals in sorted(items, key=lambda item: item[1].total_tokens, reverse=True):
         rows.append(
-            "<tr>"
-            f"<td>{html.escape(model)}</td>"
-            f"<td class=\"num\">{format_number(totals.input_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.cached_input_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.output_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.reasoning_output_tokens)}</td>"
-            f"<td class=\"num total\">{format_number(totals.total_tokens)}</td>"
-            f"<td class=\"num\">{format_number(totals.events)}</td>"
-            "</tr>"
+            {
+                "model": html.escape(model),
+                "input_tokens": format_number(totals.input_tokens),
+                "cached_input_tokens": format_number(totals.cached_input_tokens),
+                "output_tokens": format_number(totals.output_tokens),
+                "reasoning_output_tokens": format_number(totals.reasoning_output_tokens),
+                "total_tokens": format_number(totals.total_tokens),
+                "events": format_number(totals.events),
+            }
         )
 
     if rows:
-        return "\n".join(rows)
-    return '<tr><td colspan="7">오늘 집계된 모델 사용량이 없습니다.</td></tr>'
+        return render_usage_table(rows, CODEX_TODAY_MODEL_COLUMNS)
+    return render_usage_table(
+        [
+            {
+                "model": "오늘 집계된 모델 사용량이 없습니다.",
+                "input_tokens": "",
+                "cached_input_tokens": "",
+                "output_tokens": "",
+                "reasoning_output_tokens": "",
+                "total_tokens": "",
+                "events": "",
+            }
+        ],
+        CODEX_TODAY_MODEL_COLUMNS,
+    )
 
 
-def today_utc() -> str:
-    """오늘 날짜를 세션 기록과 같은 기준(UTC)의 `YYYY-MM-DD` 문자열로 반환한다.
-
-    세션 파일의 날짜는 타임스탬프의 UTC 기준 날짜로 계산되므로(`date_from_record`),
-    "오늘" 집계도 같은 기준을 써야 표 안의 오늘 날짜 행과 정확히 일치한다.
+def today_kst() -> str:
+    """오늘 날짜를 KST 00시 기준의 `YYYY-MM-DD` 문자열로 반환한다.
 
     Returns:
-        UTC 기준 오늘 날짜 문자열.
+        KST 기준 오늘 날짜 문자열.
     """
 
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(KST).date().isoformat()
 
 
 def today_totals(aggregate: dict[tuple[str, str], UsageTotals], today: str) -> UsageTotals:
@@ -564,144 +581,6 @@ def sum_totals(aggregate: dict[tuple[str, str], UsageTotals]) -> UsageTotals:
     return total
 
 
-BASE_STYLE = """
-    :root {
-      color-scheme: dark;
-      --bg: #0a0c10;
-      --surface: #12151b;
-      --surface-2: #181c24;
-      --border: #242933;
-      --text: #e7e9ee;
-      --muted: #8891a3;
-      --accent: #e8b34c;
-      --accent-soft: rgba(232, 179, 76, 0.12);
-      --ok: #5fd4a0;
-      --warn: #e8b34c;
-      --critical: #f0645f;
-      --mono: "Cascadia Code", "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
-    }
-    * {
-      box-sizing: border-box;
-    }
-    body {
-      margin: 0;
-      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    h1, h2 {
-      font-weight: 600;
-      letter-spacing: 0;
-    }
-    code {
-      font-family: var(--mono);
-    }
-    [data-tip] {
-      position: relative;
-      cursor: help;
-      border-bottom: 1px dotted var(--muted);
-    }
-    .floating-tooltip {
-      position: fixed;
-      background: #1c2029;
-      color: var(--text);
-      padding: 8px 10px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      font-size: 12px;
-      font-weight: 400;
-      line-height: 1.45;
-      max-width: 340px;
-      white-space: normal;
-      text-transform: none;
-      letter-spacing: 0;
-      box-shadow: 0 8px 20px rgba(0, 0, 0, .5);
-      pointer-events: none;
-      z-index: 9999;
-    }
-"""
-
-
-REPORT_STYLE = """
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-      margin: 0 0 24px;
-    }
-    .stat {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-    }
-    .stat .label {
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .stat .value {
-      margin-top: 8px;
-      font-family: var(--mono);
-      font-size: 24px;
-      font-weight: 600;
-    }
-    .table-wrap {
-      max-height: 420px;
-      overflow: auto;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-    table {
-      width: 100%;
-      min-width: 880px;
-      border-collapse: collapse;
-      font-size: 14px;
-    }
-    th, td {
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-    }
-    th {
-      position: sticky;
-      top: 0;
-      text-align: left;
-      background: var(--surface-2);
-      color: var(--muted);
-      font-weight: 600;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      z-index: 1;
-    }
-    tbody tr:hover td {
-      background: var(--surface-2);
-    }
-    tr:last-child td {
-      border-bottom: 0;
-    }
-    td {
-      font-family: var(--mono);
-    }
-    td:first-child, td:nth-child(2) {
-      font-family: inherit;
-    }
-    .num {
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-    .total {
-      color: var(--accent);
-      font-weight: 600;
-    }
-    .empty {
-      padding: 16px;
-      background: var(--accent-soft);
-      border: 1px solid var(--accent);
-      border-radius: 8px;
-    }
-"""
 
 
 def render_report_body(aggregate: dict[tuple[str, str], UsageTotals], sessions_dir: Path) -> str:
@@ -717,14 +596,14 @@ def render_report_body(aggregate: dict[tuple[str, str], UsageTotals], sessions_d
         `<section>`부터 시작하는 HTML 조각 문자열.
     """
 
-    today_date = today_utc()
+    today_date = today_kst()
     today = today_totals(aggregate, today_date)
-    today_model_rows = render_today_model_rows(aggregate, today_date)
-    daily_rows = render_daily_rows(aggregate)
+    today_model_table = render_today_model_rows(aggregate, today_date)
+    daily_table = render_daily_rows(aggregate)
     empty_note = "" if aggregate else "<p class=\"empty\">집계할 usage/token 이벤트가 없습니다.</p>"
 
     return f"""
-    <p class="meta">스캔 대상: {html.escape(str(sessions_dir))}</p>
+    <p class="report-meta">스캔 대상: {html.escape(str(sessions_dir))}</p>
     <section class="stats">
       <div class="stat"><div class="label">오늘 Total Tokens</div><div class="value">{format_number(today.total_tokens)}</div></div>
       <div class="stat"><div class="label">오늘 Input Tokens</div><div class="value">{format_number(today.input_tokens)}</div></div>
@@ -732,94 +611,14 @@ def render_report_body(aggregate: dict[tuple[str, str], UsageTotals], sessions_d
       <div class="stat"><div class="label">오늘 Usage Events</div><div class="value">{format_number(today.events)}</div></div>
     </section>
     {empty_note}
-    <h2>오늘 사용량 기준일: {html.escape(today_date)}</h2>
+    <h2>오늘 사용량 기준일: {html.escape(today_date)} 00:00 KST</h2>
     <h2>오늘 모델별 사용량</h2>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {render_th("Model")}
-            {render_th("Input", "num")}
-            {render_th("Cached Input", "num")}
-            {render_th("Output", "num")}
-            {render_th("Reasoning Output", "num")}
-            {render_th("Total", "num")}
-            {render_th("Events", "num")}
-          </tr>
-        </thead>
-        <tbody>
-          {today_model_rows}
-        </tbody>
-      </table>
-    </div>
+    {today_model_table}
     <h2>날짜별 요약</h2>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {render_th("Date")}
-            {render_th("Models")}
-            {render_th("Input", "num")}
-            {render_th("Cached Input", "num")}
-            {render_th("Output", "num")}
-            {render_th("Reasoning Output", "num")}
-            {render_th("Total", "num")}
-            {render_th("Events", "num")}
-          </tr>
-        </thead>
-        <tbody>
-          {daily_rows}
-        </tbody>
-      </table>
-    </div>
+    {daily_table}
 """
 
 
-def render_live_refresh_script(target_id: str, fragment_path: str, refresh_seconds: int) -> str:
-    """전체 페이지 새로고침 없이 특정 영역만 주기적으로 갱신하는 스크립트를 만든다.
-
-    `<meta http-equiv="refresh">`는 매번 페이지를 통째로 다시 그려서 화면이 깜빡이므로,
-    대신 fetch로 조각 HTML만 받아서 대상 엘리먼트의 innerHTML만 바꾼다.
-
-    Args:
-        target_id: 갱신할 대상 엘리먼트의 id.
-        fragment_path: 조각 HTML을 반환하는 엔드포인트 경로.
-        refresh_seconds: 갱신 주기(초).
-
-    Returns:
-        `<script>` 태그 문자열. refresh_seconds가 0 이하이면 빈 문자열.
-    """
-
-    if refresh_seconds <= 0:
-        return ""
-
-    return f"""
-  <script>
-    (function () {{
-      var target = document.getElementById("{target_id}");
-      var lastBody = target ? target.innerHTML : "";
-      var inFlight = false;
-      function refresh() {{
-        // 집계가 느려서 이전 요청이 아직 안 끝났으면 겹쳐 보내지 않는다.
-        if (inFlight) {{
-          return;
-        }}
-        inFlight = true;
-        fetch("{fragment_path}", {{ cache: "no-store" }})
-          .then(function (res) {{ return res.ok ? res.text() : null; }})
-          .then(function (body) {{
-            if (body !== null && target && body !== lastBody) {{
-              lastBody = body;
-              target.innerHTML = body;
-            }}
-          }})
-          .catch(function () {{ /* 네트워크 순간 끊김은 다음 주기에 재시도 */ }})
-          .finally(function () {{ inFlight = false; }});
-      }}
-      setInterval(refresh, {refresh_seconds * 1000});
-    }})();
-  </script>
-"""
 
 
 def render_tooltip_script() -> str:
@@ -974,34 +773,6 @@ def render_html(
 """
 
 
-def send_body(handler: http.server.BaseHTTPRequestHandler, body: bytes, content_type: str) -> None:
-    """200 응답을 헤더까지 포함해서 보낸다.
-
-    브라우저가 응답을 받기 전에 탭을 닫거나 새로고침해서 연결을 먼저 끊는 경우가
-    있는데(특히 몇 초 주기로 반복 호출되는 /fragment, /status.json에서 흔함),
-    오래 떠 있는 백그라운드 서버의 로그가 매번 트레이스백으로 오염되지 않도록
-    그런 연결 끊김은 조용히 넘어간다.
-
-    Args:
-        handler: 응답을 보낼 요청 핸들러.
-        body: 응답 바이트.
-        content_type: Content-Type 헤더 값.
-
-    Returns:
-        None.
-    """
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", content_type)
-    handler.send_header("Cache-Control", "no-store")
-    handler.send_header("Content-Length", str(len(body)))
-    try:
-        # 헤더 flush(end_headers)와 body write 둘 다 소켓에 실제로 쓰는 지점이라
-        # 연결이 그 사이 어느 쪽에서 끊기든 같이 잡는다.
-        handler.end_headers()
-        handler.wfile.write(body)
-    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
-        pass
 
 
 def run_live_server(sessions_dir: Path, host: str, port: int, refresh_seconds: int) -> None:
