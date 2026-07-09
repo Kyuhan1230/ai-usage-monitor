@@ -13,7 +13,7 @@ const {
   typeIntoTerminal,
 } = require("./status-capture");
 
-const DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_POLL_INTERVAL_MS = 3 * 60 * 1000;
 const DEFAULT_STARTUP_DELAY_MS = 4000;
 const DEFAULT_CAPTURE_QUIET_MS = 1600;
 const DEFAULT_MAX_CAPTURE_MS = 15 * 1000;
