@@ -86,7 +86,7 @@ function formatEpochSeconds(value) {
     hour12: false,
   }).formatToParts(date);
   const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `resets ${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute} KST`;
+  return `resets ${byType.month}/${byType.day} ${byType.hour}:${byType.minute}`;
 }
 
 function formatResetText(key, value) {

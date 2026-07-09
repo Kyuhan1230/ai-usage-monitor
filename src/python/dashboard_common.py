@@ -281,11 +281,13 @@ def render_live_refresh_script(target_id: str, fragment_path: str, refresh_secon
             if (body !== null && target && body !== lastBody) {{
               lastBody = body;
               target.innerHTML = body;
+              target.classList.remove("is-loading");
             }}
           }})
           .catch(function () {{}})
           .finally(function () {{ inFlight = false; }});
       }}
+      refresh();
       setInterval(refresh, {refresh_seconds * 1000});
     }})();
   </script>

@@ -1,9 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $scriptDir
+$projectRoot = Split-Path -Parent $scriptDir
+Set-Location $projectRoot
 
-if (-not (Test-Path -LiteralPath (Join-Path $scriptDir "node_modules\node-pty"))) {
+if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "node_modules\node-pty"))) {
     Write-Host "[dashboard] installing npm dependencies..."
     npm install
 }
@@ -25,8 +26,8 @@ try {
 }
 
 Start-Process -FilePath "python" `
-    -ArgumentList @("codex_status_dashboard.py", "--serve", "--port", "$port") `
-    -WorkingDirectory $scriptDir `
+    -ArgumentList @("src\python\codex_status_dashboard.py", "--serve", "--host", "0.0.0.0", "--port", "$port") `
+    -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
     -RedirectStandardOutput $stdoutLog `
     -RedirectStandardError $stderrLog

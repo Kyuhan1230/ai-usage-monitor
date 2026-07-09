@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +120,8 @@ def startup() -> None:
             CODEX_COMMAND,
             NODE_COMMAND,
         )
+    threading.Thread(target=current_usage_aggregate, daemon=True).start()
+    threading.Thread(target=current_claude_usage_aggregate, daemon=True).start()
 
 
 @app.on_event("shutdown")
@@ -140,13 +143,14 @@ def index() -> str:
         status_dashboard.read_status(STATUS_PATH),
         STATUS_PATH,
         REFRESH_SECONDS,
-        current_usage_aggregate(),
+        {},
         SESSIONS_DIR,
         status_dashboard.read_status(CLAUDE_STATUS_PATH),
         CLAUDE_STATUS_PATH,
-        current_claude_usage_aggregate(),
+        {},
         CLAUDE_SESSIONS_DIR,
         AUTO_STATUS_POLL,
+        True,
     )
 
 

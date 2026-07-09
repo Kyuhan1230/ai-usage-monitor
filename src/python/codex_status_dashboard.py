@@ -24,7 +24,7 @@ from dashboard_common import FileCache
 
 SCHEMA_VERSION = 1
 DEFAULT_REFRESH_SECONDS = 3
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8767
 DEFAULT_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "status.json"
 DEFAULT_CLAUDE_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "claude-status.json"
@@ -32,7 +32,8 @@ DEFAULT_HISTORY_DIR = Path.home() / ".codex-usage-wrapper" / "history"
 DEFAULT_POLL_INTERVAL_MS = 3 * 60 * 1000
 DEFAULT_CODEX_COMMAND = "codex.exe" if sys.platform == "win32" else "codex"
 DEFAULT_NODE_COMMAND = "node"
-POLLER_SCRIPT_PATH = Path(__file__).resolve().parent / "codex-status-poller.js"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+POLLER_SCRIPT_PATH = PROJECT_ROOT / "src" / "node" / "codex-status-poller.js"
 KST = ZoneInfo("Asia/Seoul")
 
 LIMIT_ALIASES = {
@@ -299,8 +300,66 @@ def display_reset(limit: dict[str, Any] | None) -> str:
         return "N/A"
     reset_text = limit.get("reset_text")
     if isinstance(reset_text, str) and reset_text:
-        return reset_text
+        return normalize_reset_text(reset_text)
     return "N/A"
+
+
+MONTH_NUMBERS = {
+    "jan": "01",
+    "feb": "02",
+    "mar": "03",
+    "apr": "04",
+    "may": "05",
+    "jun": "06",
+    "jul": "07",
+    "aug": "08",
+    "sep": "09",
+    "oct": "10",
+    "nov": "11",
+    "dec": "12",
+}
+
+
+def normalize_reset_text(reset_text: str) -> str:
+    """reset 표시를 `resets MM/dd HH:mm` 형태로 짧게 맞춘다.
+
+    Args:
+        reset_text: status JSON에 저장된 reset 문구.
+
+    Returns:
+        정규화된 reset 문구. 상대 시간은 원문을 유지한다.
+    """
+
+    iso_match = re.match(r"^resets?\s+(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})", reset_text, re.IGNORECASE)
+    if iso_match:
+        return f"resets {iso_match.group(2)}/{iso_match.group(3)} {int(iso_match.group(4)):02d}:{iso_match.group(5)}"
+
+    short_match = re.match(r"^resets?\s+(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})", reset_text, re.IGNORECASE)
+    if short_match:
+        month = int(short_match.group(1))
+        day = int(short_match.group(2))
+        hour = int(short_match.group(3))
+        return f"resets {month:02d}/{day:02d} {hour:02d}:{short_match.group(4)}"
+
+    month_name_match = re.match(
+        r"^resets?\s+(\d{1,2}):(\d{2})\s+on\s+(\d{1,2})\s+([A-Za-z]{3})",
+        reset_text,
+        re.IGNORECASE,
+    )
+    if month_name_match:
+        month = MONTH_NUMBERS.get(month_name_match.group(4).lower())
+        if month is not None:
+            day = int(month_name_match.group(3))
+            hour = int(month_name_match.group(1))
+            return f"resets {month}/{day:02d} {hour:02d}:{month_name_match.group(2)}"
+
+    time_only_match = re.match(r"^resets?\s+(\d{1,2}):(\d{2})$", reset_text, re.IGNORECASE)
+    if time_only_match:
+        today = now_kst()
+        hour = int(time_only_match.group(1))
+        return f"resets {today:%m/%d} {hour:02d}:{time_only_match.group(2)}"
+
+    return reset_text
 
 
 RING_LABELS = (
@@ -364,6 +423,12 @@ DASHBOARD_STYLE = """
       display: flex;
       align-items: center;
       gap: 10px;
+    }
+    #dashboard-content.is-loading {
+      filter: blur(2px);
+      opacity: .58;
+      pointer-events: none;
+      transition: filter .18s ease, opacity .18s ease;
     }
     .theme-toggle {
       border: 1px solid var(--border);
@@ -706,7 +771,7 @@ def render_dashboard_content(
     <section class="hint">
       <div class="label">status.json이 아직 없습니다</div>
       <p>Codex CLI에서 <code>/status</code>를 실행한 뒤 출력 내용을 복사하고, 별도 PowerShell에서 아래 명령을 실행하세요.</p>
-      <pre>Get-Clipboard | python codex_status_dashboard.py --raw-stdin</pre>
+      <pre>Get-Clipboard | python src/python/codex_status_dashboard.py --raw-stdin</pre>
       <p>저장 경로: <code>{html.escape(str(status_path))}</code></p>
     </section>
 """
@@ -784,6 +849,7 @@ def render_dashboard_page(
     claude_usage_aggregate: dict[tuple[str, str], claude_usage_report.UsageTotals],
     claude_sessions_dir: Path,
     auto_status_poll: bool,
+    initial_loading: bool = False,
 ) -> str:
     """플랜 잔여율과 토큰 사용량 리포트를 하나로 합친 전체 대시보드 페이지를 렌더링한다.
 
@@ -812,6 +878,7 @@ def render_dashboard_page(
     )
     refresh_script = usage_report.render_live_refresh_script("dashboard-content", "/fragment", refresh_seconds)
     theme_script = render_theme_script()
+    loading_class = ' class="is-loading"' if initial_loading else ""
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -839,7 +906,7 @@ def render_dashboard_page(
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="테마 전환">Dark</button>
       </div>
     </div>
-    <div id="dashboard-content">{content}</div>
+    <div id="dashboard-content"{loading_class}>{content}</div>
   </main>
   {usage_report.render_tooltip_script()}
   {theme_script}
@@ -1239,7 +1306,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--host",
         default=DEFAULT_HOST,
-        help="Host for --serve. Default: 127.0.0.1",
+        help="Host for --serve. Default: 0.0.0.0",
     )
     parser.add_argument(
         "--port",

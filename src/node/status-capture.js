@@ -30,6 +30,21 @@ const LIMIT_ALIASES = {
   monthly: ["monthly", "month"],
 };
 
+const MONTH_NUMBERS = {
+  jan: "01",
+  feb: "02",
+  mar: "03",
+  apr: "04",
+  may: "05",
+  jun: "06",
+  jul: "07",
+  aug: "08",
+  sep: "09",
+  oct: "10",
+  nov: "11",
+  dec: "12",
+};
+
 function stripAnsi(text) {
   return text
     .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, "")
@@ -74,7 +89,26 @@ function extractRemainingPercent(text) {
 
 function extractResetText(text) {
   const resetMatch = text.match(/(resets?\s+(?:in\s+)?[^,\n)]+|reset\s+(?:in\s+)?[^,\n)]+)/i);
-  return resetMatch ? resetMatch[1].trim() : null;
+  return resetMatch ? normalizeResetText(resetMatch[1].trim()) : null;
+}
+
+function normalizeResetText(resetText) {
+  const isoMatch = resetText.match(/^resets?\s+(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/i);
+  if (isoMatch) {
+    return `resets ${isoMatch[2]}/${isoMatch[3]} ${isoMatch[4].padStart(2, "0")}:${isoMatch[5]}`;
+  }
+
+  const monthNameMatch = resetText.match(/^resets?\s+(\d{1,2}):(\d{2})\s+on\s+(\d{1,2})\s+([A-Za-z]{3})/i);
+  if (monthNameMatch) {
+    const month = MONTH_NUMBERS[monthNameMatch[4].toLowerCase()];
+    if (month) {
+      const day = monthNameMatch[3].padStart(2, "0");
+      const hour = monthNameMatch[1].padStart(2, "0");
+      return `resets ${month}/${day} ${hour}:${monthNameMatch[2]}`;
+    }
+  }
+
+  return resetText;
 }
 
 function parseStatusText(rawStatusText, captureMethod = "codex_wrapper") {
@@ -243,6 +277,7 @@ module.exports = {
   clampPercent,
   extractRemainingPercent,
   extractResetText,
+  normalizeResetText,
   parseStatusText,
   writeJsonAtomic,
   appendHistory,

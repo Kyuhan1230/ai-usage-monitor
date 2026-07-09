@@ -6,3 +6,6 @@ tmp_history/
 tmp_wrapper_status.json
 tmp_wrapper_history/
 codex_usage_report.html
+docs/reports/codex_usage_report.html
+docs/reports/council-*.html
+docs/reports/council-*.md

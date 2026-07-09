@@ -10,6 +10,12 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
+const NODE_DIR = path.join(ROOT, "src", "node");
+const PYTHON_DIR = path.join(ROOT, "src", "python");
+const TEST_ENV = {
+  ...process.env,
+  PYTHONPATH: [PYTHON_DIR, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+};
 const NODE = process.execPath;
 
 function makeTempDir(name) {
@@ -68,6 +74,7 @@ function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: ROOT,
       stdio: ["pipe", "pipe", "pipe"],
+      env: TEST_ENV,
       ...options,
     });
     let stdout = "";
@@ -116,14 +123,14 @@ async function testParseRawStdin() {
   const child = spawn(
     NODE,
     [
-      "codex-wrapper.js",
+      path.join("src", "node", "codex-wrapper.js"),
       "--parse-raw-stdin",
       "--status-path",
       statusPath,
       "--history-dir",
       historyDir,
     ],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
   child.stdin.end("5-hour remaining: 71%, resets in 2h 18m\nWeekly remaining: 84%, resets in 3d 4h\n");
   await new Promise((resolve, reject) => {
@@ -144,14 +151,14 @@ async function testDuplicateLimitsKeepFirstGeneralLimit() {
   const child = spawn(
     NODE,
     [
-      "codex-wrapper.js",
+      path.join("src", "node", "codex-wrapper.js"),
       "--parse-raw-stdin",
       "--status-path",
       statusPath,
       "--history-dir",
       historyDir,
     ],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
   child.stdin.end(
     [
@@ -175,14 +182,14 @@ async function testDuplicateLimitsKeepFirstGeneralLimit() {
   assert.strictEqual(fiveHour.remaining_percent, 53);
   assert.strictEqual(fiveHour.reset_text, "resets 13:14");
   assert.strictEqual(weekly.remaining_percent, 84);
-  assert.strictEqual(weekly.reset_text, "resets 16:06 on 14 Jul");
+  assert.strictEqual(weekly.reset_text, "resets 07/14 16:06");
 }
 
 async function testPollerParseFailurePreservesPreviousOkStatus() {
   const tempDir = makeTempDir("codex-wrapper-preserve-ok");
   const statusPath = path.join(tempDir, "status.json");
   const historyDir = path.join(tempDir, "history");
-  const { writeStatusPreservingPrevious } = require(path.join(ROOT, "status-capture"));
+  const { writeStatusPreservingPrevious } = require(path.join(NODE_DIR, "status-capture"));
 
   writeStatusPreservingPrevious(
     statusPath,
@@ -206,7 +213,7 @@ async function testManualUsageWrapper() {
   const child = spawn(
     NODE,
     [
-      "codex-wrapper.js",
+      path.join("src", "node", "codex-wrapper.js"),
       "--codex-command",
       NODE,
       "--status-path",
@@ -220,7 +227,7 @@ async function testManualUsageWrapper() {
       "--",
       path.join("tests", "mock-codex.js"),
     ],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
 
   let stdout = "";
@@ -249,7 +256,7 @@ async function testStartupCaptureWrapper() {
   const child = spawn(
     NODE,
     [
-      "codex-wrapper.js",
+      path.join("src", "node", "codex-wrapper.js"),
       "--codex-command",
       NODE,
       "--status-path",
@@ -265,7 +272,7 @@ async function testStartupCaptureWrapper() {
       "--",
       path.join("tests", "mock-codex.js"),
     ],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
 
   await waitForFile(statusPath);
@@ -285,7 +292,7 @@ async function testIdleCaptureWrapper() {
   const child = spawn(
     NODE,
     [
-      "codex-wrapper.js",
+      path.join("src", "node", "codex-wrapper.js"),
       "--codex-command",
       NODE,
       "--status-path",
@@ -303,7 +310,7 @@ async function testIdleCaptureWrapper() {
       "--",
       path.join("tests", "mock-codex.js"),
     ],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
 
   await waitForFile(statusPath);
@@ -343,7 +350,7 @@ async function testDashboardReadsWrapperStatus() {
   const server = spawn(
     "python",
     [
-      "codex_status_dashboard.py",
+      path.join("src", "python", "codex_status_dashboard.py"),
       "--serve",
       "--status-path",
       statusPath,
@@ -355,7 +362,7 @@ async function testDashboardReadsWrapperStatus() {
       "--refresh-seconds",
       "1",
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   try {
@@ -376,7 +383,7 @@ async function testHeadlessStatusPoller() {
   const child = spawn(
     NODE,
     [
-      "codex-status-poller.js",
+      path.join("src", "node", "codex-status-poller.js"),
       "--codex-command",
       NODE,
       "--status-path",
@@ -392,7 +399,7 @@ async function testHeadlessStatusPoller() {
       "--",
       path.join("tests", "mock-codex.js"),
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   try {
@@ -567,7 +574,7 @@ async function testStatusPollerRestartsUnhealthySession() {
   const child = spawn(
     NODE,
     [
-      "codex-status-poller.js",
+      path.join("src", "node", "codex-status-poller.js"),
       "--codex-command",
       NODE,
       "--status-path",
@@ -587,7 +594,7 @@ async function testStatusPollerRestartsUnhealthySession() {
       "--",
       path.join("tests", "mock-codex-fail-status.js"),
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   let stdout = "";
@@ -611,7 +618,7 @@ async function testStatusPollerSurvivesBadCodexCommand() {
   const child = spawn(
     NODE,
     [
-      "codex-status-poller.js",
+      path.join("src", "node", "codex-status-poller.js"),
       "--codex-command",
       "definitely-does-not-exist.exe",
       "--status-path",
@@ -621,7 +628,7 @@ async function testStatusPollerSurvivesBadCodexCommand() {
       "--startup-delay-ms",
       "200",
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   let stdout = "";
@@ -643,8 +650,8 @@ async function testClaudeStatusHookWritesRemainingPercents() {
   const statusPath = path.join(tempDir, "claude-status.json");
   const child = spawn(
     NODE,
-    ["claude-status-hook.js", "--status-path", statusPath],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    [path.join("src", "node", "claude-status-hook.js"), "--status-path", statusPath],
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
   child.stdin.end(JSON.stringify({ rate_limits: { five_hour: { used_percentage: 29, resets_at: 1783503600 }, seven_day: { used_percentage: 66 } } }));
   await new Promise((resolve, reject) => {
@@ -657,7 +664,7 @@ async function testClaudeStatusHookWritesRemainingPercents() {
   assert.strictEqual(status.source, "claude_statusline_hook");
   assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").used_percent, 29);
   assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 71);
-  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").reset_text, "resets 2026-07-08 18:40 KST");
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").reset_text, "resets 07/08 18:40");
   assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").used_percent, 66);
   assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").remaining_percent, 34);
 }
@@ -667,8 +674,8 @@ async function testClaudeStatusHookAcceptsAlternatePercentFields() {
   const statusPath = path.join(tempDir, "claude-status.json");
   const child = spawn(
     NODE,
-    ["claude-status-hook.js", "--status-path", statusPath],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    [path.join("src", "node", "claude-status-hook.js"), "--status-path", statusPath],
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
   child.stdin.end(JSON.stringify({ rateLimits: { five_hour: { usedPercentage: 25 }, seven_day: { remaining_percentage: 88 } } }));
   await new Promise((resolve, reject) => {
@@ -689,8 +696,8 @@ async function testClaudeStatusHookSurvivesMalformedPayload() {
   const statusPath = path.join(tempDir, "claude-status.json");
   const child = spawn(
     NODE,
-    ["claude-status-hook.js", "--status-path", statusPath],
-    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    [path.join("src", "node", "claude-status-hook.js"), "--status-path", statusPath],
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
   );
   let stdout = "";
   child.stdout.on("data", (chunk) => {
@@ -721,7 +728,7 @@ async function testClaudeStatusHookInstallDoesNotOverwriteExistingCommand() {
 
   const result = await run(
     NODE,
-    ["claude-status-hook.js", "--install", "--settings-path", settingsPath],
+    [path.join("src", "node", "claude-status-hook.js"), "--install", "--settings-path", settingsPath],
     { capture: true },
   );
   const settings = readJson(settingsPath);
@@ -743,6 +750,8 @@ async function testDashboardRingsUseRemainingThresholds() {
     "assert 'ring-detail' in with_used, with_used",
     "assert '사용 66%' in with_used, with_used",
     "assert 'resets test' in with_used, with_used",
+    "assert d.normalize_reset_text('resets 2026-07-09 18:40 KST') == 'resets 07/09 18:40'",
+    "assert d.normalize_reset_text('resets 16:06 on 14 Jul') == 'resets 07/14 16:06'",
   ].join("\n");
   await run("python", ["-c", script]);
 }
@@ -814,7 +823,7 @@ async function testMergedDashboardShowsUsageAndStatus() {
   const server = spawn(
     "python",
     [
-      "codex_status_dashboard.py",
+      path.join("src", "python", "codex_status_dashboard.py"),
       "--serve",
       "--status-path",
       statusPath,
@@ -830,7 +839,7 @@ async function testMergedDashboardShowsUsageAndStatus() {
       "--refresh-seconds",
       "1",
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   try {
@@ -906,7 +915,7 @@ async function testDashboardSurvivesClientDisconnect() {
   const server = spawn(
     "python",
     [
-      "codex_status_dashboard.py",
+      path.join("src", "python", "codex_status_dashboard.py"),
       "--serve",
       "--status-path",
       statusPath,
@@ -918,7 +927,7 @@ async function testDashboardSurvivesClientDisconnect() {
       "--refresh-seconds",
       "1",
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   let stdout = "";
@@ -981,7 +990,7 @@ async function testDashboardSurvivesMissingClaudeSessionsDir() {
   const server = spawn(
     "python",
     [
-      "codex_status_dashboard.py",
+      path.join("src", "python", "codex_status_dashboard.py"),
       "--serve",
       "--status-path",
       statusPath,
@@ -997,7 +1006,7 @@ async function testDashboardSurvivesMissingClaudeSessionsDir() {
       "--refresh-seconds",
       "1",
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ROOT, env: TEST_ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   try {
@@ -1022,6 +1031,9 @@ async function testFastApiDashboardRendersWithClaudeArguments() {
     "app.CLAUDE_SESSIONS_DIR = app.Path('missing-claude-sessions')",
     "html = app.index()",
     "fragment = app.fragment()",
+    "assert 'id=\"dashboard-content\" class=\"is-loading\"' in html",
+    "assert 'refresh();' in html",
+    "assert 'is-loading' not in fragment",
     "assert 'Claude 사용량' in html",
     "assert 'Claude 사용량' in fragment",
   ].join("\n");
@@ -1029,11 +1041,11 @@ async function testFastApiDashboardRendersWithClaudeArguments() {
 }
 
 async function main() {
-  await run(NODE, ["--check", "codex-wrapper.js"]);
-  await run(NODE, ["--check", "codex-status-poller.js"]);
-  await run(NODE, ["--check", "status-capture.js"]);
-  await run(NODE, ["--check", "claude-status-hook.js"]);
-  await run("python", ["-m", "py_compile", "codex_status_dashboard.py", "codex_usage_report.py", "claude_usage_report.py", "dashboard_common.py"]);
+  await run(NODE, ["--check", path.join("src", "node", "codex-wrapper.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "codex-status-poller.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "status-capture.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
+  await run("python", ["-m", "py_compile", path.join("src", "python", "codex_status_dashboard.py"), path.join("src", "python", "codex_usage_report.py"), path.join("src", "python", "claude_usage_report.py"), path.join("src", "python", "dashboard_common.py")]);
   await testParseRawStdin();
   await testDuplicateLimitsKeepFirstGeneralLimit();
   await testPollerParseFailurePreservesPreviousOkStatus();
