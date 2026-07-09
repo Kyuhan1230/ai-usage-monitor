@@ -18,6 +18,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import codex_usage_report as usage_report
+import claude_usage_report
+from dashboard_common import FileCache
 
 
 SCHEMA_VERSION = 1
@@ -25,8 +27,9 @@ DEFAULT_REFRESH_SECONDS = 3
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8767
 DEFAULT_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "status.json"
+DEFAULT_CLAUDE_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "claude-status.json"
 DEFAULT_HISTORY_DIR = Path.home() / ".codex-usage-wrapper" / "history"
-DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000
+DEFAULT_POLL_INTERVAL_MS = 3 * 60 * 1000
 DEFAULT_CODEX_COMMAND = "codex.exe" if sys.platform == "win32" else "codex"
 DEFAULT_NODE_COMMAND = "node"
 POLLER_SCRIPT_PATH = Path(__file__).resolve().parent / "codex-status-poller.js"
@@ -306,15 +309,21 @@ RING_LABELS = (
     ("monthly", "Monthly"),
 )
 
+CLAUDE_RING_LABELS = (
+    ("five_hour", "Current session"),
+    ("seven_day", "Current week"),
+)
+
 DASHBOARD_STYLE = """
     main {
-      max-width: 1100px;
+      max-width: 1680px;
       margin: 0 auto;
-      padding: 32px 20px 44px;
+      padding: 28px 20px 40px;
     }
     h1 {
-      margin: 0 0 4px;
-      font-size: 22px;
+      margin: 0 0 18px;
+      font-family: var(--mono);
+      font-size: 20px;
       display: flex;
       align-items: center;
       gap: 10px;
@@ -335,18 +344,121 @@ DASHBOARD_STYLE = """
       text-transform: uppercase;
       letter-spacing: .06em;
     }
+    .dashboard-top {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .dashboard-top h1 {
+      margin-bottom: 0;
+    }
+    .dashboard-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .theme-toggle {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font: 12px var(--mono);
+      min-width: 92px;
+      padding: 6px 10px;
+    }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .tool-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .tool-panel {
+      min-width: 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .025), rgba(255, 255, 255, 0));
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 54px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .panel-head h2 {
+      margin: 0 0 6px;
+      color: var(--text);
+      font-size: 16px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .panel-badge {
+      flex: none;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--surface);
+      padding: 4px 8px;
+      font-size: 11px;
+      font-family: var(--mono);
+    }
+    .tool-panel .meta,
+    .report-meta {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .report-meta {
+      margin-bottom: 12px;
+    }
+    .tool-panel > .meta {
+      display: none;
+    }
+    .tool-panel h2:not(.panel-title) {
+      margin-top: 24px;
+    }
+    .tool-panel .stats {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .tool-panel .stat {
+      padding: 14px;
+    }
+    .tool-panel .stat .value {
+      font-size: 20px;
+    }
     .rings {
       display: flex;
       flex-wrap: wrap;
-      gap: 28px;
-      margin: 20px 0 28px;
+      gap: 18px;
+      margin: 0 0 22px;
     }
     .ring-card {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 10px;
-      width: 128px;
+      width: 140px;
     }
     .ring {
       --track: var(--surface-2);
@@ -380,11 +492,27 @@ DASHBOARD_STYLE = """
       font-weight: 600;
       letter-spacing: .02em;
     }
+    .ring-detail {
+      display: grid;
+      grid-template-rows: 16px 16px;
+      gap: 2px;
+      width: 100%;
+      min-height: 34px;
+      text-align: center;
+    }
+    .ring-used,
     .ring-reset {
       font-size: 12px;
       color: var(--muted);
       font-family: var(--mono);
-      text-align: center;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ring-used:empty::before,
+    .ring-reset:empty::before {
+      content: " ";
     }
     .hint {
       margin-bottom: 24px;
@@ -428,15 +556,67 @@ DASHBOARD_STYLE = """
     .poll-dot.off {
       background: #454c5a;
     }
+    @media (max-width: 1180px) {
+      .tool-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 640px) {
+      main {
+        padding: 20px 12px 32px;
+      }
+      .dashboard-top {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .dashboard-note {
+        white-space: normal;
+      }
+      .top-actions {
+        width: 100%;
+        justify-content: space-between;
+      }
+      .tool-panel {
+        padding: 14px;
+      }
+      .panel-head {
+        min-height: 0;
+      }
+      .tool-panel .stats {
+        grid-template-columns: 1fr;
+      }
+    }
 """
 
 
-def render_limit_ring(label: str, limit: dict[str, Any] | None) -> str:
+def display_used(limit: dict[str, Any] | None) -> str | None:
+    """사용률 표시 문자열을 만든다.
+
+    Args:
+        limit: 제한 정보 딕셔너리.
+
+    Returns:
+        사용률 문구 또는 None.
+    """
+
+    if not limit:
+        return None
+    used_percent = limit.get("used_percent")
+    if isinstance(used_percent, int):
+        return f"사용 {used_percent}%"
+    remaining_percent = limit.get("remaining_percent")
+    if isinstance(remaining_percent, int):
+        return f"사용 {max(0, min(100, 100 - remaining_percent))}%"
+    return None
+
+
+def render_limit_ring(label: str, limit: dict[str, Any] | None, show_used: bool = False) -> str:
     """플랜 잔여율 하나를 도넛형 링 카드로 렌더링한다.
 
     Args:
         label: 화면에 표시할 제한 이름(예: `5-hour`).
         limit: 제한 정보 딕셔너리. 값이 없으면 미확인 상태로 그린다.
+        show_used: 하단 보조 문구에 사용률을 함께 표시할지 여부.
 
     Returns:
         `<div class="ring-card">` HTML 조각.
@@ -444,7 +624,7 @@ def render_limit_ring(label: str, limit: dict[str, Any] | None) -> str:
 
     percent = limit.get("remaining_percent") if limit else None
     if isinstance(percent, int):
-        if percent <= 20:
+        if percent <= 10:
             tone = "critical"
         elif percent <= 50:
             tone = "warn"
@@ -457,14 +637,22 @@ def render_limit_ring(label: str, limit: dict[str, Any] | None) -> str:
         value_text = "–"
         pct_for_style = 0
 
+    used_text = display_used(limit) if show_used else ""
+    if used_text is None:
+        used_text = ""
     reset_text = display_reset(limit)
+    if reset_text == "N/A":
+        reset_text = ""
     return f"""
     <div class="ring-card">
       <div class="ring ring-{tone}" style="--pct:{pct_for_style}">
         <span class="ring-value">{html.escape(value_text)}</span>
       </div>
       <div class="ring-label">{html.escape(label)}</div>
-      <div class="ring-reset">{html.escape(reset_text)}</div>
+      <div class="ring-detail">
+        <div class="ring-used" title="{html.escape(used_text)}">{html.escape(used_text)}</div>
+        <div class="ring-reset" title="{html.escape(reset_text)}">{html.escape(reset_text)}</div>
+      </div>
     </div>
 """
 
@@ -474,6 +662,10 @@ def render_dashboard_content(
     status_path: Path,
     usage_aggregate: dict[tuple[str, str], usage_report.UsageTotals],
     sessions_dir: Path,
+    claude_status: dict[str, Any] | None,
+    claude_status_path: Path,
+    claude_usage_aggregate: dict[tuple[str, str], claude_usage_report.UsageTotals],
+    claude_sessions_dir: Path,
     auto_status_poll: bool,
 ) -> str:
     """플랜 잔여율 링 + 토큰 사용량 리포트, 대시보드의 갱신 대상 영역만 렌더링한다.
@@ -520,18 +712,59 @@ def render_dashboard_content(
 """
     )
 
-    rings = "".join(render_limit_ring(label, limits.get(key)) for key, label in RING_LABELS)
+    rings = "".join(render_limit_ring(label, limits.get(key), True) for key, label in RING_LABELS)
+    try:
+        claude_limits = limit_map(claude_status)
+        claude_rings = "".join(render_limit_ring(label, claude_limits.get(key), True) for key, label in CLAUDE_RING_LABELS)
+        claude_body = claude_usage_report.render_report_body(claude_usage_aggregate, claude_sessions_dir)
+    except Exception:
+        claude_rings = "".join(render_limit_ring(label, None) for _key, label in CLAUDE_RING_LABELS)
+        claude_body = '<p class="empty">집계할 usage/token 이벤트가 없습니다.</p>'
 
+    claude_status_hint = (
+        ""
+        if claude_status
+        else f"""
+      <section class="hint">
+        <div class="label">Claude statusLine hook이 아직 실행되지 않았습니다</div>
+        <p>토큰 사용량은 JSONL에서 집계하지만 Current session/week 잔여율은 <code>{html.escape(str(claude_status_path))}</code> 파일이 생긴 뒤 표시됩니다.</p>
+      </section>
+"""
+    )
     poll_dot_class = "poll-dot" if auto_status_poll else "poll-dot off"
     poll_text = "자동 폴링 켜짐" if auto_status_poll else "자동 폴링 꺼짐"
 
     return f"""
     {setup_hint}
-    <section class="rings">
-      {rings}
+    <section class="tool-grid" aria-label="Codex와 Claude 사용량">
+      <article class="tool-panel tool-panel-codex">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">Codex 사용량</h2>
+            <p class="meta">status: {html.escape(str(status_path))}</p>
+          </div>
+          <span class="panel-badge">Codex</span>
+        </div>
+        <section class="rings">
+          {rings}
+        </section>
+        {usage_report.render_report_body(usage_aggregate, sessions_dir)}
+      </article>
+      <article class="tool-panel tool-panel-claude">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">Claude 사용량</h2>
+            <p class="meta">status: {html.escape(str(claude_status_path))}</p>
+          </div>
+          <span class="panel-badge">Claude</span>
+        </div>
+        {claude_status_hint}
+        <section class="rings">
+          {claude_rings}
+        </section>
+        {claude_body}
+      </article>
     </section>
-    <h2>토큰 사용량</h2>
-    {usage_report.render_report_body(usage_aggregate, sessions_dir)}
     <footer class="status-footer">
       <span class="{poll_dot_class}"></span>
       <span>마지막 성공 캡처: {html.escape(last_updated)} · {poll_text}</span>
@@ -546,6 +779,10 @@ def render_dashboard_page(
     refresh_seconds: int,
     usage_aggregate: dict[tuple[str, str], usage_report.UsageTotals],
     sessions_dir: Path,
+    claude_status: dict[str, Any] | None,
+    claude_status_path: Path,
+    claude_usage_aggregate: dict[tuple[str, str], claude_usage_report.UsageTotals],
+    claude_sessions_dir: Path,
     auto_status_poll: bool,
 ) -> str:
     """플랜 잔여율과 토큰 사용량 리포트를 하나로 합친 전체 대시보드 페이지를 렌더링한다.
@@ -562,15 +799,32 @@ def render_dashboard_page(
         HTML 문서 문자열.
     """
 
-    content = render_dashboard_content(status, status_path, usage_aggregate, sessions_dir, auto_status_poll)
+    content = render_dashboard_content(
+        status,
+        status_path,
+        usage_aggregate,
+        sessions_dir,
+        claude_status,
+        claude_status_path,
+        claude_usage_aggregate,
+        claude_sessions_dir,
+        auto_status_poll,
+    )
     refresh_script = usage_report.render_live_refresh_script("dashboard-content", "/fragment", refresh_seconds)
+    theme_script = render_theme_script()
 
     return f"""<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Codex Usage Dashboard</title>
+  <title>Codex, Claude Usage Dashboard</title>
+  <script>
+    (function () {{
+      var theme = localStorage.getItem("codexUsageTheme") || "dark";
+      document.documentElement.dataset.theme = theme;
+    }})();
+  </script>
   <style>
 {usage_report.BASE_STYLE}
 {DASHBOARD_STYLE}
@@ -578,13 +832,54 @@ def render_dashboard_page(
 </head>
 <body>
   <main>
-    <h1>Codex Usage Dashboard</h1>
+    <div class="dashboard-top">
+      <h1>Codex, Claude Usage Dashboard</h1>
+      <div class="top-actions">
+        <div class="dashboard-note">잔여율 기준 · 10% 위험 · 50% 주의</div>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="테마 전환">Dark</button>
+      </div>
+    </div>
     <div id="dashboard-content">{content}</div>
   </main>
   {usage_report.render_tooltip_script()}
+  {theme_script}
   {refresh_script}
 </body>
 </html>
+"""
+
+
+def render_theme_script() -> str:
+    """다크/라이트 테마 토글 스크립트를 렌더링한다.
+
+    Returns:
+        `<script>` 태그 문자열.
+    """
+
+    return """
+  <script>
+    (function () {
+      var button = document.getElementById("theme-toggle");
+      if (!button) {
+        return;
+      }
+      function currentTheme() {
+        return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      }
+      function syncButton() {
+        var theme = currentTheme();
+        button.textContent = theme === "light" ? "Light" : "Dark";
+        button.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
+      }
+      button.addEventListener("click", function () {
+        var nextTheme = currentTheme() === "light" ? "dark" : "light";
+        document.documentElement.dataset.theme = nextTheme;
+        localStorage.setItem("codexUsageTheme", nextTheme);
+        syncButton();
+      });
+      syncButton();
+    })();
+  </script>
 """
 
 
@@ -775,6 +1070,8 @@ def run_dashboard_server(
     port: int,
     refresh_seconds: int,
     sessions_dir: Path,
+    claude_sessions_dir: Path,
+    claude_status_path: Path,
     history_dir: Path,
     auto_status_poll: bool,
     poll_interval_ms: int,
@@ -802,10 +1099,14 @@ def run_dashboard_server(
     # 파일별 (mtime, 크기)가 이전과 같으면 다시 파싱하지 않는다. 실사용 중에는
     # 그날 활성 세션 파일 하나만 계속 바뀌므로, 요청마다 수백 개 파일을 전부
     # 다시 읽는 대신 바뀐 파일만 다시 읽는다.
-    usage_file_cache: usage_report.FileCache = {}
+    usage_file_cache: FileCache = {}
+    claude_usage_file_cache: FileCache = {}
 
     def current_usage_aggregate() -> dict[tuple[str, str], usage_report.UsageTotals]:
         return usage_report.aggregate_usage(sessions_dir, usage_file_cache)
+
+    def current_claude_usage_aggregate() -> dict[tuple[str, str], claude_usage_report.UsageTotals]:
+        return claude_usage_report.aggregate_usage(claude_sessions_dir, claude_usage_file_cache)
 
     class DashboardHandler(http.server.BaseHTTPRequestHandler):
         """status.json + 토큰 사용량 기반 대시보드 요청 핸들러."""
@@ -821,11 +1122,16 @@ def run_dashboard_server(
 
             if self.path == "/fragment":
                 status = read_status(status_path)
+                claude_status = read_status(claude_status_path)
                 body = render_dashboard_content(
                     status,
                     status_path,
                     current_usage_aggregate(),
                     sessions_dir,
+                    claude_status,
+                    claude_status_path,
+                    current_claude_usage_aggregate(),
+                    claude_sessions_dir,
                     auto_status_poll,
                 ).encode("utf-8")
                 usage_report.send_body(self, body, "text/html; charset=utf-8")
@@ -836,12 +1142,17 @@ def run_dashboard_server(
                 return
 
             status = read_status(status_path)
+            claude_status = read_status(claude_status_path)
             body = render_dashboard_page(
                 status,
                 status_path,
                 refresh_seconds,
                 current_usage_aggregate(),
                 sessions_dir,
+                claude_status,
+                claude_status_path,
+                current_claude_usage_aggregate(),
+                claude_sessions_dir,
                 auto_status_poll,
             ).encode("utf-8")
             usage_report.send_body(self, body, "text/html; charset=utf-8")
@@ -871,10 +1182,12 @@ def run_dashboard_server(
             print(f"serving status dashboard at http://{host}:{port}")
             print(f"reading {status_path}")
             print(f"scanning {sessions_dir}")
+            print(f"scanning Claude sessions {claude_sessions_dir}")
             print("press Ctrl+C to stop")
             # 세션 폴더가 크면 최초 집계가 수십 초 걸릴 수 있어, 첫 방문자가 그 대기를
             # 그대로 겪지 않도록 서버가 요청을 받기 전에 백그라운드에서 미리 데워둔다.
             threading.Thread(target=current_usage_aggregate, daemon=True).start()
+            threading.Thread(target=current_claude_usage_aggregate, daemon=True).start()
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
@@ -967,6 +1280,18 @@ def parse_args() -> argparse.Namespace:
         help="Codex session JSONL directory for the token usage section. Default: ~/.codex/sessions",
     )
     parser.add_argument(
+        "--claude-sessions-dir",
+        type=Path,
+        default=claude_usage_report.default_sessions_dir(),
+        help="Claude Code project JSONL directory for the token usage section. Default: ~/.claude/projects",
+    )
+    parser.add_argument(
+        "--claude-status-path",
+        type=Path,
+        default=DEFAULT_CLAUDE_STATUS_PATH,
+        help="Claude statusLine status JSON path. Default: ~/.codex-usage-wrapper/claude-status.json",
+    )
+    parser.add_argument(
         "--no-auto-status-poll",
         action="store_true",
         help="Don't spawn a background headless Codex session to auto-capture plan limits for --serve.",
@@ -1010,6 +1335,8 @@ def main() -> None:
             args.port,
             args.refresh_seconds,
             args.sessions_dir.expanduser(),
+            args.claude_sessions_dir.expanduser(),
+            args.claude_status_path.expanduser(),
             args.history_dir.expanduser(),
             not args.no_auto_status_poll,
             args.poll_interval_ms,

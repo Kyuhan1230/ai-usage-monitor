@@ -102,7 +102,10 @@ async function httpGet(url) {
           resolve({ statusCode: response.statusCode, body });
         });
       })
-      .on("error", reject);
+      .on("error", (error) => {
+        error.message = `${error.message} while requesting ${url}`;
+        reject(error);
+      });
   });
 }
 
@@ -410,6 +413,153 @@ async function testHeadlessStatusPoller() {
   }
 }
 
+async function testClaudeUsageDeduplicatesMessageIds() {
+  const tempDir = makeTempDir("claude-usage-dedup");
+  const fixturePath = path.join(tempDir, "session.jsonl");
+  const records = [
+    {
+      type: "assistant",
+      timestamp: "2026-01-01T00:00:00Z",
+      message: {
+        id: "msg-1",
+        model: "claude-sonnet-test",
+        usage: { input_tokens: 100, cache_read_input_tokens: 20, cache_creation_input_tokens: 30, output_tokens: 40 },
+      },
+    },
+    {
+      type: "assistant",
+      timestamp: "2026-01-01T00:00:01Z",
+      message: {
+        id: "msg-1",
+        model: "claude-sonnet-test",
+        usage: { input_tokens: 100, cache_read_input_tokens: 20, cache_creation_input_tokens: 30, output_tokens: 40 },
+      },
+    },
+    {
+      type: "assistant",
+      timestamp: "2026-01-01T00:00:02Z",
+      message: {
+        id: "msg-2",
+        model: "claude-sonnet-test",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    },
+  ];
+  fs.writeFileSync(fixturePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+
+  const script = [
+    "from pathlib import Path",
+    "import claude_usage_report as c",
+    `result = c.compute_file_usage(Path(${JSON.stringify(fixturePath)}))`,
+    "total = c.sum_totals(result)",
+    "assert total.input_tokens == 110, total.input_tokens",
+    "assert total.cache_read_input_tokens == 20, total.cache_read_input_tokens",
+    "assert total.cache_creation_input_tokens == 30, total.cache_creation_input_tokens",
+    "assert total.output_tokens == 45, total.output_tokens",
+    "assert total.total_tokens == 205, total.total_tokens",
+    "assert total.events == 2, total.events",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
+async function testClaudeUsageFieldsModelsAndSubagents() {
+  const tempDir = makeTempDir("claude-usage-fields");
+  const sessionsDir = path.join(tempDir, "projects", "proj");
+  const subagentsDir = path.join(sessionsDir, "subagents");
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionsDir, "main.jsonl"),
+    [
+      {
+        type: "assistant",
+        timestamp: "2026-02-01T00:00:00Z",
+        message: {
+          id: "main-1",
+          model: "claude-opus-test",
+          usage: { input_tokens: 7, cache_creation_input_tokens: 11, output_tokens: 13 },
+        },
+      },
+      {
+        type: "assistant",
+        timestamp: "2026-02-01T00:01:00Z",
+        message: {
+          id: "main-2",
+          model: "<synthetic>",
+          usage: { input_tokens: 2, cache_read_input_tokens: 3, output_tokens: 5 },
+        },
+      },
+    ].map((record) => JSON.stringify(record)).join("\n") + "\n",
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(subagentsDir, "agent.jsonl"),
+    `${JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-02-01T00:02:00Z",
+      message: {
+        id: "agent-1",
+        model: "claude-subagent-test",
+        usage: { input_tokens: 17, output_tokens: 19 },
+      },
+    })}\n`,
+    "utf8",
+  );
+
+  const script = [
+    "from pathlib import Path",
+    "import claude_usage_report as c",
+    `aggregate = c.aggregate_usage(Path(${JSON.stringify(path.join(tempDir, "projects"))}), {})`,
+    "html = c.render_report_body(aggregate, Path('fixture'))",
+    "total = c.sum_totals(aggregate)",
+    "assert total.input_tokens == 26, total.input_tokens",
+    "assert total.cache_creation_input_tokens == 11, total.cache_creation_input_tokens",
+    "assert total.cache_read_input_tokens == 3, total.cache_read_input_tokens",
+    "assert total.output_tokens == 37, total.output_tokens",
+    "assert '&lt;synthetic&gt;' not in html, html",
+    "assert 'Cache Write' in html, html",
+    "assert 'claude-subagent-test' in html, html",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
+async function testUsageDatesUseKstMidnight() {
+  const tempDir = makeTempDir("usage-kst-date");
+  const claudePath = path.join(tempDir, "claude.jsonl");
+  const codexPath = path.join(tempDir, "rollout-2026-02-01T15-00-00-kst.jsonl");
+  fs.writeFileSync(
+    claudePath,
+    `${JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-02-01T15:00:00Z",
+      message: {
+        id: "kst-claude",
+        model: "claude-kst-test",
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+    })}\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    codexPath,
+    `${JSON.stringify({
+      timestamp: "2026-02-01T15:00:00Z",
+      payload: { model: "gpt-kst-test", info: { last_token_usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 } } },
+    })}\n`,
+    "utf8",
+  );
+
+  const script = [
+    "from pathlib import Path",
+    "import claude_usage_report as claude",
+    "import codex_usage_report as codex",
+    `claude_result = claude.compute_file_usage(Path(${JSON.stringify(claudePath)}))`,
+    `codex_result = codex.compute_file_usage(Path(${JSON.stringify(codexPath)}))`,
+    "assert ('2026-02-02', 'claude-kst-test') in claude_result, claude_result",
+    "assert ('2026-02-02', 'gpt-kst-test') in codex_result, codex_result",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
 async function testStatusPollerRestartsUnhealthySession() {
   const tempDir = makeTempDir("codex-status-poller-unhealthy");
   const statusPath = path.join(tempDir, "status.json");
@@ -488,11 +638,123 @@ async function testStatusPollerSurvivesBadCodexCommand() {
   }
 }
 
+async function testClaudeStatusHookWritesRemainingPercents() {
+  const tempDir = makeTempDir("claude-status-hook");
+  const statusPath = path.join(tempDir, "claude-status.json");
+  const child = spawn(
+    NODE,
+    ["claude-status-hook.js", "--status-path", statusPath],
+    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+  );
+  child.stdin.end(JSON.stringify({ rate_limits: { five_hour: { used_percentage: 29, resets_at: 1783503600 }, seven_day: { used_percentage: 66 } } }));
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`claude hook exited ${code}`))));
+  });
+
+  const status = readJson(statusPath);
+  assert.strictEqual(status.parse_status, "ok");
+  assert.strictEqual(status.source, "claude_statusline_hook");
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").used_percent, 29);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 71);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").reset_text, "resets 2026-07-08 18:40 KST");
+  assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").used_percent, 66);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").remaining_percent, 34);
+}
+
+async function testClaudeStatusHookAcceptsAlternatePercentFields() {
+  const tempDir = makeTempDir("claude-status-hook-alias");
+  const statusPath = path.join(tempDir, "claude-status.json");
+  const child = spawn(
+    NODE,
+    ["claude-status-hook.js", "--status-path", statusPath],
+    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+  );
+  child.stdin.end(JSON.stringify({ rateLimits: { five_hour: { usedPercentage: 25 }, seven_day: { remaining_percentage: 88 } } }));
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`claude hook alias exited ${code}`))));
+  });
+
+  const status = readJson(statusPath);
+  assert.strictEqual(status.parse_status, "ok");
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").used_percent, 25);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 75);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").used_percent, 12);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").remaining_percent, 88);
+}
+
+async function testClaudeStatusHookSurvivesMalformedPayload() {
+  const tempDir = makeTempDir("claude-status-hook-bad");
+  const statusPath = path.join(tempDir, "claude-status.json");
+  const child = spawn(
+    NODE,
+    ["claude-status-hook.js", "--status-path", statusPath],
+    { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString("utf8");
+  });
+  child.stdin.end("{not-json");
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`claude hook bad exited ${code}`))));
+  });
+
+  const status = readJson(statusPath);
+  assert.strictEqual(status.parse_status, "failed");
+  assert.deepStrictEqual(status.limits, []);
+  assert.match(stdout, /N\/A/);
+}
+
+async function testClaudeStatusHookInstallDoesNotOverwriteExistingCommand() {
+  const tempDir = makeTempDir("claude-status-hook-install");
+  const settingsPath = path.join(tempDir, "settings.json");
+  const existingSettings = {
+    statusLine: {
+      type: "command",
+      command: "node existing-statusline.js",
+    },
+  };
+  fs.writeFileSync(settingsPath, `${JSON.stringify(existingSettings, null, 2)}\n`, "utf8");
+
+  const result = await run(
+    NODE,
+    ["claude-status-hook.js", "--install", "--settings-path", settingsPath],
+    { capture: true },
+  );
+  const settings = readJson(settingsPath);
+  assert.deepStrictEqual(settings, existingSettings);
+  assert.match(result.stdout, /Existing statusLine\.command found/);
+}
+
+async function testDashboardRingsUseRemainingThresholds() {
+  const script = [
+    "import codex_status_dashboard as d",
+    "critical = d.render_limit_ring('Critical', {'remaining_percent': 10})",
+    "warn = d.render_limit_ring('Warn', {'remaining_percent': 50})",
+    "ok = d.render_limit_ring('Ok', {'remaining_percent': 51})",
+    "with_used = d.render_limit_ring('Claude', {'remaining_percent': 34, 'used_percent': 66, 'reset_text': 'resets test'}, True)",
+    "assert 'ring-critical' in critical, critical",
+    "assert 'ring-warn' in warn, warn",
+    "assert 'ring-ok' in ok, ok",
+    "assert '34%' in with_used, with_used",
+    "assert 'ring-detail' in with_used, with_used",
+    "assert '사용 66%' in with_used, with_used",
+    "assert 'resets test' in with_used, with_used",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
 async function testMergedDashboardShowsUsageAndStatus() {
   const tempDir = makeTempDir("codex-merged-dashboard");
   const statusPath = path.join(tempDir, "status.json");
+  const claudeStatusPath = path.join(tempDir, "claude-status.json");
   const sessionsDir = path.join(tempDir, "sessions", "2026", "01", "01");
+  const claudeSessionsDir = path.join(tempDir, "claude-projects", "proj");
   fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.mkdirSync(claudeSessionsDir, { recursive: true });
 
   fs.writeFileSync(
     statusPath,
@@ -517,6 +779,37 @@ async function testMergedDashboardShowsUsageAndStatus() {
     "utf8",
   );
 
+  fs.writeFileSync(
+    claudeStatusPath,
+    `${JSON.stringify({
+      schema_version: 1,
+      captured_at: "2026-07-08T13:42:10+09:00",
+      source: "claude_statusline_hook",
+      capture_method: "test",
+      parse_status: "ok",
+      limits: [
+        { type: "five_hour", used_percent: 29, remaining_percent: 71, reset_text: null },
+        { type: "seven_day", used_percent: 66, remaining_percent: 34, reset_text: null },
+      ],
+      raw_status_text: "{}",
+    })}\n`,
+    "utf8",
+  );
+
+  fs.writeFileSync(
+    path.join(claudeSessionsDir, "claude-session.jsonl"),
+    `${JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-01-01T00:00:00Z",
+      message: {
+        id: "claude-merged-1",
+        model: "claude-merged-test",
+        usage: { input_tokens: 21, cache_creation_input_tokens: 8, output_tokens: 13 },
+      },
+    })}\n`,
+    "utf8",
+  );
+
   const port = 8782;
   const server = spawn(
     "python",
@@ -527,6 +820,10 @@ async function testMergedDashboardShowsUsageAndStatus() {
       statusPath,
       "--sessions-dir",
       path.join(tempDir, "sessions"),
+      "--claude-sessions-dir",
+      path.join(tempDir, "claude-projects"),
+      "--claude-status-path",
+      claudeStatusPath,
       "--no-auto-status-poll",
       "--port",
       String(port),
@@ -540,12 +837,24 @@ async function testMergedDashboardShowsUsageAndStatus() {
     await wait(1000);
     const response = await httpGet(`http://127.0.0.1:${port}/`);
     assert.strictEqual(response.statusCode, 200);
+    assert.match(response.body, /Codex, Claude Usage Dashboard/);
+    assert.match(response.body, /theme-toggle/);
+    assert.match(response.body, /dashboard-note/);
     assert.match(response.body, /62%/);
     assert.match(response.body, /날짜별 요약/);
     assert.match(response.body, /오늘 모델별 사용량/);
     assert.match(response.body, /Total Tokens/);
     assert.match(response.body, /Cached Input/);
     assert.match(response.body, /gpt-5\.4-merged-test/);
+    assert.match(response.body, /Claude 사용량/);
+    assert.match(response.body, /tool-grid/);
+    assert.match(response.body, /tool-panel-codex/);
+    assert.match(response.body, /tool-panel-claude/);
+    assert.match(response.body, /Current week/);
+    assert.match(response.body, /34%/);
+    assert.match(response.body, /사용 66%/);
+    assert.match(response.body, /claude-merged-test/);
+    assert.match(response.body, /Cache Write/);
     assert.match(response.body, /data-tip="모델에 전달된 입력 토큰입니다/);
     assert.match(response.body, /floating-tooltip/);
     assert.ok(response.body.includes('fetch("/fragment"'));
@@ -641,11 +950,90 @@ async function testDashboardSurvivesClientDisconnect() {
   }
 }
 
+async function testDashboardSurvivesMissingClaudeSessionsDir() {
+  const tempDir = makeTempDir("codex-dashboard-no-claude");
+  const statusPath = path.join(tempDir, "status.json");
+  const sessionsDir = path.join(tempDir, "sessions", "2026", "01", "01");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(
+    statusPath,
+    `${JSON.stringify({
+      schema_version: 1,
+      captured_at: "2026-07-08T13:42:10+09:00",
+      source: "codex_cli_status",
+      capture_method: "test",
+      parse_status: "ok",
+      limits: [{ type: "five_hour", remaining_percent: 62, reset_text: "resets in 1h" }],
+      raw_status_text: "5-hour remaining: 62%",
+    })}\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(sessionsDir, "rollout-2026-01-01T00-00-00-codex.jsonl"),
+    `${JSON.stringify({
+      timestamp: "2026-01-01T00:00:00Z",
+      payload: { model: "gpt-codex-intact", info: { last_token_usage: { input_tokens: 9, output_tokens: 4, total_tokens: 13 } } },
+    })}\n`,
+    "utf8",
+  );
+
+  const port = 8784;
+  const server = spawn(
+    "python",
+    [
+      "codex_status_dashboard.py",
+      "--serve",
+      "--status-path",
+      statusPath,
+      "--sessions-dir",
+      path.join(tempDir, "sessions"),
+      "--claude-sessions-dir",
+      path.join(tempDir, "does-not-exist"),
+      "--claude-status-path",
+      path.join(tempDir, "missing-claude-status.json"),
+      "--no-auto-status-poll",
+      "--port",
+      String(port),
+      "--refresh-seconds",
+      "1",
+    ],
+    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+  );
+
+  try {
+    await wait(1000);
+    const response = await httpGet(`http://127.0.0.1:${port}/`);
+    assert.strictEqual(response.statusCode, 200);
+    assert.match(response.body, /gpt-codex-intact/);
+    assert.match(response.body, /Claude 사용량/);
+    assert.match(response.body, /Claude statusLine hook이 아직 실행되지 않았습니다/);
+    assert.match(response.body, /집계할 usage\/token 이벤트가 없습니다/);
+  } finally {
+    server.kill();
+  }
+}
+
+async function testFastApiDashboardRendersWithClaudeArguments() {
+  const script = [
+    "import codex_dashboard_fastapi as app",
+    "app.STATUS_PATH = app.Path('missing-status.json')",
+    "app.CLAUDE_STATUS_PATH = app.Path('missing-claude-status.json')",
+    "app.SESSIONS_DIR = app.Path('missing-codex-sessions')",
+    "app.CLAUDE_SESSIONS_DIR = app.Path('missing-claude-sessions')",
+    "html = app.index()",
+    "fragment = app.fragment()",
+    "assert 'Claude 사용량' in html",
+    "assert 'Claude 사용량' in fragment",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
 async function main() {
   await run(NODE, ["--check", "codex-wrapper.js"]);
   await run(NODE, ["--check", "codex-status-poller.js"]);
   await run(NODE, ["--check", "status-capture.js"]);
-  await run("python", ["-m", "py_compile", "codex_status_dashboard.py", "codex_usage_report.py"]);
+  await run(NODE, ["--check", "claude-status-hook.js"]);
+  await run("python", ["-m", "py_compile", "codex_status_dashboard.py", "codex_usage_report.py", "claude_usage_report.py", "dashboard_common.py"]);
   await testParseRawStdin();
   await testDuplicateLimitsKeepFirstGeneralLimit();
   await testPollerParseFailurePreservesPreviousOkStatus();
@@ -656,8 +1044,18 @@ async function main() {
   await testHeadlessStatusPoller();
   await testStatusPollerRestartsUnhealthySession();
   await testStatusPollerSurvivesBadCodexCommand();
+  await testClaudeUsageDeduplicatesMessageIds();
+  await testClaudeUsageFieldsModelsAndSubagents();
+  await testUsageDatesUseKstMidnight();
+  await testClaudeStatusHookWritesRemainingPercents();
+  await testClaudeStatusHookAcceptsAlternatePercentFields();
+  await testClaudeStatusHookSurvivesMalformedPayload();
+  await testClaudeStatusHookInstallDoesNotOverwriteExistingCommand();
+  await testDashboardRingsUseRemainingThresholds();
   await testMergedDashboardShowsUsageAndStatus();
   await testDashboardSurvivesClientDisconnect();
+  await testDashboardSurvivesMissingClaudeSessionsDir();
+  await testFastApiDashboardRendersWithClaudeArguments();
   process.stdout.write("all tests passed\n");
 }
 

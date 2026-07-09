@@ -11,6 +11,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 import codex_status_dashboard as status_dashboard
 import codex_usage_report as usage_report
+import claude_usage_report
+from dashboard_common import FileCache
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -68,16 +70,19 @@ def env_path(name: str, default: Path) -> Path:
 
 
 STATUS_PATH = env_path("CODEX_USAGE_STATUS_PATH", status_dashboard.DEFAULT_STATUS_PATH)
+CLAUDE_STATUS_PATH = env_path("CODEX_USAGE_CLAUDE_STATUS_PATH", status_dashboard.DEFAULT_CLAUDE_STATUS_PATH)
 HISTORY_DIR = env_path("CODEX_USAGE_HISTORY_DIR", status_dashboard.DEFAULT_HISTORY_DIR)
 SESSIONS_DIR = env_path("CODEX_USAGE_SESSIONS_DIR", usage_report.default_sessions_dir())
+CLAUDE_SESSIONS_DIR = env_path("CODEX_USAGE_CLAUDE_SESSIONS_DIR", claude_usage_report.default_sessions_dir())
 REFRESH_SECONDS = env_int("CODEX_USAGE_REFRESH_SECONDS", status_dashboard.DEFAULT_REFRESH_SECONDS)
 AUTO_STATUS_POLL = env_bool("CODEX_USAGE_AUTO_STATUS_POLL", True)
 POLL_INTERVAL_MS = env_int("CODEX_USAGE_POLL_INTERVAL_MS", status_dashboard.DEFAULT_POLL_INTERVAL_MS)
 CODEX_COMMAND = os.getenv("CODEX_USAGE_CODEX_COMMAND", status_dashboard.DEFAULT_CODEX_COMMAND)
 NODE_COMMAND = os.getenv("CODEX_USAGE_NODE_COMMAND", status_dashboard.DEFAULT_NODE_COMMAND)
 
-app = FastAPI(title="Codex Usage Dashboard")
-usage_file_cache: usage_report.FileCache = {}
+app = FastAPI(title="Codex, Claude Usage Dashboard")
+usage_file_cache: FileCache = {}
+claude_usage_file_cache: FileCache = {}
 poller_process = None
 
 
@@ -89,6 +94,16 @@ def current_usage_aggregate() -> dict[tuple[str, str], usage_report.UsageTotals]
     """
 
     return usage_report.aggregate_usage(SESSIONS_DIR, usage_file_cache)
+
+
+def current_claude_usage_aggregate() -> dict[tuple[str, str], claude_usage_report.UsageTotals]:
+    """현재 Claude 프로젝트 로그 기준 토큰 사용량을 집계한다.
+
+    Returns:
+        `(date, model)` 키를 가진 Claude 사용량 집계 딕셔너리.
+    """
+
+    return claude_usage_report.aggregate_usage(CLAUDE_SESSIONS_DIR, claude_usage_file_cache)
 
 
 @app.on_event("startup")
@@ -127,6 +142,10 @@ def index() -> str:
         REFRESH_SECONDS,
         current_usage_aggregate(),
         SESSIONS_DIR,
+        status_dashboard.read_status(CLAUDE_STATUS_PATH),
+        CLAUDE_STATUS_PATH,
+        current_claude_usage_aggregate(),
+        CLAUDE_SESSIONS_DIR,
         AUTO_STATUS_POLL,
     )
 
@@ -155,6 +174,10 @@ def fragment() -> str:
         STATUS_PATH,
         current_usage_aggregate(),
         SESSIONS_DIR,
+        status_dashboard.read_status(CLAUDE_STATUS_PATH),
+        CLAUDE_STATUS_PATH,
+        current_claude_usage_aggregate(),
+        CLAUDE_SESSIONS_DIR,
         AUTO_STATUS_POLL,
     )
 
