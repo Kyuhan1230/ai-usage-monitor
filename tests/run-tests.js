@@ -715,6 +715,62 @@ async function testClaudeStatusHookSurvivesMalformedPayload() {
   assert.match(stdout, /N\/A/);
 }
 
+async function testClaudeStatusHookPreservesFreshUsageCommandStatus() {
+  const tempDir = makeTempDir("claude-status-hook-preserve-usage");
+  const statusPath = path.join(tempDir, "claude-status.json");
+  fs.writeFileSync(
+    statusPath,
+    `${JSON.stringify({
+      schema_version: 1,
+      captured_at: new Date().toISOString(),
+      source: "claude_usage_command",
+      capture_method: "claude_usage_command",
+      parse_status: "ok",
+      limits: [{ type: "five_hour", used_percent: 10, remaining_percent: 90, reset_text: "resets 07/09 18:30" }],
+      poller: { state: "captured_ok", heartbeat_at: new Date().toISOString(), poll_interval_ms: 180000 },
+    })}\n`,
+    "utf8",
+  );
+
+  const child = spawn(
+    NODE,
+    [path.join("src", "node", "claude-status-hook.js"), "--status-path", statusPath],
+    { cwd: ROOT, env: TEST_ENV, stdio: ["pipe", "pipe", "pipe"] },
+  );
+  child.stdin.end(JSON.stringify({ rate_limits: { five_hour: { used_percentage: 29 } } }));
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`claude hook preserve exited ${code}`))));
+  });
+
+  const status = readJson(statusPath);
+  assert.strictEqual(status.capture_method, "claude_usage_command");
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 90);
+}
+
+async function testClaudeUsagePollerParsesUsageCommand() {
+  const { buildStatus } = require(path.join(ROOT, "src", "node", "claude-usage-poller.js"));
+  const rawText = [
+    "You are currently using your subscription to power your Claude Code usage",
+    "",
+    "Current session: 19% used · resets Jul 9, 6:29pm (Asia/Seoul)",
+    "Current week (all models): 43% used · resets Jul 14, 9am (Asia/Seoul)",
+    "Current week (Fable): 0% used",
+  ].join("\n");
+
+  const status = buildStatus(rawText);
+  const session = status.limits.find((limit) => limit.type === "five_hour");
+  const week = status.limits.find((limit) => limit.type === "seven_day");
+  assert.strictEqual(status.parse_status, "ok");
+  assert.strictEqual(status.capture_method, "claude_usage_command");
+  assert.strictEqual(session.used_percent, 19);
+  assert.strictEqual(session.remaining_percent, 81);
+  assert.strictEqual(session.reset_text, "resets 07/09 18:29");
+  assert.strictEqual(week.used_percent, 43);
+  assert.strictEqual(week.remaining_percent, 57);
+  assert.strictEqual(week.reset_text, "resets 07/14 09:00");
+}
+
 async function testClaudeStatusHookInstallDoesNotOverwriteExistingCommand() {
   const tempDir = makeTempDir("claude-status-hook-install");
   const settingsPath = path.join(tempDir, "settings.json");
@@ -1045,6 +1101,7 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "node", "codex-status-poller.js")]);
   await run(NODE, ["--check", path.join("src", "node", "status-capture.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "claude-usage-poller.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "main.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
@@ -1066,6 +1123,8 @@ async function main() {
   await testClaudeStatusHookWritesRemainingPercents();
   await testClaudeStatusHookAcceptsAlternatePercentFields();
   await testClaudeStatusHookSurvivesMalformedPayload();
+  await testClaudeStatusHookPreservesFreshUsageCommandStatus();
+  await testClaudeUsagePollerParsesUsageCommand();
   await testClaudeStatusHookInstallDoesNotOverwriteExistingCommand();
   await testDashboardRingsUseRemainingThresholds();
   await testMergedDashboardShowsUsageAndStatus();

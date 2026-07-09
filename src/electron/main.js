@@ -5,7 +5,9 @@ const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { buildStatus, summaryFromStatus } = require("../node/claude-status-hook");
+const { parseArgs: parseClaudePollerArgs, startPoller: startClaudePoller } = require("../node/claude-usage-poller");
+const { parseArgs: parsePollerArgs, startPoller } = require("../node/codex-status-poller");
+const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { writeJsonAtomic } = require("../node/status-capture");
 
 const APP_NAME = "Codex Claude Usage";
@@ -14,14 +16,24 @@ const DASHBOARD_URL = "http://127.0.0.1:8767";
 const STATUS_DIR = path.join(os.homedir(), ".codex-usage-wrapper");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
 const CLAUDE_STATUS_PATH = path.join(STATUS_DIR, "claude-status.json");
+const HISTORY_DIR = path.join(STATUS_DIR, "history");
+const POLLER_PID_PATH = path.join(STATUS_DIR, "poller.pid");
+const CLAUDE_POLLER_PID_PATH = path.join(STATUS_DIR, "claude-poller.pid");
+const CODEX_POLL_INTERVAL_MS = 3 * 60 * 1000;
+const CLAUDE_POLL_INTERVAL_MS = 3 * 60 * 1000;
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_HOOK_PATH = path.join(ROOT, "src", "node", "claude-status-hook.js");
 
 let dashboardProcess = null;
+let statusPollerProcess = null;
+let claudePollerProcess = null;
+let statusPollerRestartTimer = null;
+let claudePollerRestartTimer = null;
 let tray = null;
 let compactWindow = null;
 let dashboardWindow = null;
 let setupWindow = null;
+let isQuitting = false;
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -32,13 +44,40 @@ function runClaudeStatusHookMode() {
   const statusPath = argValue("--status-path") || CLAUDE_STATUS_PATH;
   const rawInput = fs.readFileSync(0, "utf8");
   const status = buildStatus(rawInput);
-  writeJsonAtomic(statusPath, status);
+  if (!shouldPreserveUsageCommandStatus(statusPath)) {
+    writeJsonAtomic(statusPath, status);
+  }
   process.stdout.write(`${summaryFromStatus(status)}\n`);
+}
+
+function argsAfter(name) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv.slice(index + 1) : [];
+}
+
+function runCodexStatusPollerMode() {
+  const options = parsePollerArgs(argsAfter("--codex-status-poller"));
+  startPoller(options);
+}
+
+function runClaudeUsagePollerMode() {
+  const options = parseClaudePollerArgs(argsAfter("--claude-usage-poller"));
+  startClaudePoller(options);
 }
 
 if (process.argv.includes("--claude-status-hook")) {
   runClaudeStatusHookMode();
   process.exit(0);
+}
+
+if (process.argv.includes("--codex-status-poller")) {
+  runCodexStatusPollerMode();
+  return;
+}
+
+if (process.argv.includes("--claude-usage-poller")) {
+  runClaudeUsagePollerMode();
+  return;
 }
 
 app.setName(APP_NAME);
@@ -93,6 +132,225 @@ function stopDashboardServer() {
   }
   dashboardProcess.kill();
   dashboardProcess = null;
+}
+
+function readPollerPid(pidPath) {
+  try {
+    const pid = Number(fs.readFileSync(pidPath, "utf8").trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function isPidRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function processCommandLine(pid) {
+  if (process.platform !== "win32") {
+    return "";
+  }
+  const result = spawnSync("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+  ], {
+    windowsHide: true,
+    encoding: "utf8",
+    timeout: 3000,
+  });
+  return result.status === 0 ? result.stdout : "";
+}
+
+function isKnownStatusPollerPid(pid) {
+  const commandLine = processCommandLine(pid).toLowerCase();
+  return commandLine.includes("--codex-status-poller")
+    || commandLine.includes("codex-status-poller.js")
+    || commandLine.includes("--claude-usage-poller")
+    || commandLine.includes("claude-usage-poller.js");
+}
+
+function parseStatusTime(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isPollerStatusFresh(statusPath, pollIntervalMs, expectedCaptureMethod) {
+  const status = readJsonSafe(statusPath);
+  if (!status || typeof status !== "object") {
+    return false;
+  }
+  if (expectedCaptureMethod && status.capture_method !== expectedCaptureMethod) {
+    return false;
+  }
+
+  const poller = status.poller && typeof status.poller === "object" ? status.poller : null;
+  const timestamp = parseStatusTime(poller && poller.heartbeat_at) || parseStatusTime(status.captured_at);
+  if (timestamp === null) {
+    return false;
+  }
+
+  const maxAgeMs = Math.max(pollIntervalMs * 2 + 60 * 1000, 10 * 60 * 1000);
+  return Date.now() - timestamp <= maxAgeMs;
+}
+
+function pollerArgs() {
+  const args = [
+    "--codex-status-poller",
+    "--status-path",
+    CODEX_STATUS_PATH,
+    "--history-dir",
+    HISTORY_DIR,
+    "--poll-interval-ms",
+    String(CODEX_POLL_INTERVAL_MS),
+    "--codex-command",
+    process.platform === "win32" ? "codex.exe" : "codex",
+  ];
+  return app.isPackaged ? args : [ROOT, ...args];
+}
+
+function claudePollerArgs() {
+  const args = [
+    "--claude-usage-poller",
+    "--status-path",
+    CLAUDE_STATUS_PATH,
+    "--poll-interval-ms",
+    String(CLAUDE_POLL_INTERVAL_MS),
+    "--claude-command",
+    process.platform === "win32" ? "claude.exe" : "claude",
+  ];
+  return app.isPackaged ? args : [ROOT, ...args];
+}
+
+function startStatusPoller() {
+  if (statusPollerProcess && statusPollerProcess.exitCode === null) {
+    return;
+  }
+
+  const existingPid = readPollerPid(POLLER_PID_PATH);
+  if (
+    existingPid !== null
+    && isPidRunning(existingPid)
+    && isKnownStatusPollerPid(existingPid)
+    && isPollerStatusFresh(CODEX_STATUS_PATH, CODEX_POLL_INTERVAL_MS, "codex_status_poller")
+  ) {
+    return;
+  }
+  if (existingPid !== null && isPidRunning(existingPid) && isKnownStatusPollerPid(existingPid)) {
+    try {
+      process.kill(existingPid);
+    } catch (error) {
+      // Ignore stale poller cleanup failures; the new child can still take over the pid file.
+    }
+  }
+
+  fs.mkdirSync(STATUS_DIR, { recursive: true });
+  statusPollerProcess = spawn(process.execPath, pollerArgs(), {
+    cwd: ROOT,
+    env: process.env,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  fs.writeFileSync(POLLER_PID_PATH, String(statusPollerProcess.pid), "utf8");
+
+  statusPollerProcess.on("error", () => {
+    statusPollerProcess = null;
+    scheduleStatusPollerRestart();
+  });
+  statusPollerProcess.on("exit", () => {
+    statusPollerProcess = null;
+    scheduleStatusPollerRestart();
+  });
+}
+
+function startClaudeUsagePoller() {
+  if (claudePollerProcess && claudePollerProcess.exitCode === null) {
+    return;
+  }
+
+  const existingPid = readPollerPid(CLAUDE_POLLER_PID_PATH);
+  if (
+    existingPid !== null
+    && isPidRunning(existingPid)
+    && isKnownStatusPollerPid(existingPid)
+    && isPollerStatusFresh(CLAUDE_STATUS_PATH, CLAUDE_POLL_INTERVAL_MS, "claude_usage_command")
+  ) {
+    return;
+  }
+  if (existingPid !== null && isPidRunning(existingPid) && isKnownStatusPollerPid(existingPid)) {
+    try {
+      process.kill(existingPid);
+    } catch (error) {
+      // Ignore stale poller cleanup failures; the new child can still take over the pid file.
+    }
+  }
+
+  fs.mkdirSync(STATUS_DIR, { recursive: true });
+  claudePollerProcess = spawn(process.execPath, claudePollerArgs(), {
+    cwd: ROOT,
+    env: process.env,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  fs.writeFileSync(CLAUDE_POLLER_PID_PATH, String(claudePollerProcess.pid), "utf8");
+
+  claudePollerProcess.on("error", () => {
+    claudePollerProcess = null;
+    scheduleClaudePollerRestart();
+  });
+  claudePollerProcess.on("exit", () => {
+    claudePollerProcess = null;
+    scheduleClaudePollerRestart();
+  });
+}
+
+function scheduleStatusPollerRestart() {
+  if (isQuitting || statusPollerRestartTimer) {
+    return;
+  }
+  statusPollerRestartTimer = setTimeout(() => {
+    statusPollerRestartTimer = null;
+    startStatusPoller();
+  }, 30 * 1000);
+}
+
+function scheduleClaudePollerRestart() {
+  if (isQuitting || claudePollerRestartTimer) {
+    return;
+  }
+  claudePollerRestartTimer = setTimeout(() => {
+    claudePollerRestartTimer = null;
+    startClaudeUsagePoller();
+  }, 30 * 1000);
+}
+
+function stopStatusPoller() {
+  clearTimeout(statusPollerRestartTimer);
+  statusPollerRestartTimer = null;
+  if (!statusPollerProcess || statusPollerProcess.exitCode !== null) {
+    return;
+  }
+  statusPollerProcess.kill();
+  statusPollerProcess = null;
+}
+
+function stopClaudeUsagePoller() {
+  clearTimeout(claudePollerRestartTimer);
+  claudePollerRestartTimer = null;
+  if (!claudePollerProcess || claudePollerProcess.exitCode !== null) {
+    return;
+  }
+  claudePollerProcess.kill();
+  claudePollerProcess = null;
 }
 
 function showCompactWindow() {
@@ -252,6 +510,14 @@ function buildSnapshot() {
       running: Boolean(dashboardProcess && dashboardProcess.exitCode === null),
       url: DASHBOARD_URL,
     },
+    poller: {
+      codexRunning: Boolean(statusPollerProcess && statusPollerProcess.exitCode === null)
+        || isPollerStatusFresh(CODEX_STATUS_PATH, CODEX_POLL_INTERVAL_MS, "codex_status_poller"),
+      claudeRunning: Boolean(claudePollerProcess && claudePollerProcess.exitCode === null)
+        || isPollerStatusFresh(CLAUDE_STATUS_PATH, CLAUDE_POLL_INTERVAL_MS, "claude_usage_command"),
+      codexIntervalMs: CODEX_POLL_INTERVAL_MS,
+      claudeIntervalMs: CLAUDE_POLL_INTERVAL_MS,
+    },
     codex: {
       connected: Boolean(codex && codex.parse_status === "ok"),
       ageMs: statusAgeMs(codex),
@@ -270,12 +536,18 @@ function buildSnapshot() {
       opacity: compactWindow ? compactWindow.getOpacity() : 0.96,
     },
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
+  };
+}
+
+function buildSetupSnapshot() {
+  return {
+    ...buildSnapshot(),
     setup: {
       codexCommand: commandExists("codex.exe") || commandExists("codex"),
       claudeCommand: commandExists("claude.exe") || commandExists("claude"),
       uvicornCommand: commandExists("uvicorn.exe") || commandExists("uvicorn"),
       hookCommand: claudeHookCommand(),
-    },
+    }
   };
 }
 
@@ -328,6 +600,7 @@ function createTray() {
 }
 
 ipcMain.handle("status:snapshot", () => buildSnapshot());
+ipcMain.handle("setup:snapshot", () => buildSetupSnapshot());
 ipcMain.handle("window:setAlwaysOnTop", (_event, enabled) => {
   if (compactWindow) {
     compactWindow.setAlwaysOnTop(Boolean(enabled), "floating");
@@ -354,11 +627,11 @@ ipcMain.handle("dashboard:open", () => {
 });
 ipcMain.handle("setup:open", () => {
   showSetupWindow();
-  return buildSnapshot();
+  return buildSetupSnapshot();
 });
 ipcMain.handle("setup:installClaudeHook", () => {
   installClaudeHook();
-  return buildSnapshot();
+  return buildSetupSnapshot();
 });
 ipcMain.handle("setup:openCodexLogin", () => {
   openCommand("codex login");
@@ -382,17 +655,17 @@ ipcMain.handle("app:quit", () => {
 
 app.whenReady().then(() => {
   ensureLaunchAtLogin();
-  startDashboardServer();
+  startStatusPoller();
+  startClaudeUsagePoller();
   createTray();
   showCompactWindow();
-  const snapshot = buildSnapshot();
-  if (!snapshot.claude.hookInstalled || !snapshot.setup.codexCommand || !snapshot.setup.claudeCommand || !snapshot.setup.uvicornCommand) {
-    showSetupWindow();
-  }
 });
 
 app.on("window-all-closed", () => {});
 
 app.on("before-quit", () => {
+  isQuitting = true;
+  stopStatusPoller();
+  stopClaudeUsagePoller();
   stopDashboardServer();
 });

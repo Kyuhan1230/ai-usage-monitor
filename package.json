@@ -7,7 +7,9 @@
   "description": "Local Codex CLI usage wrapper and dashboard.",
   "main": "src/electron/main.js",
   "scripts": {
-    "app": "electron .",
+    "app": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
+    "app:lite": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
+    "app:electron": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
     "wrapper": "node src/node/codex-wrapper.js",

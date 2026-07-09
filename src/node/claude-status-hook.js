@@ -9,6 +9,7 @@ const { nowKstIso, writeJsonAtomic } = require("./status-capture");
 
 const DEFAULT_STATUS_PATH = path.join(os.homedir(), ".codex-usage-wrapper", "claude-status.json");
 const DEFAULT_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+const USAGE_COMMAND_FRESH_MS = 10 * 60 * 1000;
 
 function parseArgs(argv) {
   const args = {
@@ -179,6 +180,32 @@ function buildStatus(rawInput) {
   };
 }
 
+function readJsonSafe(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    return null;
+  }
+}
+
+function parseStatusTime(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shouldPreserveUsageCommandStatus(statusPath) {
+  const current = readJsonSafe(statusPath);
+  if (!current || current.capture_method !== "claude_usage_command") {
+    return false;
+  }
+  const poller = current.poller && typeof current.poller === "object" ? current.poller : null;
+  const timestamp = parseStatusTime(poller && poller.heartbeat_at) || parseStatusTime(current.captured_at);
+  return timestamp !== null && Date.now() - timestamp <= USAGE_COMMAND_FRESH_MS;
+}
+
 function summaryFromStatus(status) {
   if (!status.limits.length) {
     return "Claude limits: N/A";
@@ -258,7 +285,9 @@ function main() {
 
   const rawInput = readStdin();
   const status = buildStatus(rawInput);
-  writeJsonAtomic(args.statusPath, status);
+  if (!shouldPreserveUsageCommandStatus(args.statusPath)) {
+    writeJsonAtomic(args.statusPath, status);
+  }
 
   const originalOutput = runOriginalCommand(args.originalCommand, rawInput);
   const summary = summaryFromStatus(status);
@@ -271,6 +300,7 @@ if (require.main === module) {
 
 module.exports = {
   buildStatus,
+  shouldPreserveUsageCommandStatus,
   summaryFromStatus,
   parseArgs,
 };

@@ -1,21 +1,136 @@
-# Codex, Claude Usage Dashboard
+# Codex Claude Usage
 
-Codex 사용량을 로컬에서 확인하기 위한 도구 모음이다.
+Codex CLI와 Claude Code 사용량을 한 화면에서 보는 로컬 Windows 대시보드다.
 
-- `src/python/codex_status_dashboard.py`: 플랜 잔여율(`/status` 캡처 결과)과 토큰 사용량 리포트를 하나로 합친 메인 대시보드.
-- `src/python/codex_dashboard_fastapi.py`: 개발 중 파일 수정이 바로 반영되도록 FastAPI와 uvicorn reload로 대시보드를 띄우는 진입점.
-- `src/python/codex_usage_report.py`: `~/.codex/sessions` JSONL을 스캔해서 날짜별, 모델별 토큰 사용량을 집계한다. 대시보드에서도 재사용하고, 독립적으로 정적 HTML을 뽑을 때도 쓴다.
-- `src/node/codex-status-poller.js`: 대시보드가 자동으로 띄우는 헤드리스 백그라운드 프로세스. 숨겨진 Codex CLI 세션 하나를 잡아두고 주기적으로 `/status`를 캡처한다.
-- `src/node/codex-wrapper.js` / `scripts/codex-wrapper.ps1`: 실제로 코딩할 때 쓰는 터미널을 감싸서, 그 세션의 실제 출력에서 `/status`를 캡처하는 보조 수단(선택 사항).
+이 프로젝트는 사용량을 보려고 인증 토큰, 브라우저 쿠키, 비공개 Usage API를 건드리지 않는다. 이미 로그인된 CLI가 로컬에 남기는 출력과 로그만 읽고, 결과를 로컬 대시보드와 Windows 트레이 앱으로 보여준다.
 
-인증 토큰, 브라우저 쿠키, 비공개 Usage API는 사용하지 않는다. 잔여율은 로그인된 Codex CLI를 그대로 구동해서 `/status` 명령을 실행한 화면 출력을 읽는 방식으로만 얻는다.
+## 기능 요약
 
-## 1. 대시보드 실행
+- Codex 5-hour, weekly 잔여율 표시
+- Claude current session, current week 잔여율 표시
+- Codex와 Claude 토큰 사용량을 날짜별, 모델별로 집계
+- Windows 트레이 상주 앱
+- 항상 위에 떠 있는 compact window
+- 전체 HTML 대시보드
+- Windows 로그인 시 자동 실행
+- 다른 PC 배포용 Windows 설치 파일 생성
+- Claude `/usage` 백그라운드 수집 및 선택형 statusLine hook 설치
+- 로컬 파일 기반 캐싱으로 큰 세션 폴더에서도 빠른 갱신
 
-별도 PowerShell에서 대시보드를 실행한다.
+## 화면 구성
+
+Windows 앱은 세 가지 화면을 제공한다.
+
+- Compact window: Codex와 Claude 잔여율만 작게 표시하는 항상 위 창
+- Full dashboard: 잔여율, 날짜별 사용량, 모델별 사용량을 모두 보여주는 대시보드
+- Setup window: Codex CLI, Claude Code, Claude hook, uvicorn, 자동 실행 상태를 점검하는 설정 화면
+
+대시보드는 기본적으로 `127.0.0.1:8767`에서 실행된다.
+
+```text
+http://127.0.0.1:8767
+```
+
+## 설치 파일로 사용하기
+
+빌드가 끝난 설치 파일은 아래 경로에 생성된다.
+
+```text
+dist\Codex Claude Usage Setup 0.1.0.exe
+```
+
+친구나 다른 PC에 배포할 때는 이 설치 파일을 전달하면 된다.
+
+단, 설치 파일이 모든 외부 런타임을 포함하는 것은 아니다. 대상 PC에는 아래 프로그램이 필요하다.
+
+- Codex CLI
+- Claude Code
+- Python
+- Python 환경에서 실행 가능한 `fastapi`, `uvicorn`
+
+설치 후 앱을 처음 실행하면 Setup 창에서 필요한 항목을 확인할 수 있다.
+
+## 첫 실행 체크리스트
+
+설치 후 Setup 창에서 아래 상태를 확인한다.
+
+```text
+Codex CLI               정상 또는 필요
+Claude Code             정상 또는 필요
+Claude statusLine hook  정상 또는 필요
+Dashboard runtime       정상 또는 필요
+Windows 시작 시 실행     정상 또는 주의
+```
+
+상태 문구는 다음처럼 표시된다.
+
+```text
+정상: 방금 갱신
+정상: 3분 전 갱신
+주의: 오래된 값입니다. 4시간 전 갱신.
+필요: statusLine hook이 현재 앱을 가리키지 않습니다.
+```
+
+Setup에서 할 수 있는 일:
+
+- `codex login` 실행
+- `claude auth` 실행
+- Claude statusLine hook 설치
+- 전체 대시보드 열기
+- status 파일 최신성 확인
+
+## 실행
+
+저장소를 직접 받아서 실행할 때는 Node 의존성을 설치한 뒤 경량 앱을 띄운다.
 
 ```powershell
-cd "D:\1. 프로젝트\스터디\CodexUsage"
+npm install
+npm run app
+```
+
+이 명령은 Electron을 쓰지 않는 Windows 내장 WinForms 앱을 실행한다. 앱이 켜지면 작은 compact window와 백그라운드 수집기만 시작하고, FastAPI 대시보드 서버는 전체 대시보드를 열 때만 시작한다.
+
+기존 Electron 앱을 비교용으로 실행해야 하면 아래 명령을 사용한다.
+
+```powershell
+npm run app:electron
+```
+
+기본 경량 앱의 평상시 프로세스 구성은 다음과 같다.
+
+```text
+parents: powershell.exe
+collectors: node.exe 2개
+server: 대시보드 열기 전에는 없음
+electron: 없음
+```
+
+## 경량 앱 검증
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts\native-usage-tray.ps1 -SelfTest
+```
+
+실행 중 프로세스를 확인하려면 다음을 사용한다.
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object {
+    $_.CommandLine -like '*native-usage-tray.ps1*' -or
+    $_.CommandLine -like '*codex-status-poller.js*' -or
+    $_.CommandLine -like '*claude-usage-poller.js*' -or
+    $_.CommandLine -like '*uvicorn*'
+  } |
+  Select-Object ProcessId,ParentProcessId,Name,CommandLine
+```
+
+앱만 켠 상태에서는 `uvicorn`과 `8767` 포트가 없어야 한다.
+
+## 일반 대시보드만 실행하기
+
+Electron 앱 없이 브라우저 대시보드만 실행할 수 있다.
+
+```powershell
 npm run dashboard
 ```
 
@@ -25,345 +140,194 @@ npm run dashboard
 http://127.0.0.1:8767
 ```
 
-같은 사내망의 다른 PC에서는 이 PC의 LAN IP로 접속한다.
-
-```text
-http://10.24.0.145:8767
-```
-
-이 명령 하나로 다음이 자동으로 일어난다.
-
-- 플랜 잔여율(5-hour/weekly/monthly)이 잔여량에 따라 초록/주황/빨강으로 바뀌는 링으로, 토큰 사용량 리포트(날짜별·모델별)가 그 아래 한 페이지에 표시된다.
-- 서버가 시작하면서 백그라운드에 숨겨진 Codex CLI 세션을 하나 띄우고(`src/node/codex-status-poller.js`), 기본 3분마다 `/status`를 캡처해서 `status.json`을 갱신한다. 사용자가 이 프로세스를 직접 신경 쓸 필요는 없다.
-- 대시보드 하단에는 마지막 성공 캡처 시각과 poller heartbeat가 함께 표시된다. heartbeat가 계속 바뀌면 poller는 살아 있고, 성공 캡처 시각만 오래됐으면 `/status` 파싱이나 Codex CLI 상태를 확인하면 된다.
-- 토큰 사용량 쪽은 파일별로 (수정시각, 크기)를 캐싱해서, 실제로 바뀐 세션 파일만 다시 파싱한다. 코딩 중에는 그날 활성 세션 파일 하나만 계속 바뀌므로, 세션 폴더가 수백~수천 개 파일로 커져도 매 새로고침마다 전부 다시 읽지 않는다. 서버를 막 띄운 직후의 최초 집계만 세션 폴더 크기에 비례해 다소 걸릴 수 있고(예: 1GB 안팎이면 20초 내외), 이마저도 서버가 첫 요청을 받기 전 백그라운드에서 미리 데워둔다.
-
-대시보드는 페이지 전체를 새로고침하지 않는다. 기본 3초마다 잔여율·토큰 사용량 영역만 백그라운드에서 다시 받아와 조용히 갈아 끼운다(`/fragment` 엔드포인트를 fetch로 폴링).
-
-개발 중에는 reload 모드로 실행한다. Python 파일을 고치면 uvicorn이 서버를 자동으로 다시 띄우므로 매번 직접 껐다 켤 필요가 없다.
+개발 중 Python 파일 변경을 자동 반영하려면 reload 모드를 사용한다.
 
 ```powershell
 npm run dashboard:dev
 ```
 
-기존 순수 Python HTTP 서버로 확인해야 할 때는 아래 명령을 쓴다.
+기존 순수 Python HTTP 서버를 확인해야 할 때는 legacy 명령을 사용한다.
 
 ```powershell
 npm run dashboard:legacy
 ```
 
-플랜 잔여율 자동 캡처를 끄고 싶으면:
+## 데이터가 갱신되는 방식
 
-```powershell
-python src/python/codex_status_dashboard.py --serve --no-auto-status-poll
-```
+Codex 잔여율:
 
-캡처 주기, Codex 실행 파일, 세션 폴더 등은 옵션으로 바꿀 수 있다.
+- 앱이 백그라운드에서 Codex CLI를 실행한다.
+- `/status` 출력을 캡처한다.
+- `~\.codex-usage-wrapper\status.json`에 저장한다.
+- 기본적으로 3분마다 다시 캡처한다.
+- 이 수집기는 FastAPI 대시보드 서버와 별도로 실행된다.
 
-```powershell
-python src/python/codex_status_dashboard.py --serve `
-  --poll-interval-ms 180000 `
-  --codex-command codex.exe `
-  --sessions-dir "C:\Users\me\.codex\sessions"
-```
+Claude 잔여율:
 
-## 2. 컴퓨터 켤 때 자동으로 띄우기
+- 앱이 백그라운드에서 `claude /usage`를 실행한다.
+- `Current session`, `Current week (all models)` 출력을 파싱한다.
+- `~\.codex-usage-wrapper\claude-status.json`에 저장한다.
+- 기본적으로 3분마다 다시 캡처한다.
+- Claude statusLine hook은 선택 사항이다.
 
-로그인할 때마다 대시보드가 알아서 백그라운드로 뜨게 하려면, Windows 시작프로그램 폴더에 바로가기를 등록한다.
+토큰 사용량:
 
-```powershell
-$WshShell = New-Object -ComObject WScript.Shell
-$startupFolder = [Environment]::GetFolderPath('Startup')
-$shortcutPath = Join-Path $startupFolder "CodexUsageDashboard.lnk"
+- Codex는 `~\.codex\sessions` JSONL을 읽는다.
+- Claude는 `~\.claude\projects\**\*.jsonl`을 읽는다.
+- 파일별 `(mtime, size)` 캐시를 사용해 바뀐 파일만 다시 파싱한다.
+- 전체 대시보드를 열어둔 동안 대시보드가 이 집계를 갱신한다.
 
-$shortcut = $WshShell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
-$shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\1. 프로젝트\스터디\CodexUsage\scripts\codex_status_dashboard_start.ps1"'
-$shortcut.WorkingDirectory = "D:\1. 프로젝트\스터디\CodexUsage"
-$shortcut.WindowStyle = 7
-$shortcut.Save()
-```
+## 저장 위치
 
-`scripts/codex_status_dashboard_start.ps1`이 `npm install`(필요할 때만) 후 대시보드를 창 없이 백그라운드로 띄우고, 출력을 `~\.codex-usage-wrapper\dashboard.log` / `dashboard-error.log`에 남긴다.
-
-스크립트는 `http://127.0.0.1:8767/status.json`이 이미 응답하면 새 대시보드를 중복 실행하지 않고 종료한다. 서버는 `0.0.0.0:8767`에 바인딩해서 같은 사내망의 다른 PC에서도 열 수 있다.
-
-껐다 켜지 않고 바로 등록한 상태를 확인하려면 시작프로그램 폴더를 직접 연다.
-
-```powershell
-explorer shell:startup
-```
-
-자동 실행을 끄려면 그 폴더에서 `CodexUsageDashboard.lnk`만 지우면 된다.
-
-이 방식은 Docker가 아니라 Windows 네이티브 방식이다. 대시보드가 실제로 하는 일(로그인된 `codex.exe`를 그대로 구동해서 `/status`를 읽는 것)은 Linux 컨테이너 안에서는 실행할 수 없는 Windows 프로세스라서, Docker로 묶는 방식은 이 프로젝트의 핵심 기능과 맞지 않는다.
-
-상시 실행 안정성을 더 높이고 싶으면 시작프로그램 바로가기보다 작업 스케줄러를 권장한다. 시작프로그램은 로그인 시 1회 실행만 보장하고, 작업 스케줄러는 실패 시 재시작 정책을 줄 수 있다. 작업 스케줄러 등록은 Windows 정책에 따라 관리자 권한 PowerShell이 필요할 수 있다.
-
-작업 스케줄러 등록 예시:
-
-```powershell
-$action = New-ScheduledTaskAction `
-  -Execute "powershell.exe" `
-  -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\1. 프로젝트\스터디\CodexUsage\scripts\codex_status_dashboard_start.ps1"'
-
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet `
-  -RestartCount 3 `
-  -RestartInterval (New-TimeSpan -Minutes 1)
-
-Register-ScheduledTask `
-  -TaskName "CodexUsageDashboard" `
-  -Action $action `
-  -Trigger $trigger `
-  -Settings $settings `
-  -Description "Start local Codex, Claude Usage Dashboard"
-```
-
-이미 시작프로그램 바로가기를 쓰고 있다면 둘 중 하나만 남긴다. 둘 다 등록해도 스크립트가 중복 실행을 막지만, 운영 경로는 하나가 낫다.
-
-## 3. (선택) 실제 코딩 세션에서 더 빠르게 캡처하기 — 래퍼
-
-백그라운드 poller는 기본 3분 주기라서 즉각성이 떨어질 수 있다. 실제로 코딩하는 세션 자체에서 캡처하고 싶다면 아래 래퍼로 Codex를 실행한다.
-
-```powershell
-cd "D:\1. 프로젝트\스터디\CodexUsage"
-.\scripts/codex-wrapper.ps1
-```
-
-PowerShell이 아니라 파일을 더블클릭해서 실행하고 싶으면 아래 파일을 사용한다.
-
-```text
-scripts/codex-wrapper.cmd
-```
-
-더블클릭했을 때 창이 바로 닫히면 PowerShell이나 Windows Terminal에서 아래처럼 실행한다.
-
-```powershell
-.\scripts/codex-wrapper.cmd
-```
-
-처음 실행할 때 `node_modules`가 없으면 `npm install`을 한 번 실행한다.
-
-Codex 안에서 한 줄 맨 앞에 아래 명령을 입력하면 래퍼가 가로챈다.
-
-```text
-:usage
-```
-
-래퍼는 이 입력을 Codex로 보내지 않고 내부적으로 `/status`를 입력한 뒤 출력값을 캡처해서 `status.json`에 저장한다. 대시보드는 다음 refresh 때 값을 표시한다.
-
-래퍼는 기본적으로 다음 자동 갱신도 수행한다.
-
-- 세션 시작 후 약 2.5초 뒤 1회 `/status` 캡처
-- 사용자 입력과 캡처가 없을 때 3분 idle 주기 캡처
-- 응답 출력이 조용해진 뒤 자동 캡처 시도
-
-자동 캡처는 사용자 입력이 감지되었거나, Codex 출력이 아직 조용해지지 않았거나, 승인/확인 프롬프트로 보이는 출력이 최근에 감지되면 건너뛴다. `/status` 출력이 계속 흘러서 quiet 구간이 오지 않으면(예: 스피너 애니메이션) 최대 15초 뒤 강제로 캡처를 마무리한다.
-
-응답 후 자동 캡처를 끄려면:
-
-```powershell
-.\scripts/codex-wrapper.ps1 --no-after-output-capture
-```
-
-자동 시작 캡처를 끄려면:
-
-```powershell
-.\scripts/codex-wrapper.ps1 --no-start-capture
-```
-
-idle 캡처를 끄려면:
-
-```powershell
-.\scripts/codex-wrapper.ps1 --no-idle-capture
-```
-
-Codex 인자를 넘기려면 `--` 뒤에 쓴다.
-
-```powershell
-.\scripts/codex-wrapper.ps1 -- --model gpt-5.5
-```
-
-## 4. 수동 캡처 fallback
-
-래퍼도 백그라운드 poller도 쓰고 싶지 않다면 `/status` 출력 복사 방식으로 `status.json`을 만들 수 있다.
-
-1. Codex CLI에서 `/status`를 실행한다.
-2. 출력 내용을 복사한다.
-3. 별도 PowerShell에서 실행한다.
-
-```powershell
-cd "D:\1. 프로젝트\스터디\CodexUsage"
-Get-Clipboard | python src/python/codex_status_dashboard.py --raw-stdin
-```
-
-## 5. 토큰 사용량만 필요할 때
-
-대시보드 없이 리포트만 뽑고 싶을 때 쓴다.
-
-정적 HTML 생성:
-
-```powershell
-python src/python/codex_usage_report.py
-```
-
-실시간 재스캔 서버:
-
-```powershell
-python src/python/codex_usage_report.py --serve
-```
-
-브라우저에서 연다.
-
-```text
-http://127.0.0.1:8765
-```
-
-## 6. 저장 파일
-
-최신 상태:
+최신 Codex 상태:
 
 ```text
 ~\.codex-usage-wrapper\status.json
 ```
 
-히스토리:
+최신 Claude 상태:
+
+```text
+~\.codex-usage-wrapper\claude-status.json
+```
+
+Codex status 캡처 히스토리:
 
 ```text
 ~\.codex-usage-wrapper\history\YYYY-MM-DD.jsonl
 ```
 
-백그라운드 poller의 PID(대시보드 서버가 자동 관리, 직접 건드릴 필요 없음):
-
-```text
-~\.codex-usage-wrapper\poller.pid
-```
-
-시작프로그램으로 띄웠을 때의 서버 로그(문제 생겼을 때 여기부터 확인):
+대시보드 로그:
 
 ```text
 ~\.codex-usage-wrapper\dashboard.log
 ~\.codex-usage-wrapper\dashboard-error.log
 ```
 
-## 7. 보안 원칙
+## 보안 원칙
 
-- OpenAI 인증 토큰을 읽지 않는다.
-- 브라우저 쿠키를 읽지 않는다.
-- 비공개 Usage API를 호출하지 않는다.
-- 외부 서버로 사용량 데이터를 보내지 않는다.
-- 대시보드는 로컬 파일과 로컬 HTTP 서버만 사용한다.
-- 백그라운드 poller도 로그인된 Codex CLI를 그대로 구동해서 화면에 보이는 `/status` 출력을 읽을 뿐, 인증 파일이나 세션 토큰을 직접 열어보지 않는다.
+이 프로젝트는 다음을 하지 않는다.
 
-## 7-1. Claude Code 사용량 섹션
+- OpenAI 인증 토큰 읽기
+- Anthropic 인증 토큰 읽기
+- 브라우저 쿠키 읽기
+- 비공개 Usage API 호출
+- 외부 서버로 사용량 데이터 전송
+- 원본 민감 로그를 외부 서비스에 업로드
 
-통합 대시보드에는 Codex 섹션 아래에 Claude 사용량 섹션도 표시된다.
+사용하는 입력은 로컬 CLI 출력, 로컬 status JSON, 로컬 세션 JSONL뿐이다.
 
-- 토큰 사용량은 `~\.claude\projects\**\*.jsonl` 파일을 스캔해서 날짜별, 모델별로 집계한다.
-- `subagents` 하위 폴더의 JSONL도 포함한다.
-- Claude JSONL은 같은 `message.id`를 가진 여러 assistant 라인이 동일한 usage를 반복 기록하므로, 대시보드는 `message.id`별 마지막 usage만 집계한다.
-- 표시 열은 Input, Cached Input, Cache Write, Output, Total, Events다.
-- Claude Current session/week 잔여율은 Claude Code의 `statusLine` hook이 저장한 `~\.codex-usage-wrapper\claude-status.json`을 읽는다. 사용률은 링 하단 보조 문구로 함께 표시한다.
+## 프로젝트 구조
 
-Claude statusLine hook 수동 등록:
+```text
+src/electron/
+  main.js                 Windows 앱 메인 프로세스
+  preload.js              안전한 IPC 브릿지
+  renderer/compact.*      항상 위 compact window
+  renderer/setup.*        초기 설정 및 상태 점검 UI
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node \"D:\\1. 프로젝트\\스터디\\CodexUsage\\src/node/claude-status-hook.js\""
-  }
-}
+src/node/
+  codex-status-poller.js  Codex /status 백그라운드 캡처
+  codex-wrapper.js        선택형 Codex 터미널 래퍼
+  claude-status-hook.js   Claude statusLine hook 파서
+  claude-usage-poller.js  Claude /usage 백그라운드 캡처
+  status-capture.js       status JSON 저장/파싱 공용 로직
+
+src/python/
+  codex_dashboard_fastapi.py  FastAPI 대시보드 진입점
+  codex_status_dashboard.py   통합 대시보드 렌더링
+  codex_usage_report.py       Codex JSONL 사용량 집계
+  claude_usage_report.py      Claude JSONL 사용량 집계
+  dashboard_common.py         HTML 렌더링 공용 유틸
+
+scripts/
+  codex-wrapper.ps1
+  codex-wrapper.cmd
+  codex_status_dashboard_start.ps1
 ```
 
-위 내용을 `~\.claude\settings.json`에 직접 추가한다. 대시보드 서버는 이 파일을 자동으로 수정하지 않는다.
+## 선택: Codex 래퍼 사용
 
-이미 `statusLine.command`가 있다면 바로 덮어쓰지 않는다. 이 머신에서는 caveman 플러그인이 statusLine을 관리할 수 있으므로 실제 충돌 가능성이 있다. 기존 statusLine을 유지하려면 그대로 둔다. 둘 다 쓰려면 기존 명령을 `CLAUDE_STATUSLINE_ORIGINAL_COMMAND` 환경 변수에 넣고 hook 명령을 호출하도록 수동으로 체인한다.
-
-예시:
+백그라운드 poller보다 더 빠르게 현재 Codex 세션의 status를 캡처하고 싶으면 래퍼를 사용할 수 있다.
 
 ```powershell
-$env:CLAUDE_STATUSLINE_ORIGINAL_COMMAND = "기존 statusLine 명령"
-node "D:\1. 프로젝트\스터디\CodexUsage\src\node\claude-status-hook.js"
+.\scripts\codex-wrapper.ps1
 ```
 
-hook은 Claude Code가 stdin으로 넘기는 JSON에서 `rate_limits.five_hour.used_percentage`와 `rate_limits.seven_day.used_percentage`를 읽고, 사용률과 잔여율을 함께 `claude-status.json`에 저장한다. 대시보드 링 중앙은 잔여율을 표시하고, 사용률은 보조 문구로 표시한다. `remaining_percentage` 계열 필드만 있으면 사용률을 역산하고, `resets_at` 같은 epoch 값은 KST 시각으로 표시한다. JSON이 없거나 깨져도 종료 코드 0으로 끝나며 status 파일에는 failed 상태를 남긴다.
+Codex 안에서 아래 명령을 입력하면 래퍼가 가로채서 `/status`를 캡처한다.
 
-## 8. 현재 제약
+```text
+:usage
+```
 
-Windows TUI 래핑은 `node-pty` 기반이다. 대부분의 Windows Terminal 환경에서 동작하도록 만들었지만, 승인 프롬프트나 특수한 멀티라인 입력 중 자동 `/status` 주입은 완전히 증명하기 어렵다.
+Codex 인자를 넘기려면 `--` 뒤에 쓴다.
 
-백그라운드 poller는 실제 코딩 세션과는 별개의 Codex CLI 프로세스이므로, 로그인 상태에서 두 개의 세션이 동시에 떠 있는 상태가 된다. Codex 최초 실행 시 온보딩 화면 등 특수한 프롬프트가 뜨면 자동 캡처가 지연되거나 건너뛸 수 있다.
+```powershell
+.\scripts\codex-wrapper.ps1 -- --model gpt-5.5
+```
 
-가장 안전하고 즉각적인 갱신 방식은 여전히 래퍼를 쓰면서 `:usage`를 직접 입력하는 방식이다. 대시보드만 켜두는 방식은 최대 poll 주기(기본 3분)만큼 지연될 수 있다.
+## 수동 캡처
 
-서버를 새로 띄운 직후 첫 요청은 세션 폴더 전체를 처음 훑느라 세션 폴더 크기에 따라 몇 초~몇십 초 걸릴 수 있다(파일별 캐시가 아직 없으므로). 이후 요청은 바뀐 파일만 다시 읽어서 훨씬 빠르다.
+자동 캡처가 깨졌을 때는 `/status` 출력을 복사해서 수동으로 저장할 수 있다.
 
-## 9. 검증
+```powershell
+Get-Clipboard | python src/python/codex_status_dashboard.py --raw-stdin
+```
 
-전체 검증:
+## 문제 해결
+
+Claude 값이 오래됨으로 표시된다:
+
+- Setup에서 Claude statusLine hook이 정상인지 확인한다.
+- 필요하면 `hook 설치`를 누른다.
+- Claude Code 창을 활성화하거나 새 세션을 시작해 statusLine이 다시 그려지게 한다.
+- `~\.codex-usage-wrapper\claude-status.json`의 수정 시각을 확인한다.
+
+Codex 값이 오래됨으로 표시된다:
+
+- Codex CLI 로그인이 되어 있는지 확인한다.
+- Setup에서 Codex CLI 상태를 확인한다.
+- Full dashboard를 열어 poller heartbeat가 움직이는지 확인한다.
+- 필요하면 `npm run dashboard` 또는 앱을 재시작한다.
+
+Dashboard runtime이 필요으로 표시된다:
+
+- Python이 설치되어 있는지 확인한다.
+- `uvicorn`과 `fastapi`가 실행 가능한 환경인지 확인한다.
+
+```powershell
+python -m pip install fastapi uvicorn
+```
+
+설치 앱에 수정이 반영되지 않는다:
+
+- `npm run app`은 개발 모드다.
+- 설치 앱은 `npm run dist`로 다시 빌드해야 바뀐다.
+- 빌드 후 `dist\Codex Claude Usage Setup 0.1.0.exe`를 다시 실행한다.
+
+## 검증
+
+전체 테스트:
 
 ```powershell
 npm test
 ```
 
-검증 내용:
+검증 범위:
 
-- JavaScript / Python 문법 검사
-- `/status` raw 텍스트 파싱
-- mock Codex CLI에서 `:usage` 가로채기
-- mock Codex CLI에서 세션 시작 자동 캡처
-- mock Codex CLI에서 idle 자동 캡처
-- 헤드리스 poller의 시작·주기 캡처
-- poller가 존재하지 않는 Codex 실행 파일에도 죽지 않고 재시도하는지
-- mock `/status` 출력 캡처 후 `status.json` 생성
-- 합쳐진 대시보드가 잔여율과 토큰 사용량을 함께 표시하는지
+- JavaScript 문법 검사
+- Python 문법 검사
+- Codex `/status` 파싱
+- Codex poller 동작
+- Claude statusLine hook 파싱
+- Codex/Claude JSONL 사용량 집계
+- 통합 대시보드 렌더링
+- Electron main/preload/renderer 문법 검사
 
-## 10. Windows 앱
+## 현재 제약
 
-Electron 기반 compact 앱을 실행할 수 있다.
-
-```powershell
-npm run app
-```
-
-설치 파일 생성:
-
-```powershell
-npm run dist
-```
-
-출력 파일은 `dist\` 아래에 생성된다. 다른 PC에서는 설치 후 Setup 창에서 Codex CLI, Claude Code, Claude statusLine hook, uvicorn 상태를 확인한다.
-
-수정 사항을 설치 앱에 반영하려면 다시 빌드한다.
-
-```powershell
-npm test
-npm run dist
-```
-
-그 다음 `dist\Codex Claude Usage Setup 0.1.0.exe`를 다시 실행해 설치하면 된다. 개발 중 바로 확인할 때는 `npm run app`을 쓴다.
-
-앱은 시작 시 내부에서 FastAPI 대시보드 서버를 `127.0.0.1:8767`로 띄우고, 작은 always-on-top 창을 연다. 작업표시줄 트레이 아이콘에서 compact window, full dashboard, setup, quit 동작을 실행할 수 있다.
-
-compact 창 기능:
-
-- Codex, Claude 잔여율 표시
-- 항상 위 토글
-- 투명도 조절
-- 접기/펼치기
-- 전체 대시보드 열기
-- Windows 시작 시 자동 실행
-
-Setup 창 기능:
-
-- Codex CLI 설치 및 status 확인
-- Claude Code 설치 및 status 확인
-- 각 status의 마지막 갱신 시각과 오래된 값 경고
-- Codex 로그인 실행
-- Claude 인증 실행
-- Claude statusLine hook 설치
-- uvicorn 런타임 확인
-
-앱은 OpenAI, Anthropic 인증 토큰이나 브라우저 쿠키를 저장하지 않는다. 로그인 상태는 기존 CLI와 로컬 status JSON 파일로만 확인한다.
+- 설치 파일은 Electron 앱과 프로젝트 파일을 포함하지만 Python 런타임, Codex CLI, Claude Code를 설치하지 않는다.
+- Claude 잔여율은 `claude /usage` 출력에 의존한다.
+- Codex 잔여율은 실제 Codex CLI `/status` 화면 출력 포맷에 의존한다.
+- 기본 아이콘은 아직 Electron 기본 아이콘이다.
+- 완전 독립 실행형 앱으로 만들려면 Python 서버를 번들링하거나 Node/Electron 쪽으로 서버를 옮겨야 한다.

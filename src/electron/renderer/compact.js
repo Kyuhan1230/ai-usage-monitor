@@ -127,7 +127,7 @@ function render(snapshot) {
   el["claude-five-hour"].textContent = percentText(claudeFiveHour);
   el["claude-seven-day"].textContent = percentText(claudeSevenDay);
   el["claude-reset"].textContent = resetText(claudeLimit);
-  el["claude-stamp"].textContent = snapshot.claude.hookInstalled ? ageText(snapshot.claude.ageMs) : "Claude hook 설정 필요";
+  el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
 
   el["always-on-top"].checked = Boolean(snapshot.window.alwaysOnTop);
   el.opacity.value = Math.round((snapshot.window.opacity || 0.96) * 100);
@@ -150,4 +150,4 @@ el.refresh.addEventListener("click", refresh);
 el["open-dashboard"].addEventListener("click", () => window.usageApp.openDashboard());
 
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh, 10000);

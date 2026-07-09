@@ -32,7 +32,7 @@ function statusText(commandOk, connected, ageMs, missingCommand, staleHelp) {
     return `필요: ${missingCommand}`;
   }
   if (!connected) {
-    return "주의: CLI는 있지만 status 파일이 아직 없습니다. 로그인 후 대시보드가 한 번 캡처해야 합니다.";
+    return "주의: CLI는 있지만 status 파일이 아직 없습니다. 백그라운드 수집기가 곧 캡처합니다.";
   }
   if (!isFresh(ageMs)) {
     return `주의: 오래된 값입니다. ${ageText(ageMs)}. ${staleHelp}`;
@@ -41,24 +41,24 @@ function statusText(commandOk, connected, ageMs, missingCommand, staleHelp) {
 }
 
 async function refresh() {
-  const snapshot = await window.usageApp.snapshot();
+  const snapshot = await window.usageApp.setupSnapshot();
   codexDetail.textContent = statusText(
     snapshot.setup.codexCommand,
     snapshot.codex.connected,
     snapshot.codex.ageMs,
     "codex 명령을 찾지 못했습니다. Codex CLI 설치가 필요합니다.",
-    "백그라운드 poller가 다음 주기에 다시 캡처합니다.",
+    "백그라운드 수집기가 3분마다 다시 캡처합니다.",
   );
   claudeDetail.textContent = statusText(
     snapshot.setup.claudeCommand,
     snapshot.claude.connected,
     snapshot.claude.ageMs,
     "claude 명령을 찾지 못했습니다. Claude Code 설치가 필요합니다.",
-    "Claude Code 창이 statusLine을 다시 그리면 갱신됩니다.",
+    "백그라운드 수집기가 3분마다 claude /usage를 다시 캡처합니다.",
   );
   hookDetail.textContent = snapshot.claude.hookInstalled
-    ? `정상: 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`
-    : "필요: statusLine hook이 현재 앱을 가리키지 않습니다. hook 설치를 누르세요.";
+    ? `선택: statusLine hook도 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`
+    : "선택: claude /usage 수집만으로도 잔여율은 갱신됩니다. statusLine 연동이 필요하면 hook 설치를 누르세요.";
   runtimeDetail.textContent = snapshot.setup.uvicornCommand
     ? "정상: uvicorn을 찾았습니다. 내부 대시보드 서버를 띄울 수 있습니다."
     : "필요: uvicorn 명령을 찾지 못했습니다. Python 환경에 fastapi/uvicorn 설치가 필요합니다.";
