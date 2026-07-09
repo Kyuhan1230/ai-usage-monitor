@@ -239,12 +239,15 @@ $mutedColor = [System.Drawing.Color]::FromArgb(156, 166, 181)
 $lineColor = [System.Drawing.Color]::FromArgb(50, 60, 76)
 $goodColor = [System.Drawing.Color]::FromArgb(108, 211, 148)
 $warnColor = [System.Drawing.Color]::FromArgb(228, 179, 99)
+$badColor = [System.Drawing.Color]::FromArgb(231, 111, 111)
+$buttonColor = [System.Drawing.Color]::FromArgb(36, 44, 56)
+$buttonHotColor = [System.Drawing.Color]::FromArgb(45, 56, 72)
 $whiteColor = [System.Drawing.Color]::White
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Codex Claude Usage"
-$form.Size = New-Object System.Drawing.Size(390, 430)
-$form.MinimumSize = New-Object System.Drawing.Size(360, 390)
+$form.Size = New-Object System.Drawing.Size(390, 456)
+$form.MinimumSize = New-Object System.Drawing.Size(360, 420)
 $form.StartPosition = "CenterScreen"
 $form.TopMost = $true
 $form.ShowInTaskbar = $true
@@ -278,6 +281,43 @@ function New-Label {
   return $label
 }
 
+function Get-ToneColor {
+  param($Percent)
+
+  if ($null -eq $Percent) {
+    return $lineColor
+  }
+  if ([int]$Percent -le 10) {
+    return $badColor
+  }
+  if ([int]$Percent -le 50) {
+    return $warnColor
+  }
+  return $goodColor
+}
+
+function Get-RemainingValue {
+  param($Limit)
+
+  if ($null -eq $Limit -or $null -eq $Limit.remaining_percent) {
+    return $null
+  }
+  return [int]$Limit.remaining_percent
+}
+
+function Set-Meter {
+  param($Card, $Percent)
+
+  $tone = Get-ToneColor $Percent
+  $Card.MeterFill.BackColor = $tone
+  $Card.Remaining.ForeColor = $tone
+  $width = 0
+  if ($null -ne $Percent -and $Card.MeterBack.Width -gt 0) {
+    $width = [Math]::Max(2, [Math]::Floor($Card.MeterBack.Width * ([int]$Percent / 100)))
+  }
+  $Card.MeterFill.Width = $width
+}
+
 function New-Card {
   param([string]$Title, [System.Drawing.Color]$Accent)
 
@@ -296,13 +336,14 @@ function New-Card {
   $cardLayout = New-Object System.Windows.Forms.TableLayoutPanel
   $cardLayout.Dock = "Fill"
   $cardLayout.ColumnCount = 2
-  $cardLayout.RowCount = 5
+  $cardLayout.RowCount = 6
   $cardLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 54))) | Out-Null
   $cardLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 46))) | Out-Null
   $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
   $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 48))) | Out-Null
+  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 14))) | Out-Null
   $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 26))) | Out-Null
-  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 26))) | Out-Null
+  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 24))) | Out-Null
   $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
   $panel.Controls.Add($cardLayout)
 
@@ -312,16 +353,28 @@ function New-Card {
   $subLabel = New-Label "--" $font $mutedColor
   $resetLabel = New-Label (U "0072 0065 0073 0065 0074 0020 C815 BCF4 0020 C5C6 C74C") $smallFont $mutedColor
   $ageLabel = New-Label (U "AC31 C2E0 0020 AE30 B85D 0020 C5C6 C74C") $smallFont $mutedColor
+  $meterBack = New-Object System.Windows.Forms.Panel
+  $meterBack.Dock = "Fill"
+  $meterBack.Height = 8
+  $meterBack.Margin = New-Object System.Windows.Forms.Padding(0, 3, 0, 3)
+  $meterBack.BackColor = [System.Drawing.Color]::FromArgb(40, 49, 63)
+  $meterFill = New-Object System.Windows.Forms.Panel
+  $meterFill.Dock = "Left"
+  $meterFill.Width = 0
+  $meterFill.BackColor = $Accent
+  $meterBack.Controls.Add($meterFill)
 
   $cardLayout.Controls.Add($titleLabel, 0, 0)
   $cardLayout.SetColumnSpan($titleLabel, 2)
   $cardLayout.Controls.Add($remainingValue, 0, 1)
   $cardLayout.Controls.Add($usedLabel, 1, 1)
-  $cardLayout.Controls.Add($subLabel, 0, 2)
+  $cardLayout.Controls.Add($meterBack, 0, 2)
+  $cardLayout.SetColumnSpan($meterBack, 2)
+  $cardLayout.Controls.Add($subLabel, 0, 3)
   $cardLayout.SetColumnSpan($subLabel, 2)
-  $cardLayout.Controls.Add($resetLabel, 0, 3)
+  $cardLayout.Controls.Add($resetLabel, 0, 4)
   $cardLayout.SetColumnSpan($resetLabel, 2)
-  $cardLayout.Controls.Add($ageLabel, 0, 4)
+  $cardLayout.Controls.Add($ageLabel, 0, 5)
   $cardLayout.SetColumnSpan($ageLabel, 2)
 
   return @{
@@ -331,18 +384,27 @@ function New-Card {
     Sub = $subLabel
     Reset = $resetLabel
     Age = $ageLabel
+    MeterBack = $meterBack
+    MeterFill = $meterFill
   }
 }
 
 $header = New-Object System.Windows.Forms.TableLayoutPanel
 $header.Dock = "Fill"
-$header.ColumnCount = 1
+$header.ColumnCount = 2
 $header.RowCount = 2
 $header.BackColor = $bgColor
+$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 62))) | Out-Null
+$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 38))) | Out-Null
 $headerTitle = New-Label "Codex Claude Usage" $titleFont $whiteColor
 $headerSub = New-Label (U "0033 BD84 B9C8 B2E4 0020 C790 B3D9 0020 AC31 C2E0") $smallFont $mutedColor
+$serverBadge = New-Label (U "C11C BC84 0020 AEBC C9D0") $smallFont $goodColor
+$serverBadge.TextAlign = "MiddleRight"
+$serverBadge.Dock = "Fill"
 $header.Controls.Add($headerTitle, 0, 0)
 $header.Controls.Add($headerSub, 0, 1)
+$header.Controls.Add($serverBadge, 1, 0)
+$header.SetRowSpan($serverBadge, 2)
 $layout.Controls.Add($header, 0, 0)
 
 $codexCard = New-Card "Codex" $goodColor
@@ -385,11 +447,13 @@ function New-Button {
   $button.Text = $Text
   $button.Dock = "Fill"
   $button.Margin = New-Object System.Windows.Forms.Padding(0, 5, 8, 0)
-  $button.BackColor = [System.Drawing.Color]::FromArgb(36, 44, 56)
-  $button.ForeColor = [System.Drawing.Color]::White
+  $button.BackColor = $buttonColor
+  $button.ForeColor = $whiteColor
   $button.FlatStyle = "Flat"
   $button.Font = $buttonFont
   $button.FlatAppearance.BorderColor = $lineColor
+  $button.Add_MouseEnter({ param($sender, $event) $sender.BackColor = $buttonHotColor })
+  $button.Add_MouseLeave({ param($sender, $event) $sender.BackColor = $buttonColor })
   return $button
 }
 
@@ -411,6 +475,8 @@ function Update-Ui {
 
   $codexRemaining = Get-PercentText $codexMain
   $claudeRemaining = Get-PercentText $claudeMain
+  $codexRemainingValue = Get-RemainingValue $codexMain
+  $claudeRemainingValue = Get-RemainingValue $claudeMain
   $codexUsed = if ($codexMain -and $null -ne $codexMain.remaining_percent) { "{0}%" -f (100 - [int]$codexMain.remaining_percent) } else { "--" }
   $claudeUsed = if ($claudeMain -and $null -ne $claudeMain.used_percent) { "{0}%" -f [int]$claudeMain.used_percent } elseif ($claudeMain -and $null -ne $claudeMain.remaining_percent) { "{0}%" -f (100 - [int]$claudeMain.remaining_percent) } else { "--" }
 
@@ -419,12 +485,14 @@ function Update-Ui {
   $codexCard.Sub.Text = "{0} {1}  /  {2} {3}" -f (U "0035 C2DC AC04"), (Get-PercentText $codexFiveHour), (U "C8FC AC04"), (Get-PercentText $codexWeekly)
   $codexCard.Reset.Text = "{0}  {1}" -f (U "B9AC C14B"), (Get-ResetText $codexMain)
   $codexCard.Age.Text = "{0}  {1}" -f (U "AC31 C2E0"), (Get-StatusAgeText $codex)
+  Set-Meter $codexCard $codexRemainingValue
 
   $claudeCard.Remaining.Text = $claudeRemaining
   $claudeCard.Used.Text = "{0} {1}" -f (U "C0AC C6A9"), $claudeUsed
   $claudeCard.Sub.Text = "{0} {1}  /  {2} {3}" -f (U "C138 C158"), (Get-PercentText $claudeFiveHour), (U "C8FC AC04"), (Get-PercentText $claudeSevenDay)
   $claudeCard.Reset.Text = "{0}  {1}" -f (U "B9AC C14B"), (Get-ResetText $claudeMain)
   $claudeCard.Age.Text = "{0}  {1}" -f (U "AC31 C2E0"), (Get-StatusAgeText $claude)
+  Set-Meter $claudeCard $claudeRemainingValue
 }
 
 $refreshButton.Add_Click({ Update-Ui })
