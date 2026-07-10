@@ -418,52 +418,129 @@ if ($SelfTest) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeWindowDrag
+{
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+}
+"@
 
 Start-Collectors
 
-$font = New-Object System.Drawing.Font("Segoe UI", 9)
-$smallFont = New-Object System.Drawing.Font("Segoe UI", 8)
+$font = New-Object System.Drawing.Font("Segoe UI", 8.8)
+$smallFont = New-Object System.Drawing.Font("Segoe UI", 7.8)
 $monoFont = New-Object System.Drawing.Font("Cascadia Mono", 8)
-$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 12, [System.Drawing.FontStyle]::Bold)
+$titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 11, [System.Drawing.FontStyle]::Bold)
 $valueFont = New-Object System.Drawing.Font("Cascadia Mono", 13, [System.Drawing.FontStyle]::Bold)
-$buttonFont = New-Object System.Drawing.Font("Segoe UI", 9)
-$bgColor = [System.Drawing.Color]::FromArgb(18, 21, 28)
-$cardColor = [System.Drawing.Color]::FromArgb(27, 32, 42)
-$cardAltColor = [System.Drawing.Color]::FromArgb(32, 39, 52)
-$mutedColor = [System.Drawing.Color]::FromArgb(155, 167, 184)
-$dimColor = [System.Drawing.Color]::FromArgb(119, 130, 149)
-$lineColor = [System.Drawing.Color]::FromArgb(48, 56, 72)
-$codexColor = [System.Drawing.Color]::FromArgb(155, 209, 255)
-$claudeColor = [System.Drawing.Color]::FromArgb(228, 179, 99)
+$buttonFont = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5, [System.Drawing.FontStyle]::Bold)
+$bgColor = [System.Drawing.Color]::FromArgb(14, 17, 22)
+$chromeColor = [System.Drawing.Color]::FromArgb(20, 24, 31)
+$cardColor = [System.Drawing.Color]::FromArgb(24, 29, 38)
+$cardAltColor = [System.Drawing.Color]::FromArgb(35, 42, 54)
+$mutedColor = [System.Drawing.Color]::FromArgb(156, 166, 180)
+$dimColor = [System.Drawing.Color]::FromArgb(102, 113, 130)
+$lineColor = [System.Drawing.Color]::FromArgb(42, 50, 64)
+$codexColor = [System.Drawing.Color]::FromArgb(111, 191, 255)
+$claudeColor = [System.Drawing.Color]::FromArgb(235, 184, 102)
 $goodColor = [System.Drawing.Color]::FromArgb(110, 207, 154)
 $warnColor = [System.Drawing.Color]::FromArgb(230, 189, 95)
 $badColor = [System.Drawing.Color]::FromArgb(238, 106, 106)
-$buttonColor = [System.Drawing.Color]::FromArgb(32, 39, 52)
-$buttonHotColor = [System.Drawing.Color]::FromArgb(42, 49, 64)
+$buttonColor = [System.Drawing.Color]::FromArgb(30, 36, 47)
+$buttonHotColor = [System.Drawing.Color]::FromArgb(43, 51, 66)
 $whiteColor = [System.Drawing.Color]::FromArgb(238, 242, 248)
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Codex Claude Usage"
-$form.Size = New-Object System.Drawing.Size(400, 460)
-$form.MinimumSize = New-Object System.Drawing.Size(390, 440)
+$form.Size = New-Object System.Drawing.Size(410, 456)
+$form.MinimumSize = New-Object System.Drawing.Size(400, 436)
 $form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "None"
 $form.TopMost = $false
 $form.ShowInTaskbar = $true
 $form.BackColor = $bgColor
 $form.ForeColor = [System.Drawing.Color]::White
 $form.Font = $font
 
+$rootLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$rootLayout.Dock = "Fill"
+$rootLayout.RowCount = 2
+$rootLayout.ColumnCount = 1
+$rootLayout.Padding = New-Object System.Windows.Forms.Padding(1)
+$rootLayout.BackColor = $lineColor
+$rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 34))) | Out-Null
+$rootLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$form.Controls.Add($rootLayout)
+
+$titleBar = New-Object System.Windows.Forms.TableLayoutPanel
+$titleBar.Dock = "Fill"
+$titleBar.ColumnCount = 4
+$titleBar.RowCount = 1
+$titleBar.BackColor = $chromeColor
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
+$rootLayout.Controls.Add($titleBar, 0, 0)
+
+$brandMark = New-Object System.Windows.Forms.Panel
+$brandMark.Dock = "Fill"
+$brandMark.Margin = New-Object System.Windows.Forms.Padding(10, 9, 8, 9)
+$brandMark.BackColor = $codexColor
+$titleText = New-Object System.Windows.Forms.Label
+$titleText.Text = "Codex Claude Usage"
+$titleText.Dock = "Fill"
+$titleText.TextAlign = "MiddleLeft"
+$titleText.ForeColor = $whiteColor
+$titleText.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.7, [System.Drawing.FontStyle]::Bold)
+$minButton = New-Object System.Windows.Forms.Label
+$minButton.Text = "-"
+$minButton.Dock = "Fill"
+$minButton.TextAlign = "MiddleCenter"
+$minButton.ForeColor = $mutedColor
+$minButton.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
+$closeButtonChrome = New-Object System.Windows.Forms.Label
+$closeButtonChrome.Text = "x"
+$closeButtonChrome.Dock = "Fill"
+$closeButtonChrome.TextAlign = "MiddleCenter"
+$closeButtonChrome.ForeColor = $mutedColor
+$closeButtonChrome.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
+foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
+  $dragControl.Add_MouseDown({
+    param($sender, $event)
+    if ($event.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+      [NativeWindowDrag]::ReleaseCapture() | Out-Null
+      [NativeWindowDrag]::SendMessage($form.Handle, 0xA1, 0x2, 0) | Out-Null
+    }
+  })
+}
+$minButton.Add_MouseEnter({ $minButton.BackColor = $buttonHotColor })
+$minButton.Add_MouseLeave({ $minButton.BackColor = $chromeColor })
+$minButton.Add_Click({ $form.WindowState = "Minimized" })
+$closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(76, 38, 44); $closeButtonChrome.ForeColor = $whiteColor })
+$closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.BackColor = $chromeColor; $closeButtonChrome.ForeColor = $mutedColor })
+$closeButtonChrome.Add_Click({ $form.Close() })
+$titleBar.Controls.Add($brandMark, 0, 0)
+$titleBar.Controls.Add($titleText, 1, 0)
+$titleBar.Controls.Add($minButton, 2, 0)
+$titleBar.Controls.Add($closeButtonChrome, 3, 0)
+
 $layout = New-Object System.Windows.Forms.TableLayoutPanel
 $layout.Dock = "Fill"
-$layout.Padding = New-Object System.Windows.Forms.Padding(14)
+$layout.Padding = New-Object System.Windows.Forms.Padding(16, 12, 16, 14)
 $layout.RowCount = 4
 $layout.ColumnCount = 1
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 50))) | Out-Null
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 58))) | Out-Null
 $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
 $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 86))) | Out-Null
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 76))) | Out-Null
 $layout.BackColor = $bgColor
-$form.Controls.Add($layout)
+$rootLayout.Controls.Add($layout, 0, 1)
 
 function New-Label {
   param(
@@ -555,7 +632,20 @@ function New-Card {
   $panel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 10)
   $panel.Padding = New-Object System.Windows.Forms.Padding(12)
   $panel.BackColor = $cardColor
-  $panel.BorderStyle = "FixedSingle"
+  $panel.BorderStyle = "None"
+  $panel.Add_Paint({
+    param($sender, $event)
+    $graphics = $event.Graphics
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $rect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
+    $brush = New-Object System.Drawing.SolidBrush($cardColor)
+    $pen = New-Object System.Drawing.Pen($lineColor)
+    $graphics.FillRectangle($brush, $rect)
+    $graphics.DrawLine($pen, 0, 0, $sender.Width, 0)
+    $graphics.DrawLine($pen, 0, $sender.Height - 1, $sender.Width, $sender.Height - 1)
+    $brush.Dispose()
+    $pen.Dispose()
+  })
 
   $cardLayout = New-Object System.Windows.Forms.TableLayoutPanel
   $cardLayout.Dock = "Fill"
@@ -569,7 +659,7 @@ function New-Card {
   $panel.Controls.Add($cardLayout)
 
   $titleLabel = New-Label $Title $font $whiteColor
-  $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+  $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.5, [System.Drawing.FontStyle]::Bold)
   $stateLabel = New-Label (U "D655 C778 0020 C911") $monoFont $mutedColor
   $stateLabel.AutoSize = $false
   $stateLabel.TextAlign = "MiddleRight"
@@ -668,16 +758,28 @@ function New-Card {
 
 $header = New-Object System.Windows.Forms.TableLayoutPanel
 $header.Dock = "Fill"
-$header.ColumnCount = 1
+$header.ColumnCount = 2
 $header.RowCount = 2
 $header.BackColor = $bgColor
 $header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 18))) | Out-Null
+$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 78))) | Out-Null
+$header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 20))) | Out-Null
 $header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$headerSub = New-Label "AI CLI Usage" $monoFont $mutedColor
-$headerTitle = New-Label "Codex, Claude" $titleFont $whiteColor
+$headerSub = New-Label "LOCAL QUOTA INSTRUMENT" $monoFont $mutedColor
+$headerTitle = New-Label "Codex / Claude" $titleFont $whiteColor
+$livePill = New-Object System.Windows.Forms.Label
+$livePill.Text = "LIVE"
+$livePill.Dock = "Top"
+$livePill.Height = 22
+$livePill.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
+$livePill.TextAlign = "MiddleCenter"
+$livePill.ForeColor = $goodColor
+$livePill.BackColor = $cardColor
+$livePill.Font = $monoFont
 $header.Controls.Add($headerSub, 0, 0)
 $header.Controls.Add($headerTitle, 0, 1)
+$header.Controls.Add($livePill, 1, 0)
+$header.SetRowSpan($livePill, 2)
 $layout.Controls.Add($header, 0, 0)
 
 $codexCard = New-Card "Codex" "5h" "Week"
@@ -702,6 +804,7 @@ $topMost.Text = U "D56D C0C1 0020 C704"
 $topMost.Checked = $false
 $topMost.ForeColor = $mutedColor
 $topMost.BackColor = $bgColor
+$topMost.FlatStyle = "Flat"
 $topMost.AutoSize = $true
 $topMost.Add_CheckedChanged({ $form.TopMost = $topMost.Checked })
 $controls.Controls.Add($topMost, 0, 0)
@@ -711,6 +814,7 @@ $startup.Text = U "C2DC C791 0020 C2DC 0020 C2E4 D589"
 $startup.Checked = Test-StartupRegistration
 $startup.ForeColor = $mutedColor
 $startup.BackColor = $bgColor
+$startup.FlatStyle = "Flat"
 $startup.AutoSize = $true
 $startup.Add_CheckedChanged({ Set-StartupRegistration -Enabled $startup.Checked })
 $controls.Controls.Add($startup, 1, 0)
@@ -718,24 +822,24 @@ $controls.SetColumnSpan($startup, 2)
 
 function New-Button {
   param([string]$Text)
-  $button = New-Object System.Windows.Forms.Button
+  $button = New-Object System.Windows.Forms.Label
   $button.Text = $Text
   $button.Dock = "Fill"
-  $button.Margin = New-Object System.Windows.Forms.Padding(0, 5, 8, 0)
+  $button.Margin = New-Object System.Windows.Forms.Padding(0, 6, 8, 0)
   $button.BackColor = $buttonColor
   $button.ForeColor = $whiteColor
-  $button.FlatStyle = "Flat"
   $button.Font = $buttonFont
-  $button.FlatAppearance.BorderColor = $lineColor
-  $button.FlatAppearance.BorderSize = 1
+  $button.TextAlign = "MiddleCenter"
+  $button.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $button.BorderStyle = "None"
   $button.Add_MouseEnter({ param($sender, $event) $sender.BackColor = $buttonHotColor })
   $button.Add_MouseLeave({ param($sender, $event) $sender.BackColor = $buttonColor })
   return $button
 }
 
-$refreshButton = New-Button (U "C0C8 B85C ACE0 CE68")
+$refreshButton = New-Button "Refresh"
 $setupButton = New-Button "Setup"
-$dashboardButton = New-Button (U "C804 CCB4 0020 B300 C2DC BCF4 B4DC")
+$dashboardButton = New-Button "Dashboard"
 $controls.Controls.Add($refreshButton, 0, 1)
 $controls.Controls.Add($setupButton, 1, 1)
 $controls.Controls.Add($dashboardButton, 2, 1)
