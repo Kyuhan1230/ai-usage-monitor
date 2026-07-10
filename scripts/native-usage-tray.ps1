@@ -779,7 +779,8 @@ $form.Add_FormClosing({
 
   if (-not $script:ExitRequested) {
     $event.Cancel = $true
-    $form.Hide()
+    $form.ShowInTaskbar = $true
+    $form.WindowState = "Minimized"
     return
   }
 
