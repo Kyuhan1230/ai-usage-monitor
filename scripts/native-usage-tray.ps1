@@ -98,6 +98,24 @@ function Get-PercentText {
   return "{0}%" -f [int]$Limit.remaining_percent
 }
 
+function Get-UsageWindow {
+  param($Status, [string]$Window)
+
+  if ($null -eq $Status -or $null -eq $Status.usage_windows) {
+    return $null
+  }
+  return @($Status.usage_windows | Where-Object { $_.window -eq $Window } | Select-Object -First 1)[0]
+}
+
+function Get-UsageWindowText {
+  param($UsageWindow)
+
+  if ($null -eq $UsageWindow -or $null -eq $UsageWindow.requests) {
+    return "--"
+  }
+  return "{0} req" -f [int]$UsageWindow.requests
+}
+
 function Get-ResetText {
   param($Limit)
 
@@ -729,6 +747,8 @@ function Update-Ui {
   $codexWeekly = Get-Limit $codex "weekly"
   $claudeFiveHour = Get-Limit $claude "five_hour"
   $claudeSevenDay = Get-Limit $claude "seven_day"
+  $claudeDayWindow = Get-UsageWindow $claude "24h"
+  $claudeWeekWindow = Get-UsageWindow $claude "7d"
 
   $codexMain = if ($codexFiveHour) { $codexFiveHour } else { $codexWeekly }
   $claudeMain = if ($claudeFiveHour) { $claudeFiveHour } else { $claudeSevenDay }
@@ -746,8 +766,8 @@ function Update-Ui {
   Set-Dial $codexCard $codexRemainingValue
 
   $claudeCard.State.Text = Get-StateText $claude
-  $claudeCard.First.Text = Get-PercentText $claudeFiveHour
-  $claudeCard.Second.Text = Get-PercentText $claudeSevenDay
+  $claudeCard.First.Text = if ($claudeFiveHour) { Get-PercentText $claudeFiveHour } else { Get-UsageWindowText $claudeDayWindow }
+  $claudeCard.Second.Text = if ($claudeSevenDay) { Get-PercentText $claudeSevenDay } else { Get-UsageWindowText $claudeWeekWindow }
   $claudeCard.Reset.Text = Get-ResetText $claudeMain
   $claudeCard.Age.Text = Get-StatusAgeText $claude
   Set-Dial $claudeCard $claudeRemainingValue

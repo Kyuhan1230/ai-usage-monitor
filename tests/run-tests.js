@@ -870,6 +870,36 @@ async function testClaudeUsagePollerAcceptsSubscriptionSummary() {
   ]);
 }
 
+async function testClaudeUsagePollerPreservesLimitsOnSummaryOnly() {
+  const tempDir = makeTempDir("claude-summary-preserve-limits");
+  const statusPath = path.join(tempDir, "claude-status.json");
+  fs.writeFileSync(
+    statusPath,
+    `${JSON.stringify({
+      captured_at: "2026-07-10T10:00:00+09:00",
+      parse_status: "ok",
+      limits: [
+        { type: "five_hour", used_percent: 40, remaining_percent: 60, reset_text: "resets 07/10 18:00" },
+        { type: "seven_day", used_percent: 10, remaining_percent: 90, reset_text: "resets 07/14 09:00" },
+      ],
+    })}\n`,
+    "utf8",
+  );
+  const { buildStatus, mergePreviousLimits } = require(path.join(ROOT, "src", "node", "claude-usage-poller.js"));
+  const rawText = [
+    "You are currently using your subscription to power your Claude Code usage",
+    "",
+    "Last 24h - 242 requests - 16 sessions",
+    "Last 7d - 1991 requests - 42 sessions",
+  ].join("\n");
+
+  const status = mergePreviousLimits(statusPath, buildStatus(rawText));
+  assert.strictEqual(status.parse_status, "ok");
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 60);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "seven_day").remaining_percent, 90);
+  assert.strictEqual(status.limits_preserved_from, "2026-07-10T10:00:00+09:00");
+}
+
 async function testClaudeStatusHookInstallDoesNotOverwriteExistingCommand() {
   const tempDir = makeTempDir("claude-status-hook-install");
   const settingsPath = path.join(tempDir, "settings.json");
@@ -1251,6 +1281,7 @@ async function main() {
   await testClaudeStatusHookPreservesFreshUsageCommandStatus();
   await testClaudeUsagePollerParsesUsageCommand();
   await testClaudeUsagePollerAcceptsSubscriptionSummary();
+  await testClaudeUsagePollerPreservesLimitsOnSummaryOnly();
   await testClaudeStatusHookInstallDoesNotOverwriteExistingCommand();
   await testClaudeStatusHookInstallReplacesLegacyAppCommand();
   await testDashboardRingsUseRemainingThresholds();

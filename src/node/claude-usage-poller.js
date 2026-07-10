@@ -166,6 +166,29 @@ function buildStatus(rawText, parseError = null) {
   };
 }
 
+function readJsonSafe(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
+  } catch (error) {
+    return null;
+  }
+}
+
+function mergePreviousLimits(statusPath, status) {
+  if (status.parse_status !== "ok" || status.limits.length > 0) {
+    return status;
+  }
+  const previous = readJsonSafe(statusPath);
+  if (!previous || !Array.isArray(previous.limits) || previous.limits.length === 0) {
+    return status;
+  }
+  return {
+    ...status,
+    limits: previous.limits,
+    limits_preserved_from: previous.captured_at || null,
+  };
+}
+
 function captureOnce(options, callback) {
   execFile(options.claudeCommand, ["/usage"], {
     windowsHide: true,
@@ -174,7 +197,7 @@ function captureOnce(options, callback) {
     maxBuffer: 512 * 1024,
   }, (error, stdout, stderr) => {
     const rawText = [stdout, stderr].filter(Boolean).join("\n");
-    const status = buildStatus(rawText, error ? error.message : null);
+    const status = mergePreviousLimits(options.statusPath, buildStatus(rawText, error ? error.message : null));
     fs.mkdirSync(path.dirname(options.statusPath), { recursive: true });
     writeJsonAtomic(options.statusPath, {
       ...status,
@@ -231,6 +254,7 @@ if (require.main === module) {
 module.exports = {
   buildStatus,
   captureOnce,
+  mergePreviousLimits,
   parseArgs,
   parseUsageText,
   parseUsageWindows,
