@@ -77,7 +77,10 @@ SESSIONS_DIR = env_path("CODEX_USAGE_SESSIONS_DIR", usage_report.default_session
 CLAUDE_SESSIONS_DIR = env_path("CODEX_USAGE_CLAUDE_SESSIONS_DIR", claude_usage_report.default_sessions_dir())
 REFRESH_SECONDS = env_int("CODEX_USAGE_REFRESH_SECONDS", status_dashboard.DEFAULT_REFRESH_SECONDS)
 AUTO_STATUS_POLL = env_bool("CODEX_USAGE_AUTO_STATUS_POLL", True)
-POLL_INTERVAL_MS = env_int("CODEX_USAGE_POLL_INTERVAL_MS", status_dashboard.DEFAULT_POLL_INTERVAL_MS)
+POLL_INTERVAL_MS = env_int(
+    "CODEX_USAGE_CODEX_POLL_INTERVAL_MS",
+    env_int("CODEX_USAGE_POLL_INTERVAL_MS", status_dashboard.DEFAULT_POLL_INTERVAL_MS),
+)
 CODEX_COMMAND = os.getenv("CODEX_USAGE_CODEX_COMMAND", status_dashboard.DEFAULT_CODEX_COMMAND)
 NODE_COMMAND = os.getenv("CODEX_USAGE_NODE_COMMAND", status_dashboard.DEFAULT_NODE_COMMAND)
 
@@ -94,7 +97,7 @@ def current_usage_aggregate() -> dict[tuple[str, str], usage_report.UsageTotals]
         `(date, model)` 키를 가진 사용량 집계 딕셔너리.
     """
 
-    return usage_report.aggregate_usage(SESSIONS_DIR, usage_file_cache)
+    return usage_report.aggregate_usage(SESSIONS_DIR, usage_file_cache, usage_report.DEFAULT_FILE_CACHE_PATH)
 
 
 def current_claude_usage_aggregate() -> dict[tuple[str, str], claude_usage_report.UsageTotals]:

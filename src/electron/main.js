@@ -19,8 +19,13 @@ const CLAUDE_STATUS_PATH = path.join(STATUS_DIR, "claude-status.json");
 const HISTORY_DIR = path.join(STATUS_DIR, "history");
 const POLLER_PID_PATH = path.join(STATUS_DIR, "poller.pid");
 const CLAUDE_POLLER_PID_PATH = path.join(STATUS_DIR, "claude-poller.pid");
-const CODEX_POLL_INTERVAL_MS = 3 * 60 * 1000;
-const CLAUDE_POLL_INTERVAL_MS = 3 * 60 * 1000;
+const DEFAULT_FAST_POLL_INTERVAL_MS = 60 * 1000;
+const CODEX_POLL_INTERVAL_MS = parsePositiveInt(process.env.CODEX_USAGE_CODEX_POLL_INTERVAL_MS)
+  || parsePositiveInt(process.env.CODEX_USAGE_POLL_INTERVAL_MS)
+  || DEFAULT_FAST_POLL_INTERVAL_MS;
+const CLAUDE_POLL_INTERVAL_MS = parsePositiveInt(process.env.CODEX_USAGE_CLAUDE_POLL_INTERVAL_MS)
+  || parsePositiveInt(process.env.CODEX_USAGE_POLL_INTERVAL_MS)
+  || DEFAULT_FAST_POLL_INTERVAL_MS;
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_HOOK_PATH = path.join(ROOT, "src", "node", "claude-status-hook.js");
 
@@ -34,6 +39,11 @@ let compactWindow = null;
 let dashboardWindow = null;
 let setupWindow = null;
 let isQuitting = false;
+
+function parsePositiveInt(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -367,7 +377,7 @@ function showCompactWindow() {
     minHeight: 280,
     frame: false,
     resizable: true,
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     skipTaskbar: false,
     opacity: 0.96,
     backgroundColor: "#12151c",
@@ -532,7 +542,7 @@ function buildSnapshot() {
       limits: statusByType(claude),
     },
     window: {
-      alwaysOnTop: compactWindow ? compactWindow.isAlwaysOnTop() : true,
+      alwaysOnTop: compactWindow ? compactWindow.isAlwaysOnTop() : false,
       opacity: compactWindow ? compactWindow.getOpacity() : 0.96,
     },
     launchAtLogin: app.getLoginItemSettings().openAtLogin,

@@ -13,7 +13,23 @@ $HistoryDir = Join-Path $StatusDir "history"
 $CodexPidPath = Join-Path $StatusDir "poller.pid"
 $ClaudePidPath = Join-Path $StatusDir "claude-poller.pid"
 $DashboardUrl = "http://127.0.0.1:8767"
-$PollIntervalMs = 180000
+$DefaultPollIntervalMs = 60000
+function Get-PollIntervalMs {
+  param([string]$SpecificValue, [string]$FallbackValue)
+
+  foreach ($candidate in @($SpecificValue, $FallbackValue)) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    $parsedPollIntervalMs = 0
+    if ([int]::TryParse($candidate, [ref]$parsedPollIntervalMs) -and $parsedPollIntervalMs -gt 0) {
+      return $parsedPollIntervalMs
+    }
+  }
+  return $DefaultPollIntervalMs
+}
+$CodexPollIntervalMs = Get-PollIntervalMs $env:CODEX_USAGE_CODEX_POLL_INTERVAL_MS $env:CODEX_USAGE_POLL_INTERVAL_MS
+$ClaudePollIntervalMs = Get-PollIntervalMs $env:CODEX_USAGE_CLAUDE_POLL_INTERVAL_MS $env:CODEX_USAGE_POLL_INTERVAL_MS
 $DashboardProcess = $null
 $CodexPollerProcess = $null
 $ClaudePollerProcess = $null
@@ -151,7 +167,7 @@ function Start-Collectors {
     $codexScript,
     "--status-path", $CodexStatusPath,
     "--history-dir", $HistoryDir,
-    "--poll-interval-ms", "$PollIntervalMs",
+    "--poll-interval-ms", "$CodexPollIntervalMs",
     "--codex-command", "codex.exe"
   )
   Set-Content -LiteralPath $CodexPidPath -Value $script:CodexPollerProcess.Id -Encoding UTF8
@@ -159,7 +175,7 @@ function Start-Collectors {
   $script:ClaudePollerProcess = Start-HiddenProcess $node @(
     $claudeScript,
     "--status-path", $ClaudeStatusPath,
-    "--poll-interval-ms", "$PollIntervalMs",
+    "--poll-interval-ms", "$ClaudePollIntervalMs",
     "--claude-command", "claude.exe"
   )
   Set-Content -LiteralPath $ClaudePidPath -Value $script:ClaudePollerProcess.Id -Encoding UTF8
@@ -193,6 +209,153 @@ function Start-Dashboard {
     )
   }
   Start-Process $DashboardUrl | Out-Null
+}
+
+function Start-VisibleCommand {
+  param([string]$Command)
+
+  Start-Process "powershell.exe" -ArgumentList @("-NoExit", "-Command", $Command) | Out-Null
+}
+
+function Test-CommandAvailable {
+  param([string]$Command)
+
+  return $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
+}
+
+function Get-ClaudeSettingsPath {
+  return Join-Path $env:USERPROFILE ".claude\settings.json"
+}
+
+function Get-ClaudeHookPath {
+  return Join-Path $Root "src\node\claude-status-hook.js"
+}
+
+function Test-ClaudeHookInstalled {
+  $settingsPath = Get-ClaudeSettingsPath
+  $hookPath = Get-ClaudeHookPath
+  $settings = Read-JsonSafe $settingsPath
+  if ($null -eq $settings -or $null -eq $settings.statusLine -or [string]::IsNullOrWhiteSpace($settings.statusLine.command)) {
+    return $false
+  }
+  $normalizedCommand = ([string]$settings.statusLine.command).Replace("/", "\").ToLowerInvariant()
+  return $normalizedCommand.Contains("claude-status-hook.js") -or $normalizedCommand.Contains($hookPath.ToLowerInvariant())
+}
+
+function Install-ClaudeHook {
+  try {
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    $hookPath = Get-ClaudeHookPath
+    $settingsPath = Get-ClaudeSettingsPath
+    $process = Start-HiddenProcess $node @(
+      $hookPath,
+      "--install",
+      "--settings-path", $settingsPath
+    )
+    $process.WaitForExit(5000) | Out-Null
+    if ($process.ExitCode -eq 0) {
+      [System.Windows.Forms.MessageBox]::Show((U "0043 006C 0061 0075 0064 0065 0020 0068 006F 006F 006B 0020 C124 CE58 AC00 0020 C644 B8CC B418 C5C8 C2B5 B2C8 002E"), "Codex Claude Usage") | Out-Null
+    } else {
+      [System.Windows.Forms.MessageBox]::Show((U "0043 006C 0061 0075 0064 0065 0020 0068 006F 006F 006B 0020 C124 CE58 C5D0 0020 C2E4 D328 D588 C2B5 B2C8 002E"), "Codex Claude Usage") | Out-Null
+    }
+  } catch {
+    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Codex Claude Usage") | Out-Null
+  }
+}
+
+function New-StatusRow {
+  param(
+    [System.Windows.Forms.TableLayoutPanel]$Parent,
+    [int]$Row,
+    [string]$Label,
+    [bool]$Ok
+  )
+
+  $name = New-Label $Label $font $whiteColor
+  $name.AutoSize = $false
+  $name.Dock = "Fill"
+  $valueText = if ($Ok) { U "C815 C0C1" } else { U "D655 C778 0020 D544 C694" }
+  $valueColor = if ($Ok) { $goodColor } else { $warnColor }
+  $value = New-Label $valueText $monoFont $valueColor
+  $value.AutoSize = $false
+  $value.Dock = "Fill"
+  $value.TextAlign = "MiddleRight"
+  $Parent.Controls.Add($name, 0, $Row)
+  $Parent.Controls.Add($value, 1, $Row)
+}
+
+function Show-SetupWindow {
+  $setup = New-Object System.Windows.Forms.Form
+  $setup.Text = "Codex Claude Usage Setup"
+  $setup.Size = New-Object System.Drawing.Size(440, 360)
+  $setup.MinimumSize = New-Object System.Drawing.Size(420, 340)
+  $setup.StartPosition = "CenterParent"
+  $setup.BackColor = $bgColor
+  $setup.ForeColor = $whiteColor
+  $setup.Font = $font
+
+  $setupLayout = New-Object System.Windows.Forms.TableLayoutPanel
+  $setupLayout.Dock = "Fill"
+  $setupLayout.Padding = New-Object System.Windows.Forms.Padding(16)
+  $setupLayout.ColumnCount = 1
+  $setupLayout.RowCount = 4
+  $setupLayout.BackColor = $bgColor
+  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 48))) | Out-Null
+  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 112))) | Out-Null
+  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44))) | Out-Null
+  $setup.Controls.Add($setupLayout)
+
+  $setupHeader = New-Label "Setup" $titleFont $whiteColor
+  $setupHeader.AutoSize = $false
+  $setupHeader.Dock = "Fill"
+  $setupLayout.Controls.Add($setupHeader, 0, 0)
+
+  $statusPanel = New-Object System.Windows.Forms.TableLayoutPanel
+  $statusPanel.Dock = "Fill"
+  $statusPanel.ColumnCount = 2
+  $statusPanel.RowCount = 4
+  $statusPanel.BackColor = $cardColor
+  $statusPanel.Padding = New-Object System.Windows.Forms.Padding(12)
+  $statusPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 65))) | Out-Null
+  $statusPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 35))) | Out-Null
+  for ($index = 0; $index -lt 4; $index += 1) {
+    $statusPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 22))) | Out-Null
+  }
+  New-StatusRow $statusPanel 0 "Codex CLI" (Test-CommandAvailable "codex.exe")
+  New-StatusRow $statusPanel 1 "Claude Code" (Test-CommandAvailable "claude.exe")
+  New-StatusRow $statusPanel 2 "Claude hook" (Test-ClaudeHookInstalled)
+  New-StatusRow $statusPanel 3 "Dashboard runtime" (Test-CommandAvailable "uvicorn.exe")
+  $setupLayout.Controls.Add($statusPanel, 0, 1)
+
+  $buttonGrid = New-Object System.Windows.Forms.TableLayoutPanel
+  $buttonGrid.Dock = "Top"
+  $buttonGrid.ColumnCount = 2
+  $buttonGrid.RowCount = 2
+  $buttonGrid.BackColor = $bgColor
+  $buttonGrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
+  $buttonGrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
+  $buttonGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 42))) | Out-Null
+  $buttonGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 42))) | Out-Null
+  $codexLoginButton = New-Button "codex login"
+  $claudeAuthButton = New-Button "claude auth"
+  $hookButton = New-Button "Install Claude hook"
+  $openDashboardButton = New-Button "Open dashboard"
+  $buttonGrid.Controls.Add($codexLoginButton, 0, 0)
+  $buttonGrid.Controls.Add($claudeAuthButton, 1, 0)
+  $buttonGrid.Controls.Add($hookButton, 0, 1)
+  $buttonGrid.Controls.Add($openDashboardButton, 1, 1)
+  $setupLayout.Controls.Add($buttonGrid, 0, 2)
+
+  $closeButton = New-Button "Close"
+  $setupLayout.Controls.Add($closeButton, 0, 3)
+
+  $codexLoginButton.Add_Click({ Start-VisibleCommand "codex login" })
+  $claudeAuthButton.Add_Click({ Start-VisibleCommand "claude auth" })
+  $hookButton.Add_Click({ Install-ClaudeHook; $setup.Close(); Show-SetupWindow })
+  $openDashboardButton.Add_Click({ Start-Dashboard })
+  $closeButton.Add_Click({ $setup.Close() })
+  $setup.ShowDialog($form) | Out-Null
 }
 
 function Set-StartupRegistration {
@@ -230,26 +393,31 @@ Start-Collectors
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
 $smallFont = New-Object System.Drawing.Font("Segoe UI", 8)
+$monoFont = New-Object System.Drawing.Font("Cascadia Mono", 8)
 $titleFont = New-Object System.Drawing.Font("Segoe UI Semibold", 12, [System.Drawing.FontStyle]::Bold)
-$valueFont = New-Object System.Drawing.Font("Segoe UI Semibold", 20, [System.Drawing.FontStyle]::Bold)
-$buttonFont = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
-$bgColor = [System.Drawing.Color]::FromArgb(14, 18, 24)
-$cardColor = [System.Drawing.Color]::FromArgb(27, 33, 43)
-$mutedColor = [System.Drawing.Color]::FromArgb(156, 166, 181)
-$lineColor = [System.Drawing.Color]::FromArgb(50, 60, 76)
-$goodColor = [System.Drawing.Color]::FromArgb(108, 211, 148)
-$warnColor = [System.Drawing.Color]::FromArgb(228, 179, 99)
-$badColor = [System.Drawing.Color]::FromArgb(231, 111, 111)
-$buttonColor = [System.Drawing.Color]::FromArgb(36, 44, 56)
-$buttonHotColor = [System.Drawing.Color]::FromArgb(45, 56, 72)
-$whiteColor = [System.Drawing.Color]::White
+$valueFont = New-Object System.Drawing.Font("Cascadia Mono", 13, [System.Drawing.FontStyle]::Bold)
+$buttonFont = New-Object System.Drawing.Font("Segoe UI", 9)
+$bgColor = [System.Drawing.Color]::FromArgb(18, 21, 28)
+$cardColor = [System.Drawing.Color]::FromArgb(27, 32, 42)
+$cardAltColor = [System.Drawing.Color]::FromArgb(32, 39, 52)
+$mutedColor = [System.Drawing.Color]::FromArgb(155, 167, 184)
+$dimColor = [System.Drawing.Color]::FromArgb(119, 130, 149)
+$lineColor = [System.Drawing.Color]::FromArgb(48, 56, 72)
+$codexColor = [System.Drawing.Color]::FromArgb(155, 209, 255)
+$claudeColor = [System.Drawing.Color]::FromArgb(228, 179, 99)
+$goodColor = [System.Drawing.Color]::FromArgb(110, 207, 154)
+$warnColor = [System.Drawing.Color]::FromArgb(230, 189, 95)
+$badColor = [System.Drawing.Color]::FromArgb(238, 106, 106)
+$buttonColor = [System.Drawing.Color]::FromArgb(32, 39, 52)
+$buttonHotColor = [System.Drawing.Color]::FromArgb(42, 49, 64)
+$whiteColor = [System.Drawing.Color]::FromArgb(238, 242, 248)
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Codex Claude Usage"
-$form.Size = New-Object System.Drawing.Size(390, 456)
-$form.MinimumSize = New-Object System.Drawing.Size(360, 420)
+$form.Size = New-Object System.Drawing.Size(400, 460)
+$form.MinimumSize = New-Object System.Drawing.Size(390, 440)
 $form.StartPosition = "CenterScreen"
-$form.TopMost = $true
+$form.TopMost = $false
 $form.ShowInTaskbar = $true
 $form.BackColor = $bgColor
 $form.ForeColor = [System.Drawing.Color]::White
@@ -257,13 +425,14 @@ $form.Font = $font
 
 $layout = New-Object System.Windows.Forms.TableLayoutPanel
 $layout.Dock = "Fill"
-$layout.Padding = New-Object System.Windows.Forms.Padding(16)
+$layout.Padding = New-Object System.Windows.Forms.Padding(14)
 $layout.RowCount = 4
 $layout.ColumnCount = 1
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 48))) | Out-Null
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 50))) | Out-Null
 $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
 $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 74))) | Out-Null
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 86))) | Out-Null
+$layout.BackColor = $bgColor
 $form.Controls.Add($layout)
 
 function New-Label {
@@ -305,128 +474,203 @@ function Get-RemainingValue {
   return [int]$Limit.remaining_percent
 }
 
-function Set-Meter {
+function Test-FreshStatus {
+  param($Status)
+
+  if ($null -eq $Status -or [string]::IsNullOrWhiteSpace($Status.captured_at)) {
+    return $false
+  }
+  try {
+    $captured = [DateTimeOffset]::Parse([string]$Status.captured_at)
+    return (([DateTimeOffset]::Now - $captured).TotalMinutes -le 10)
+  } catch {
+    return $false
+  }
+}
+
+function Get-StateText {
+  param($Status)
+
+  if ($null -eq $Status -or $Status.parse_status -ne "ok") {
+    return U "D655 C778 0020 D544 C694"
+  }
+  if (Test-FreshStatus $Status) {
+    return U "CD5C C2E0"
+  }
+  return U "C9C0 C5F0"
+}
+
+function Set-Dial {
   param($Card, $Percent)
 
   $tone = Get-ToneColor $Percent
-  $Card.MeterFill.BackColor = $tone
-  $Card.Remaining.ForeColor = $tone
-  $width = 0
-  if ($null -ne $Percent -and $Card.MeterBack.Width -gt 0) {
-    $width = [Math]::Max(2, [Math]::Floor($Card.MeterBack.Width * ([int]$Percent / 100)))
+  $text = if ($null -eq $Percent) { "--" } else { "{0}%" -f [int]$Percent }
+  $Card.Dial.Tag = @{
+    Percent = if ($null -eq $Percent) { 0 } else { [int]$Percent }
+    Text = $text
+    Tone = $tone
   }
-  $Card.MeterFill.Width = $width
+  $Card.Dial.Invalidate()
 }
 
 function New-Card {
-  param([string]$Title, [System.Drawing.Color]$Accent)
+  param(
+    [string]$Title,
+    [string]$FirstLabel,
+    [string]$SecondLabel
+  )
 
   $panel = New-Object System.Windows.Forms.Panel
   $panel.Dock = "Fill"
-  $panel.Margin = New-Object System.Windows.Forms.Padding(0, 5, 0, 8)
-  $panel.Padding = New-Object System.Windows.Forms.Padding(14)
+  $panel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 10)
+  $panel.Padding = New-Object System.Windows.Forms.Padding(12)
   $panel.BackColor = $cardColor
-
-  $accentBar = New-Object System.Windows.Forms.Panel
-  $accentBar.Dock = "Top"
-  $accentBar.Height = 3
-  $accentBar.BackColor = $Accent
-  $panel.Controls.Add($accentBar)
+  $panel.BorderStyle = "FixedSingle"
 
   $cardLayout = New-Object System.Windows.Forms.TableLayoutPanel
   $cardLayout.Dock = "Fill"
   $cardLayout.ColumnCount = 2
-  $cardLayout.RowCount = 6
-  $cardLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 54))) | Out-Null
-  $cardLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 46))) | Out-Null
+  $cardLayout.RowCount = 2
+  $cardLayout.BackColor = $cardColor
+  $cardLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 82))) | Out-Null
+  $cardLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
   $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
-  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 48))) | Out-Null
-  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 14))) | Out-Null
-  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 26))) | Out-Null
-  $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 24))) | Out-Null
   $cardLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
   $panel.Controls.Add($cardLayout)
 
-  $titleLabel = New-Label $Title $titleFont $Accent
-  $remainingValue = New-Label "--" $valueFont $whiteColor
-  $usedLabel = New-Label ((U "C0AC C6A9") + " --") $font $mutedColor
-  $subLabel = New-Label "--" $font $mutedColor
-  $resetLabel = New-Label (U "0072 0065 0073 0065 0074 0020 C815 BCF4 0020 C5C6 C74C") $smallFont $mutedColor
-  $ageLabel = New-Label (U "AC31 C2E0 0020 AE30 B85D 0020 C5C6 C74C") $smallFont $mutedColor
-  $meterBack = New-Object System.Windows.Forms.Panel
-  $meterBack.Dock = "Fill"
-  $meterBack.Height = 8
-  $meterBack.Margin = New-Object System.Windows.Forms.Padding(0, 3, 0, 3)
-  $meterBack.BackColor = [System.Drawing.Color]::FromArgb(40, 49, 63)
-  $meterFill = New-Object System.Windows.Forms.Panel
-  $meterFill.Dock = "Left"
-  $meterFill.Width = 0
-  $meterFill.BackColor = $Accent
-  $meterBack.Controls.Add($meterFill)
+  $titleLabel = New-Label $Title $font $whiteColor
+  $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9, [System.Drawing.FontStyle]::Bold)
+  $stateLabel = New-Label (U "D655 C778 0020 C911") $monoFont $mutedColor
+  $stateLabel.AutoSize = $false
+  $stateLabel.TextAlign = "MiddleRight"
+  $stateLabel.Dock = "Fill"
+
+  $dial = New-Object System.Windows.Forms.Panel
+  $dial.Width = 70
+  $dial.Height = 70
+  $dial.Margin = New-Object System.Windows.Forms.Padding(0, 4, 12, 0)
+  $dial.BackColor = $cardColor
+  $dial.Tag = @{
+    Percent = 0
+    Text = "--"
+    Tone = $lineColor
+  }
+  $dial.Add_Paint({
+    param($sender, $event)
+
+    $graphics = $event.Graphics
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $bounds = New-Object System.Drawing.Rectangle(1, 1, 68, 68)
+    $textBounds = New-Object System.Drawing.RectangleF(1, 1, 68, 68)
+    $trackBrush = New-Object System.Drawing.SolidBrush($cardAltColor)
+    $graphics.FillEllipse($trackBrush, $bounds)
+    $trackBrush.Dispose()
+
+    $state = $sender.Tag
+    $percent = [Math]::Max(0, [Math]::Min(100, [int]$state.Percent))
+    if ($percent -gt 0) {
+      $toneBrush = New-Object System.Drawing.SolidBrush($state.Tone)
+      $graphics.FillPie($toneBrush, $bounds, -90, [float](360 * $percent / 100))
+      $toneBrush.Dispose()
+    }
+
+    $inner = New-Object System.Drawing.Rectangle(9, 9, 52, 52)
+    $innerBrush = New-Object System.Drawing.SolidBrush($cardColor)
+    $graphics.FillEllipse($innerBrush, $inner)
+    $innerBrush.Dispose()
+
+    $textBrush = New-Object System.Drawing.SolidBrush($whiteColor)
+    $format = New-Object System.Drawing.StringFormat
+    $format.Alignment = [System.Drawing.StringAlignment]::Center
+    $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $graphics.DrawString([string]$state.Text, $valueFont, $textBrush, $textBounds, $format)
+    $format.Dispose()
+    $textBrush.Dispose()
+  })
+
+  $copyLayout = New-Object System.Windows.Forms.TableLayoutPanel
+  $copyLayout.Dock = "Fill"
+  $copyLayout.ColumnCount = 2
+  $copyLayout.RowCount = 4
+  $copyLayout.BackColor = $cardColor
+  $copyLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 64))) | Out-Null
+  $copyLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+  $copyLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 22))) | Out-Null
+  $copyLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 22))) | Out-Null
+  $copyLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 22))) | Out-Null
+  $copyLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+
+  $firstName = New-Label $FirstLabel $monoFont $mutedColor
+  $firstValue = New-Label "--" $valueFont $whiteColor
+  $secondName = New-Label $SecondLabel $monoFont $mutedColor
+  $secondValue = New-Label "--" $valueFont $whiteColor
+  $resetLabel = New-Label (U "0072 0065 0073 0065 0074 0020 C815 BCF4 0020 C5C6 C74C") $monoFont $mutedColor
+  $ageLabel = New-Label (U "AC31 C2E0 0020 AE30 B85D 0020 C5C6 C74C") $monoFont $dimColor
+  foreach ($label in @($firstName, $firstValue, $secondName, $secondValue, $resetLabel, $ageLabel)) {
+    $label.AutoSize = $false
+    $label.Dock = "Fill"
+    $label.AutoEllipsis = $true
+  }
+  $copyLayout.Controls.Add($firstName, 0, 0)
+  $copyLayout.Controls.Add($firstValue, 1, 0)
+  $copyLayout.Controls.Add($secondName, 0, 1)
+  $copyLayout.Controls.Add($secondValue, 1, 1)
+  $copyLayout.Controls.Add($resetLabel, 0, 2)
+  $copyLayout.SetColumnSpan($resetLabel, 2)
+  $copyLayout.Controls.Add($ageLabel, 0, 3)
+  $copyLayout.SetColumnSpan($ageLabel, 2)
 
   $cardLayout.Controls.Add($titleLabel, 0, 0)
-  $cardLayout.SetColumnSpan($titleLabel, 2)
-  $cardLayout.Controls.Add($remainingValue, 0, 1)
-  $cardLayout.Controls.Add($usedLabel, 1, 1)
-  $cardLayout.Controls.Add($meterBack, 0, 2)
-  $cardLayout.SetColumnSpan($meterBack, 2)
-  $cardLayout.Controls.Add($subLabel, 0, 3)
-  $cardLayout.SetColumnSpan($subLabel, 2)
-  $cardLayout.Controls.Add($resetLabel, 0, 4)
-  $cardLayout.SetColumnSpan($resetLabel, 2)
-  $cardLayout.Controls.Add($ageLabel, 0, 5)
-  $cardLayout.SetColumnSpan($ageLabel, 2)
+  $cardLayout.Controls.Add($stateLabel, 1, 0)
+  $cardLayout.Controls.Add($dial, 0, 1)
+  $cardLayout.Controls.Add($copyLayout, 1, 1)
 
   return @{
     Panel = $panel
-    Remaining = $remainingValue
-    Used = $usedLabel
-    Sub = $subLabel
+    Dial = $dial
+    State = $stateLabel
+    First = $firstValue
+    Second = $secondValue
     Reset = $resetLabel
     Age = $ageLabel
-    MeterBack = $meterBack
-    MeterFill = $meterFill
   }
 }
 
 $header = New-Object System.Windows.Forms.TableLayoutPanel
 $header.Dock = "Fill"
-$header.ColumnCount = 2
+$header.ColumnCount = 1
 $header.RowCount = 2
 $header.BackColor = $bgColor
-$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 62))) | Out-Null
-$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 38))) | Out-Null
-$headerTitle = New-Label "Codex Claude Usage" $titleFont $whiteColor
-$headerSub = New-Label (U "0033 BD84 B9C8 B2E4 0020 C790 B3D9 0020 AC31 C2E0") $smallFont $mutedColor
-$serverBadge = New-Label (U "C11C BC84 0020 AEBC C9D0") $smallFont $goodColor
-$serverBadge.TextAlign = "MiddleRight"
-$serverBadge.Dock = "Fill"
-$header.Controls.Add($headerTitle, 0, 0)
-$header.Controls.Add($headerSub, 0, 1)
-$header.Controls.Add($serverBadge, 1, 0)
-$header.SetRowSpan($serverBadge, 2)
+$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 18))) | Out-Null
+$header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+$headerSub = New-Label "AI CLI Usage" $monoFont $mutedColor
+$headerTitle = New-Label "Codex, Claude" $titleFont $whiteColor
+$header.Controls.Add($headerSub, 0, 0)
+$header.Controls.Add($headerTitle, 0, 1)
 $layout.Controls.Add($header, 0, 0)
 
-$codexCard = New-Card "Codex" $goodColor
-$claudeCard = New-Card "Claude" $warnColor
+$codexCard = New-Card "Codex" "5h" "Week"
+$claudeCard = New-Card "Claude" "Session" "Week"
 $layout.Controls.Add($codexCard.Panel, 0, 1)
 $layout.Controls.Add($claudeCard.Panel, 0, 2)
 
 $controls = New-Object System.Windows.Forms.TableLayoutPanel
 $controls.Dock = "Fill"
-$controls.ColumnCount = 2
+$controls.ColumnCount = 3
 $controls.RowCount = 2
-$controls.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
-$controls.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
-$controls.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
-$controls.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38))) | Out-Null
+$controls.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 33))) | Out-Null
+$controls.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 34))) | Out-Null
+$controls.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 33))) | Out-Null
+$controls.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 34))) | Out-Null
+$controls.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 42))) | Out-Null
 $controls.BackColor = $bgColor
 $layout.Controls.Add($controls, 0, 3)
 
 $topMost = New-Object System.Windows.Forms.CheckBox
 $topMost.Text = U "D56D C0C1 0020 C704"
-$topMost.Checked = $true
-$topMost.ForeColor = [System.Drawing.Color]::White
+$topMost.Checked = $false
+$topMost.ForeColor = $mutedColor
 $topMost.BackColor = $bgColor
 $topMost.AutoSize = $true
 $topMost.Add_CheckedChanged({ $form.TopMost = $topMost.Checked })
@@ -435,11 +679,12 @@ $controls.Controls.Add($topMost, 0, 0)
 $startup = New-Object System.Windows.Forms.CheckBox
 $startup.Text = U "C2DC C791 0020 C2DC 0020 C2E4 D589"
 $startup.Checked = Test-StartupRegistration
-$startup.ForeColor = [System.Drawing.Color]::White
+$startup.ForeColor = $mutedColor
 $startup.BackColor = $bgColor
 $startup.AutoSize = $true
 $startup.Add_CheckedChanged({ Set-StartupRegistration -Enabled $startup.Checked })
 $controls.Controls.Add($startup, 1, 0)
+$controls.SetColumnSpan($startup, 2)
 
 function New-Button {
   param([string]$Text)
@@ -452,15 +697,18 @@ function New-Button {
   $button.FlatStyle = "Flat"
   $button.Font = $buttonFont
   $button.FlatAppearance.BorderColor = $lineColor
+  $button.FlatAppearance.BorderSize = 1
   $button.Add_MouseEnter({ param($sender, $event) $sender.BackColor = $buttonHotColor })
   $button.Add_MouseLeave({ param($sender, $event) $sender.BackColor = $buttonColor })
   return $button
 }
 
 $refreshButton = New-Button (U "C0C8 B85C ACE0 CE68")
-$dashboardButton = New-Button (U "C804 CCB4 0020 BCF4 AE30")
+$setupButton = New-Button "Setup"
+$dashboardButton = New-Button (U "C804 CCB4 0020 B300 C2DC BCF4 B4DC")
 $controls.Controls.Add($refreshButton, 0, 1)
-$controls.Controls.Add($dashboardButton, 1, 1)
+$controls.Controls.Add($setupButton, 1, 1)
+$controls.Controls.Add($dashboardButton, 2, 1)
 
 function Update-Ui {
   $codex = Read-JsonSafe $CodexStatusPath
@@ -477,25 +725,24 @@ function Update-Ui {
   $claudeRemaining = Get-PercentText $claudeMain
   $codexRemainingValue = Get-RemainingValue $codexMain
   $claudeRemainingValue = Get-RemainingValue $claudeMain
-  $codexUsed = if ($codexMain -and $null -ne $codexMain.remaining_percent) { "{0}%" -f (100 - [int]$codexMain.remaining_percent) } else { "--" }
-  $claudeUsed = if ($claudeMain -and $null -ne $claudeMain.used_percent) { "{0}%" -f [int]$claudeMain.used_percent } elseif ($claudeMain -and $null -ne $claudeMain.remaining_percent) { "{0}%" -f (100 - [int]$claudeMain.remaining_percent) } else { "--" }
 
-  $codexCard.Remaining.Text = $codexRemaining
-  $codexCard.Used.Text = "{0} {1}" -f (U "C0AC C6A9"), $codexUsed
-  $codexCard.Sub.Text = "{0} {1}  /  {2} {3}" -f (U "0035 C2DC AC04"), (Get-PercentText $codexFiveHour), (U "C8FC AC04"), (Get-PercentText $codexWeekly)
-  $codexCard.Reset.Text = "{0}  {1}" -f (U "B9AC C14B"), (Get-ResetText $codexMain)
-  $codexCard.Age.Text = "{0}  {1}" -f (U "AC31 C2E0"), (Get-StatusAgeText $codex)
-  Set-Meter $codexCard $codexRemainingValue
+  $codexCard.State.Text = Get-StateText $codex
+  $codexCard.First.Text = Get-PercentText $codexFiveHour
+  $codexCard.Second.Text = Get-PercentText $codexWeekly
+  $codexCard.Reset.Text = Get-ResetText $codexMain
+  $codexCard.Age.Text = Get-StatusAgeText $codex
+  Set-Dial $codexCard $codexRemainingValue
 
-  $claudeCard.Remaining.Text = $claudeRemaining
-  $claudeCard.Used.Text = "{0} {1}" -f (U "C0AC C6A9"), $claudeUsed
-  $claudeCard.Sub.Text = "{0} {1}  /  {2} {3}" -f (U "C138 C158"), (Get-PercentText $claudeFiveHour), (U "C8FC AC04"), (Get-PercentText $claudeSevenDay)
-  $claudeCard.Reset.Text = "{0}  {1}" -f (U "B9AC C14B"), (Get-ResetText $claudeMain)
-  $claudeCard.Age.Text = "{0}  {1}" -f (U "AC31 C2E0"), (Get-StatusAgeText $claude)
-  Set-Meter $claudeCard $claudeRemainingValue
+  $claudeCard.State.Text = Get-StateText $claude
+  $claudeCard.First.Text = Get-PercentText $claudeFiveHour
+  $claudeCard.Second.Text = Get-PercentText $claudeSevenDay
+  $claudeCard.Reset.Text = Get-ResetText $claudeMain
+  $claudeCard.Age.Text = Get-StatusAgeText $claude
+  Set-Dial $claudeCard $claudeRemainingValue
 }
 
 $refreshButton.Add_Click({ Update-Ui })
+$setupButton.Add_Click({ Show-SetupWindow })
 $dashboardButton.Add_Click({ Start-Dashboard })
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
@@ -504,6 +751,7 @@ $notify.Visible = $true
 $notify.Icon = [System.Drawing.SystemIcons]::Application
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 [void]$menu.Items.Add((U "C5F4 AE30"), $null, { $form.Show(); $form.WindowState = "Normal"; $form.Activate() })
+[void]$menu.Items.Add("Setup", $null, { Show-SetupWindow })
 [void]$menu.Items.Add((U "B300 C2DC BCF4 B4DC"), $null, { Start-Dashboard })
 [void]$menu.Items.Add((U "C885 B8CC"), $null, { $form.Close() })
 $notify.ContextMenuStrip = $menu

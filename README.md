@@ -13,7 +13,7 @@ Codex CLI와 Claude Code 사용량을 한 화면에서 보는 로컬 Windows 대
 - 항상 위에 떠 있는 compact window
 - 전체 HTML 대시보드
 - Windows 로그인 시 자동 실행
-- 다른 PC 배포용 Windows 설치 파일 생성
+- 다른 PC 배포용 Windows native exe 폴더 생성
 - Claude `/usage` 백그라운드 수집 및 선택형 statusLine hook 설치
 - 로컬 파일 기반 캐싱으로 큰 세션 폴더에서도 빠른 갱신
 
@@ -31,20 +31,21 @@ Windows 앱은 세 가지 화면을 제공한다.
 http://127.0.0.1:8767
 ```
 
-## 설치 파일로 사용하기
+## native exe로 사용하기
 
-빌드가 끝난 설치 파일은 아래 경로에 생성된다.
+빌드가 끝난 실행 파일은 아래 경로에 생성된다.
 
 ```text
-dist\Codex Claude Usage Setup 0.1.0.exe
+dist\native\Codex Claude Usage.exe
 ```
 
-친구나 다른 PC에 배포할 때는 이 설치 파일을 전달하면 된다.
+다른 PC에 배포할 때는 `dist\native` 폴더 전체를 전달하면 된다.
 
-단, 설치 파일이 모든 외부 런타임을 포함하는 것은 아니다. 대상 PC에는 아래 프로그램이 필요하다.
+단, native exe가 모든 외부 런타임을 포함하는 것은 아니다. 대상 PC에는 아래 프로그램이 필요하다.
 
 - Codex CLI
 - Claude Code
+- Node.js
 - Python
 - Python 환경에서 실행 가능한 `fastapi`, `uvicorn`
 
@@ -159,7 +160,7 @@ Codex 잔여율:
 - 앱이 백그라운드에서 Codex CLI를 실행한다.
 - `/status` 출력을 캡처한다.
 - `~\.codex-usage-wrapper\status.json`에 저장한다.
-- 기본적으로 3분마다 다시 캡처한다.
+- 기본적으로 1분마다 다시 캡처한다.
 - 이 수집기는 FastAPI 대시보드 서버와 별도로 실행된다.
 
 Claude 잔여율:
@@ -167,8 +168,16 @@ Claude 잔여율:
 - 앱이 백그라운드에서 `claude /usage`를 실행한다.
 - `Current session`, `Current week (all models)` 출력을 파싱한다.
 - `~\.codex-usage-wrapper\claude-status.json`에 저장한다.
-- 기본적으로 3분마다 다시 캡처한다.
+- 기본적으로 1분마다 다시 캡처한다.
 - Claude statusLine hook은 선택 사항이다.
+
+캡처 주기는 환경변수로 조절할 수 있다.
+
+```powershell
+$env:CODEX_USAGE_POLL_INTERVAL_MS = "180000"
+$env:CODEX_USAGE_CODEX_POLL_INTERVAL_MS = "60000"
+$env:CODEX_USAGE_CLAUDE_POLL_INTERVAL_MS = "180000"
+```
 
 토큰 사용량:
 
@@ -302,8 +311,8 @@ python -m pip install fastapi uvicorn
 설치 앱에 수정이 반영되지 않는다:
 
 - `npm run app`은 개발 모드다.
-- 설치 앱은 `npm run dist`로 다시 빌드해야 바뀐다.
-- 빌드 후 `dist\Codex Claude Usage Setup 0.1.0.exe`를 다시 실행한다.
+- native 앱은 `npm run dist`로 다시 빌드해야 바뀐다.
+- 빌드 후 `dist\native\Codex Claude Usage.exe`를 다시 실행한다.
 
 ## 검증
 
@@ -326,8 +335,8 @@ npm test
 
 ## 현재 제약
 
-- 설치 파일은 Electron 앱과 프로젝트 파일을 포함하지만 Python 런타임, Codex CLI, Claude Code를 설치하지 않는다.
+- native exe 폴더는 프로젝트 파일과 Node 의존성을 포함하지만 Node.js, Python 런타임, Codex CLI, Claude Code를 설치하지 않는다.
 - Claude 잔여율은 `claude /usage` 출력에 의존한다.
 - Codex 잔여율은 실제 Codex CLI `/status` 화면 출력 포맷에 의존한다.
-- 기본 아이콘은 아직 Electron 기본 아이콘이다.
-- 완전 독립 실행형 앱으로 만들려면 Python 서버를 번들링하거나 Node/Electron 쪽으로 서버를 옮겨야 한다.
+- 기본 아이콘은 아직 Windows 기본 실행 파일 아이콘이다.
+- 완전 독립 실행형 앱으로 만들려면 Node.js와 Python 서버를 함께 번들링하거나 서버를 단일 런타임으로 옮겨야 한다.

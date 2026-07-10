@@ -420,6 +420,21 @@ async function testHeadlessStatusPoller() {
   }
 }
 
+async function testCodexPollerAddsFastServiceTierForCodexCommand() {
+  const { buildCodexArgs, parseArgs } = require(path.join(ROOT, "src", "node", "codex-status-poller.js"));
+  const codexOptions = parseArgs(["--codex-command", "codex.exe"]);
+  assert.deepStrictEqual(
+    buildCodexArgs(codexOptions).slice(0, 3),
+    ["-c", 'service_tier="fast"', "--no-alt-screen"],
+  );
+
+  const nodeOptions = parseArgs(["--codex-command", NODE, "--", path.join("tests", "mock-codex.js")]);
+  assert.deepStrictEqual(buildCodexArgs(nodeOptions), [path.join("tests", "mock-codex.js")]);
+
+  const customOptions = parseArgs(["--codex-command", "codex.exe", "--", "-c", 'service_tier="flex"']);
+  assert.deepStrictEqual(buildCodexArgs(customOptions), ["--no-alt-screen", "-c", 'service_tier="flex"']);
+}
+
 async function testClaudeUsageDeduplicatesMessageIds() {
   const tempDir = makeTempDir("claude-usage-dedup");
   const fixturePath = path.join(tempDir, "session.jsonl");
@@ -563,6 +578,65 @@ async function testUsageDatesUseKstMidnight() {
     `codex_result = codex.compute_file_usage(Path(${JSON.stringify(codexPath)}))`,
     "assert ('2026-02-02', 'claude-kst-test') in claude_result, claude_result",
     "assert ('2026-02-02', 'gpt-kst-test') in codex_result, codex_result",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
+async function testCodexUsageUsesPersistentFileCache() {
+  const tempDir = makeTempDir("codex-persistent-cache");
+  const sessionsDir = path.join(tempDir, "sessions", "2026", "01", "01");
+  const cachePath = path.join(tempDir, "codex-file-cache.json");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionsDir, "rollout-2026-01-01T00-00-00-cache.jsonl"),
+    `${JSON.stringify({
+      timestamp: "2026-01-01T00:00:00Z",
+      payload: { model: "gpt-cache-test", info: { last_token_usage: { input_tokens: 5, output_tokens: 7, total_tokens: 12 } } },
+    })}\n`,
+    "utf8",
+  );
+
+  const script = [
+    "from pathlib import Path",
+    "import codex_usage_report as c",
+    `sessions = Path(${JSON.stringify(path.join(tempDir, "sessions"))})`,
+    `cache = Path(${JSON.stringify(cachePath)})`,
+    "first = c.aggregate_usage(sessions, disk_cache_path=cache)",
+    "assert cache.exists(), cache",
+    "def fail_compute(path):",
+    "    raise AssertionError('cache miss')",
+    "c.compute_file_usage = fail_compute",
+    "second = c.aggregate_usage(sessions, disk_cache_path=cache)",
+    "total = c.sum_totals(second)",
+    "assert total.total_tokens == 12, total.total_tokens",
+    "assert first.keys() == second.keys(), (first, second)",
+  ].join("\n");
+  await run("python", ["-c", script]);
+}
+
+async function testCodexUsageSurvivesDiskCacheWriteFailure() {
+  const tempDir = makeTempDir("codex-cache-write-failure");
+  const sessionsDir = path.join(tempDir, "sessions", "2026", "01", "01");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionsDir, "rollout-2026-01-01T00-00-00-cache-fail.jsonl"),
+    `${JSON.stringify({
+      timestamp: "2026-01-01T00:00:00Z",
+      payload: { model: "gpt-cache-fail-test", info: { last_token_usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 } } },
+    })}\n`,
+    "utf8",
+  );
+
+  const script = [
+    "from pathlib import Path",
+    "import codex_usage_report as c",
+    `sessions = Path(${JSON.stringify(path.join(tempDir, "sessions"))})`,
+    "def fail_save(*args, **kwargs):",
+    "    raise OSError('cache write failed')",
+    "c.save_file_cache = fail_save",
+    `aggregate = c.aggregate_usage(sessions, disk_cache_path=Path(${JSON.stringify(path.join(tempDir, "cache.json"))}))`,
+    "total = c.sum_totals(aggregate)",
+    "assert total.total_tokens == 5, total.total_tokens",
   ].join("\n");
   await run("python", ["-c", script]);
 }
@@ -771,6 +845,31 @@ async function testClaudeUsagePollerParsesUsageCommand() {
   assert.strictEqual(week.reset_text, "resets 07/14 09:00");
 }
 
+async function testClaudeUsagePollerAcceptsSubscriptionSummary() {
+  const { buildStatus } = require(path.join(ROOT, "src", "node", "claude-usage-poller.js"));
+  const rawText = [
+    "You are currently using your subscription to power your Claude Code usage",
+    "",
+    "What's contributing to your limits usage?",
+    "Approximate, based on local sessions on this machine - does not include other devices or claude.ai.",
+    "",
+    "Last 24h - 242 requests - 16 sessions",
+    "  75% of your usage was at >150k context",
+    "",
+    "Last 7d - 1991 requests - 42 sessions",
+    "  82% of your usage was at >150k context",
+  ].join("\n");
+
+  const status = buildStatus(rawText);
+  assert.strictEqual(status.parse_status, "ok");
+  assert.strictEqual(status.summary_status, "subscription_usage_summary");
+  assert.deepStrictEqual(status.limits, []);
+  assert.deepStrictEqual(status.usage_windows, [
+    { window: "24h", requests: 242, sessions: 16 },
+    { window: "7d", requests: 1991, sessions: 42 },
+  ]);
+}
+
 async function testClaudeStatusHookInstallDoesNotOverwriteExistingCommand() {
   const tempDir = makeTempDir("claude-status-hook-install");
   const settingsPath = path.join(tempDir, "settings.json");
@@ -790,6 +889,29 @@ async function testClaudeStatusHookInstallDoesNotOverwriteExistingCommand() {
   const settings = readJson(settingsPath);
   assert.deepStrictEqual(settings, existingSettings);
   assert.match(result.stdout, /Existing statusLine\.command found/);
+}
+
+async function testClaudeStatusHookInstallReplacesLegacyAppCommand() {
+  const tempDir = makeTempDir("claude-status-hook-install-legacy");
+  const settingsPath = path.join(tempDir, "settings.json");
+  fs.writeFileSync(
+    settingsPath,
+    `${JSON.stringify({
+      statusLine: {
+        type: "command",
+        command: '"C:\\Users\\me\\AppData\\Local\\Programs\\Codex Claude Usage\\Codex Claude Usage.exe" --claude-status-hook',
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  await run(
+    NODE,
+    [path.join("src", "node", "claude-status-hook.js"), "--install", "--settings-path", settingsPath],
+    { capture: true },
+  );
+  const settings = readJson(settingsPath);
+  assert.match(settings.statusLine.command, /node ".*claude-status-hook\.js"/);
 }
 
 async function testDashboardRingsUseRemainingThresholds() {
@@ -1115,17 +1237,22 @@ async function main() {
   await testIdleCaptureWrapper();
   await testDashboardReadsWrapperStatus();
   await testHeadlessStatusPoller();
+  await testCodexPollerAddsFastServiceTierForCodexCommand();
   await testStatusPollerRestartsUnhealthySession();
   await testStatusPollerSurvivesBadCodexCommand();
   await testClaudeUsageDeduplicatesMessageIds();
   await testClaudeUsageFieldsModelsAndSubagents();
   await testUsageDatesUseKstMidnight();
+  await testCodexUsageUsesPersistentFileCache();
+  await testCodexUsageSurvivesDiskCacheWriteFailure();
   await testClaudeStatusHookWritesRemainingPercents();
   await testClaudeStatusHookAcceptsAlternatePercentFields();
   await testClaudeStatusHookSurvivesMalformedPayload();
   await testClaudeStatusHookPreservesFreshUsageCommandStatus();
   await testClaudeUsagePollerParsesUsageCommand();
+  await testClaudeUsagePollerAcceptsSubscriptionSummary();
   await testClaudeStatusHookInstallDoesNotOverwriteExistingCommand();
+  await testClaudeStatusHookInstallReplacesLegacyAppCommand();
   await testDashboardRingsUseRemainingThresholds();
   await testMergedDashboardShowsUsageAndStatus();
   await testDashboardSurvivesClientDisconnect();

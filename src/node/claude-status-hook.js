@@ -243,6 +243,14 @@ function runOriginalCommand(command, rawInput) {
   }
 }
 
+function isThisHookCommand(command, hookPath) {
+  return String(command || "").includes(path.basename(hookPath));
+}
+
+function isLegacyAppHookCommand(command) {
+  return /Codex Claude Usage\.exe/i.test(String(command || ""));
+}
+
 function install(settingsPath) {
   const hookPath = path.resolve(__filename);
   let settings = {};
@@ -254,7 +262,12 @@ function install(settingsPath) {
   }
 
   const existing = settings.statusLine && settings.statusLine.command;
-  if (typeof existing === "string" && existing && !existing.includes(path.basename(hookPath))) {
+  if (
+    typeof existing === "string" &&
+    existing &&
+    !isThisHookCommand(existing, hookPath) &&
+    !isLegacyAppHookCommand(existing)
+  ) {
     process.stdout.write(
       [
         "Existing statusLine.command found; settings.json was not modified.",
@@ -302,5 +315,6 @@ module.exports = {
   buildStatus,
   shouldPreserveUsageCommandStatus,
   summaryFromStatus,
+  isLegacyAppHookCommand,
   parseArgs,
 };

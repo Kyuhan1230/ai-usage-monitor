@@ -13,9 +13,9 @@ const {
   typeIntoTerminal,
 } = require("./status-capture");
 
-const DEFAULT_POLL_INTERVAL_MS = 3 * 60 * 1000;
-const DEFAULT_STARTUP_DELAY_MS = 4000;
-const DEFAULT_CAPTURE_QUIET_MS = 1600;
+const DEFAULT_POLL_INTERVAL_MS = 60 * 1000;
+const DEFAULT_STARTUP_DELAY_MS = 10 * 1000;
+const DEFAULT_CAPTURE_QUIET_MS = 2500;
 const DEFAULT_MAX_CAPTURE_MS = 15 * 1000;
 const DEFAULT_RESPAWN_BACKOFF_MS = 30 * 1000;
 const MAX_RESPAWN_BACKOFF_MS = 5 * 60 * 1000;
@@ -24,6 +24,7 @@ const MAX_FAILED_PARSE_RETRIES = 3;
 const WATCHDOG_CHECK_MS = 60 * 1000;
 const OUTPUT_TAIL_LIMIT = 8000;
 const CAPTURE_METHOD = "codex_status_poller";
+const DEFAULT_CODEX_CONFIG_ARGS = ["-c", 'service_tier="fast"', "--no-alt-screen"];
 
 function parseArgs(argv) {
   const options = {
@@ -127,6 +128,34 @@ function log(message) {
   process.stdout.write(`[status-poller] ${message}\n`);
 }
 
+function isCodexCommand(command) {
+  return path.basename(command).toLowerCase().startsWith("codex");
+}
+
+function hasServiceTierOverride(args) {
+  return args.some((arg, index) => (
+    arg.startsWith("service_tier=") ||
+    arg.startsWith("service_tier.") ||
+    (args[index - 1] === "-c" && arg.startsWith("service_tier=")) ||
+    (args[index - 1] === "--config" && arg.startsWith("service_tier="))
+  ));
+}
+
+function buildCodexArgs(options) {
+  if (!isCodexCommand(options.codexCommand)) {
+    return options.codexArgs;
+  }
+
+  const defaults = [];
+  if (!hasServiceTierOverride(options.codexArgs)) {
+    defaults.push("-c", 'service_tier="fast"');
+  }
+  if (!options.codexArgs.includes("--no-alt-screen")) {
+    defaults.push("--no-alt-screen");
+  }
+  return [...defaults, ...options.codexArgs];
+}
+
 function isOutputQuiet(lastOutputAt, requiredMs) {
   return Date.now() - lastOutputAt >= requiredMs;
 }
@@ -136,7 +165,7 @@ function runSession(options, onSessionEnded, onCaptureSuccess) {
     poll_interval_ms: options.pollIntervalMs,
   });
 
-  const term = pty.spawn(options.codexCommand, options.codexArgs, {
+  const term = pty.spawn(options.codexCommand, buildCodexArgs(options), {
     name: "xterm-256color",
     cols: 120,
     rows: 30,
@@ -309,10 +338,12 @@ function runSession(options, onSessionEnded, onCaptureSuccess) {
   term.onExit(({ exitCode }) => {
     stopped = true;
     stopTimers();
-    writePollerHeartbeat(options.statusPath, "session_exited", `exit code ${exitCode}`, {
+    const exitTail = outputTail.trim().split("\n").filter(Boolean).slice(-4).join(" | ");
+    const detail = exitTail ? `exit code ${exitCode}: ${exitTail.slice(0, 500)}` : `exit code ${exitCode}`;
+    writePollerHeartbeat(options.statusPath, "session_exited", detail, {
       poll_interval_ms: options.pollIntervalMs,
     });
-    onSessionEnded(exitCode);
+    onSessionEnded(exitCode, detail);
   });
 
   setTimeout(() => tryRequestStatus("startup"), options.startupDelayMs);
@@ -369,7 +400,7 @@ function startPoller(options) {
     try {
       activeSession = runSession(
         options,
-        (exitCode) => retryAfterFailure(`headless Codex session exited (code ${exitCode})`),
+        (exitCode, detail) => retryAfterFailure(`headless Codex session exited (${detail || `code ${exitCode}`})`),
         resetBackoff,
       );
     } catch (error) {
@@ -403,4 +434,4 @@ if (require.main === module) {
   startPoller(options);
 }
 
-module.exports = { parseArgs, startPoller };
+module.exports = { buildCodexArgs, parseArgs, startPoller };

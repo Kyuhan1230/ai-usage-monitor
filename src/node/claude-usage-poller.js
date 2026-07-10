@@ -8,7 +8,7 @@ const { execFile } = require("child_process");
 const { nowKstIso, writeJsonAtomic } = require("./status-capture");
 
 const DEFAULT_STATUS_PATH = path.join(os.homedir(), ".codex-usage-wrapper", "claude-status.json");
-const DEFAULT_POLL_INTERVAL_MS = 3 * 60 * 1000;
+const DEFAULT_POLL_INTERVAL_MS = 60 * 1000;
 const DEFAULT_STARTUP_DELAY_MS = 3000;
 const DEFAULT_TIMEOUT_MS = 60 * 1000;
 const CAPTURE_METHOD = "claude_usage_command";
@@ -126,16 +126,42 @@ function parseUsageText(rawText) {
   return limits;
 }
 
+function parseUsageWindows(rawText) {
+  const windows = [];
+  const pattern = /^Last\s+(\d+\w*)\s+\S+\s+(\d+)\s+requests\s+\S+\s+(\d+)\s+sessions$/i;
+  for (const line of String(rawText || "").split(/\r?\n/)) {
+    const match = line.trim().match(pattern);
+    if (!match) {
+      continue;
+    }
+    windows.push({
+      window: match[1],
+      requests: Number(match[2]),
+      sessions: Number(match[3]),
+    });
+  }
+  return windows;
+}
+
+function isSubscriptionUsageSummary(rawText) {
+  return /using your subscription to power your Claude Code usage/i.test(String(rawText || ""));
+}
+
 function buildStatus(rawText, parseError = null) {
   const limits = parseError ? [] : parseUsageText(rawText);
+  const usageWindows = parseError ? [] : parseUsageWindows(rawText);
+  const hasSubscriptionSummary = !parseError && isSubscriptionUsageSummary(rawText);
+  const parseStatus = limits.length > 0 || usageWindows.length > 0 || hasSubscriptionSummary ? "ok" : "failed";
   return {
     schema_version: 1,
     captured_at: nowKstIso(),
     source: "claude_usage_command",
     capture_method: CAPTURE_METHOD,
-    parse_status: limits.length > 0 ? "ok" : "failed",
+    parse_status: parseStatus,
     error: parseError,
     limits,
+    usage_windows: usageWindows,
+    summary_status: hasSubscriptionSummary ? "subscription_usage_summary" : null,
     raw_status_text: rawText,
   };
 }
@@ -207,5 +233,6 @@ module.exports = {
   captureOnce,
   parseArgs,
   parseUsageText,
+  parseUsageWindows,
   startPoller,
 };

@@ -47,14 +47,14 @@ async function refresh() {
     snapshot.codex.connected,
     snapshot.codex.ageMs,
     "codex 명령을 찾지 못했습니다. Codex CLI 설치가 필요합니다.",
-    "백그라운드 수집기가 3분마다 다시 캡처합니다.",
+    "백그라운드 수집기가 1분마다 다시 캡처합니다.",
   );
   claudeDetail.textContent = statusText(
     snapshot.setup.claudeCommand,
     snapshot.claude.connected,
     snapshot.claude.ageMs,
     "claude 명령을 찾지 못했습니다. Claude Code 설치가 필요합니다.",
-    "백그라운드 수집기가 3분마다 claude /usage를 다시 캡처합니다.",
+    "백그라운드 수집기가 1분마다 claude /usage를 다시 캡처합니다.",
   );
   hookDetail.textContent = snapshot.claude.hookInstalled
     ? `선택: statusLine hook도 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`

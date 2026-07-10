@@ -6,6 +6,7 @@ import argparse
 import html
 import http.server
 import json
+import os
 import re
 import threading
 from collections import defaultdict
@@ -18,6 +19,8 @@ from zoneinfo import ZoneInfo
 from dashboard_common import BASE_STYLE, REPORT_STYLE, FileCache, render_live_refresh_script, render_usage_table, send_body
 
 KST = ZoneInfo("Asia/Seoul")
+DEFAULT_FILE_CACHE_PATH = Path.home() / ".codex-usage-wrapper" / "codex-file-cache.json"
+CACHE_SCHEMA_VERSION = 1
 
 
 TOKEN_KEYS = (
@@ -98,6 +101,142 @@ class UsageTotals:
             setattr(self, key, getattr(self, key) + to_int(usage.get(key)))
         self.events += 1
         self.files.add(source_file)
+
+
+def usage_totals_to_dict(totals: UsageTotals) -> dict[str, Any]:
+    """파일 캐시에 저장할 수 있는 dict로 집계값을 변환한다.
+
+    Args:
+        totals: 직렬화할 집계값.
+
+    Returns:
+        JSON으로 저장 가능한 집계 dict.
+    """
+
+    return {
+        "input_tokens": totals.input_tokens,
+        "cached_input_tokens": totals.cached_input_tokens,
+        "output_tokens": totals.output_tokens,
+        "reasoning_output_tokens": totals.reasoning_output_tokens,
+        "total_tokens": totals.total_tokens,
+        "events": totals.events,
+    }
+
+
+def usage_totals_from_dict(data: dict[str, Any], source_file: Path) -> UsageTotals:
+    """파일 캐시에서 읽은 dict를 UsageTotals로 복원한다.
+
+    Args:
+        data: 캐시에 저장된 집계 dict.
+        source_file: 집계가 나온 원본 파일 경로.
+
+    Returns:
+        복원된 집계값.
+    """
+
+    return UsageTotals(
+        input_tokens=to_int(data.get("input_tokens")),
+        cached_input_tokens=to_int(data.get("cached_input_tokens")),
+        output_tokens=to_int(data.get("output_tokens")),
+        reasoning_output_tokens=to_int(data.get("reasoning_output_tokens")),
+        total_tokens=to_int(data.get("total_tokens")),
+        events=to_int(data.get("events")),
+        files={source_file},
+    )
+
+
+def load_file_cache(cache_path: Path) -> FileCache:
+    """디스크에 저장된 파일별 집계 캐시를 읽는다.
+
+    Args:
+        cache_path: 캐시 JSON 파일 경로.
+
+    Returns:
+        파일 경로별 시그니처와 집계 결과 캐시.
+    """
+
+    if not cache_path.exists():
+        return {}
+    try:
+        raw_cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if not isinstance(raw_cache, dict) or raw_cache.get("schema_version") != CACHE_SCHEMA_VERSION:
+        return {}
+
+    files = raw_cache.get("files")
+    if not isinstance(files, dict):
+        return {}
+
+    cache: FileCache = {}
+    for path_text, entry in files.items():
+        if not isinstance(path_text, str) or not isinstance(entry, dict):
+            continue
+        signature = entry.get("signature")
+        rows = entry.get("rows")
+        if (
+            not isinstance(signature, list)
+            or len(signature) != 2
+            or not isinstance(rows, list)
+        ):
+            continue
+
+        source_file = Path(path_text)
+        file_usage: dict[tuple[str, str], UsageTotals] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            date = row.get("date")
+            model = row.get("model")
+            totals = row.get("totals")
+            if not isinstance(date, str) or not isinstance(model, str) or not isinstance(totals, dict):
+                continue
+            file_usage[(date, model)] = usage_totals_from_dict(totals, source_file)
+
+        cache[source_file] = ((float(signature[0]), int(signature[1])), file_usage)
+    return cache
+
+
+def save_file_cache(cache_path: Path, file_cache: FileCache, seen_paths: set[Path]) -> None:
+    """파일별 집계 캐시를 디스크에 저장한다.
+
+    Args:
+        cache_path: 캐시 JSON 파일 경로.
+        file_cache: 현재 메모리 캐시.
+        seen_paths: 이번 스캔에서 실제로 발견한 파일 경로 집합.
+
+    Returns:
+        None.
+    """
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    files: dict[str, Any] = {}
+    for path in sorted(seen_paths, key=lambda item: str(item)):
+        cached = file_cache.get(path)
+        if cached is None:
+            continue
+        signature, file_usage = cached
+        rows = []
+        for (date, model), totals in sorted(file_usage.items()):
+            rows.append(
+                {
+                    "date": date,
+                    "model": model,
+                    "totals": usage_totals_to_dict(totals),
+                }
+            )
+        files[str(path)] = {
+            "signature": [signature[0], signature[1]],
+            "rows": rows,
+        }
+
+    tmp_path = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
+    tmp_path.write_text(
+        json.dumps({"schema_version": CACHE_SCHEMA_VERSION, "files": files}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.replace(tmp_path, cache_path)
 
 
 def to_int(value: Any) -> int:
@@ -358,7 +497,11 @@ def compute_file_usage(path: Path) -> dict[tuple[str, str], UsageTotals]:
     return dict(result)
 
 
-def aggregate_usage(sessions_dir: Path, file_cache: FileCache | None = None) -> dict[tuple[str, str], UsageTotals]:
+def aggregate_usage(
+    sessions_dir: Path,
+    file_cache: FileCache | None = None,
+    disk_cache_path: Path | None = None,
+) -> dict[tuple[str, str], UsageTotals]:
     """세션 JSONL 파일을 날짜별, 모델별로 집계한다.
 
     `file_cache`를 넘기면 파일별 (mtime, 크기)가 이전과 같은 파일은 다시 파싱하지 않고
@@ -373,8 +516,18 @@ def aggregate_usage(sessions_dir: Path, file_cache: FileCache | None = None) -> 
         `(date, model)` 키를 가진 usage 집계 딕셔너리.
     """
 
+    uses_disk_cache = disk_cache_path is not None
+    cache_changed = False
+    if disk_cache_path is not None:
+        if file_cache is None:
+            file_cache = load_file_cache(disk_cache_path.expanduser())
+        elif not file_cache:
+            file_cache.update(load_file_cache(disk_cache_path.expanduser()))
+
     aggregate: dict[tuple[str, str], UsageTotals] = defaultdict(UsageTotals)
+    seen_paths: set[Path] = set()
     for path in iter_jsonl_files(sessions_dir):
+        seen_paths.add(path)
         if file_cache is None:
             file_usage = compute_file_usage(path)
         else:
@@ -386,9 +539,16 @@ def aggregate_usage(sessions_dir: Path, file_cache: FileCache | None = None) -> 
             else:
                 file_usage = compute_file_usage(path)
                 file_cache[path] = (signature, file_usage)
+                cache_changed = True
 
         for key, totals in file_usage.items():
             merge_into(aggregate[key], totals)
+
+    if uses_disk_cache and file_cache is not None and (cache_changed or seen_paths):
+        try:
+            save_file_cache(disk_cache_path.expanduser(), file_cache, seen_paths)
+        except OSError:
+            pass
 
     return dict(aggregate)
 
@@ -794,7 +954,7 @@ def run_live_server(sessions_dir: Path, host: str, port: int, refresh_seconds: i
     file_cache: FileCache = {}
 
     def current_aggregate() -> dict[tuple[str, str], UsageTotals]:
-        return aggregate_usage(sessions_dir, file_cache)
+        return aggregate_usage(sessions_dir, file_cache, DEFAULT_FILE_CACHE_PATH)
 
     class LiveUsageHandler(http.server.BaseHTTPRequestHandler):
         """실시간 사용량 HTML만 제공하는 요청 핸들러."""
@@ -892,7 +1052,7 @@ def main() -> None:
         run_live_server(sessions_dir, args.host, args.port, args.refresh_seconds)
         return
 
-    aggregate = aggregate_usage(sessions_dir)
+    aggregate = aggregate_usage(sessions_dir, disk_cache_path=DEFAULT_FILE_CACHE_PATH)
     html_report = render_html(aggregate, sessions_dir)
     args.output.write_text(html_report, encoding="utf-8")
     print(f"wrote {args.output} ({len(aggregate)} date/model rows)")

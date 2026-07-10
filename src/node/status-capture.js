@@ -210,10 +210,14 @@ function writeStatus(statusPath, historyDir, rawStatusText, captureMethod = "cod
 function writeStatusPreservingPrevious(statusPath, historyDir, rawStatusText, captureMethod = "codex_wrapper") {
   const status = parseStatusText(rawStatusText, captureMethod);
   appendHistory(historyDir, status);
+  const compactStatus = {
+    ...status,
+    raw_status_text: "",
+  };
 
   if (status.parse_status === "ok") {
     writeJsonAtomic(statusPath, {
-      ...status,
+      ...compactStatus,
       poller: {
         state: "captured_ok",
         detail: "",
@@ -245,7 +249,7 @@ function writeStatusPreservingPrevious(statusPath, historyDir, rawStatusText, ca
   }
 
   writeJsonAtomic(statusPath, {
-    ...status,
+    ...compactStatus,
     poller: {
       state: "parse_failed",
       detail: "no previous successful status",

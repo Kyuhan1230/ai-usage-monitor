@@ -29,7 +29,7 @@ DEFAULT_PORT = 8767
 DEFAULT_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "status.json"
 DEFAULT_CLAUDE_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "claude-status.json"
 DEFAULT_HISTORY_DIR = Path.home() / ".codex-usage-wrapper" / "history"
-DEFAULT_POLL_INTERVAL_MS = 3 * 60 * 1000
+DEFAULT_POLL_INTERVAL_MS = 60 * 1000
 DEFAULT_CODEX_COMMAND = "codex.exe" if sys.platform == "win32" else "codex"
 DEFAULT_NODE_COMMAND = "node"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -1170,7 +1170,7 @@ def run_dashboard_server(
     claude_usage_file_cache: FileCache = {}
 
     def current_usage_aggregate() -> dict[tuple[str, str], usage_report.UsageTotals]:
-        return usage_report.aggregate_usage(sessions_dir, usage_file_cache)
+        return usage_report.aggregate_usage(sessions_dir, usage_file_cache, usage_report.DEFAULT_FILE_CACHE_PATH)
 
     def current_claude_usage_aggregate() -> dict[tuple[str, str], claude_usage_report.UsageTotals]:
         return claude_usage_report.aggregate_usage(claude_sessions_dir, claude_usage_file_cache)
