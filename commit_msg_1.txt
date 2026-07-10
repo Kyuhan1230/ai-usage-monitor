@@ -1,0 +1,5 @@
+fix: stabilize dashboard launch
+
+Wait for the dashboard server to respond before opening the browser.
+Close the setup modal after launching the dashboard to avoid a disabled parent window.
+Document the installed-app update path and dashboard troubleshooting steps.

@@ -145,6 +145,43 @@ function Start-HiddenProcess {
   return [System.Diagnostics.Process]::Start($info)
 }
 
+function Test-DashboardReady {
+  try {
+    $response = Invoke-WebRequest -Uri "$DashboardUrl/status.json" -UseBasicParsing -TimeoutSec 1
+    return $response.StatusCode -eq 200
+  } catch {
+    return $false
+  }
+}
+
+function Wait-DashboardReady {
+  param([int]$TimeoutMs = 8000)
+
+  $deadline = [DateTimeOffset]::Now.AddMilliseconds($TimeoutMs)
+  while ([DateTimeOffset]::Now -lt $deadline) {
+    if (Test-DashboardReady) {
+      return $true
+    }
+    if ($null -ne $script:DashboardProcess -and $script:DashboardProcess.HasExited) {
+      return $false
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  return Test-DashboardReady
+}
+
+function Show-DashboardError {
+  param([string]$Message)
+
+  [System.Windows.Forms.MessageBox]::Show(
+    $form,
+    $Message,
+    "Dashboard",
+    [System.Windows.Forms.MessageBoxButtons]::OK,
+    [System.Windows.Forms.MessageBoxIcon]::Warning
+  ) | Out-Null
+}
+
 function Test-KnownPollerPid {
   param([int]$ProcessId)
 
@@ -224,16 +261,26 @@ function Stop-Collectors {
 }
 
 function Start-Dashboard {
-  if ($null -eq $script:DashboardProcess -or $script:DashboardProcess.HasExited) {
-    $pythonPath = Join-Path $Root "src\python"
-    $script:DashboardProcess = Start-HiddenProcess "uvicorn.exe" @(
-      "--app-dir", $pythonPath,
-      "codex_dashboard_fastapi:app",
-      "--host", "127.0.0.1",
-      "--port", "8767"
-    )
+  try {
+    if (-not (Test-DashboardReady)) {
+      if ($null -eq $script:DashboardProcess -or $script:DashboardProcess.HasExited) {
+        $pythonPath = Join-Path $Root "src\python"
+        $script:DashboardProcess = Start-HiddenProcess "uvicorn.exe" @(
+          "--app-dir", $pythonPath,
+          "codex_dashboard_fastapi:app",
+          "--host", "127.0.0.1",
+          "--port", "8767"
+        )
+      }
+      if (-not (Wait-DashboardReady)) {
+        Show-DashboardError "Dashboard server did not start. Check that uvicorn is installed and port 8767 is available."
+        return
+      }
+    }
+    Start-Process $DashboardUrl | Out-Null
+  } catch {
+    Show-DashboardError ("Dashboard could not be opened. {0}" -f $_.Exception.Message)
   }
-  Start-Process $DashboardUrl | Out-Null
 }
 
 function Start-VisibleCommand {
@@ -432,7 +479,7 @@ function Show-SetupWindow {
   $codexLoginButton.Add_Click({ Start-VisibleCommand "codex login" })
   $claudeAuthButton.Add_Click({ Start-VisibleCommand "claude auth" })
   $hookButton.Add_Click({ Install-ClaudeHook; $setup.Close(); Show-SetupWindow })
-  $openDashboardButton.Add_Click({ Start-Dashboard })
+  $openDashboardButton.Add_Click({ Start-Dashboard; $setup.Close() })
   $closeButton.Add_Click({ $setup.Close() })
   $setup.ShowDialog($form) | Out-Null
 }
