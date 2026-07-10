@@ -12,6 +12,11 @@ $Portable = Join-Path $Root $PortableDir
 $AppName = "Codex Claude Usage"
 $InstallerPath = Join-Path $Out "$AppName Setup.exe"
 $NsiPath = Join-Path $Out "native-installer.nsi"
+$IconPath = Join-Path $Root "assets\codex-claude-usage.ico"
+
+if (-not (Test-Path -LiteralPath $IconPath)) {
+  throw "Missing app icon: $IconPath"
+}
 
 function Find-MakeNsis {
   $command = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
@@ -48,11 +53,14 @@ if (-not (Test-Path -LiteralPath $Out)) {
 
 $portableEscaped = Escape-NsisPath -Path $Portable
 $installerEscaped = Escape-NsisPath -Path $InstallerPath
+$iconEscaped = Escape-NsisPath -Path $IconPath
 
 $nsi = @"
 Unicode true
 Name "$AppName"
 OutFile "$installerEscaped"
+Icon "$iconEscaped"
+UninstallIcon "$iconEscaped"
 InstallDir "`$LOCALAPPDATA\Programs\$AppName"
 RequestExecutionLevel user
 ShowInstDetails show
@@ -69,8 +77,8 @@ Section "Install"
   SetOutPath "`$INSTDIR"
   File /r "$portableEscaped\*"
   CreateDirectory "`$SMPROGRAMS\$AppName"
-  CreateShortcut "`$SMPROGRAMS\$AppName\$AppName.lnk" "`$INSTDIR\$AppName.exe"
-  CreateShortcut "`$DESKTOP\$AppName.lnk" "`$INSTDIR\$AppName.exe"
+  CreateShortcut "`$SMPROGRAMS\$AppName\$AppName.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\$AppName.exe" 0
+  CreateShortcut "`$DESKTOP\$AppName.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\$AppName.exe" 0
   WriteUninstaller "`$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "DisplayName" "$AppName"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "UninstallString" '"`$INSTDIR\Uninstall.exe"'

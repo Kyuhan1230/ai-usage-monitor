@@ -9,13 +9,18 @@ $Root = Resolve-Path (Join-Path $ScriptDir "..")
 $Out = Join-Path $Root $OutputDir
 $AppName = "Codex Claude Usage"
 $ExePath = Join-Path $Out "$AppName.exe"
+$IconPath = Join-Path $Root "assets\codex-claude-usage.ico"
+
+if (-not (Test-Path -LiteralPath $IconPath)) {
+  throw "Missing app icon: $IconPath"
+}
 
 if (Test-Path -LiteralPath $Out) {
   Remove-Item -LiteralPath $Out -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
-foreach ($name in @("scripts", "src")) {
+foreach ($name in @("assets", "scripts", "src")) {
   Copy-Item -LiteralPath (Join-Path $Root $name) -Destination (Join-Path $Out $name) -Recurse -Force
 }
 Copy-Item -LiteralPath (Join-Path $Root "package.json") -Destination (Join-Path $Out "package.json") -Force
@@ -97,10 +102,30 @@ if (-not (Test-Path -LiteralPath $automationAssembly)) {
   throw "System.Management.Automation.dll was not found: $automationAssembly"
 }
 
-Add-Type `
-  -TypeDefinition $source `
-  -ReferencedAssemblies @("System.dll", "System.Windows.Forms.dll", $automationAssembly) `
-  -OutputAssembly $ExePath `
-  -OutputType WindowsApplication
+$sourcePath = Join-Path $Out "native-launcher.cs"
+Set-Content -LiteralPath $sourcePath -Value $source -Encoding UTF8
+
+$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if (-not (Test-Path -LiteralPath $csc)) {
+  $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework\v4.0.30319\csc.exe"
+}
+if (-not (Test-Path -LiteralPath $csc)) {
+  throw "csc.exe was not found."
+}
+
+& $csc `
+  "/nologo" `
+  "/target:winexe" `
+  "/out:$ExePath" `
+  "/win32icon:$IconPath" `
+  "/reference:System.dll" `
+  "/reference:System.Windows.Forms.dll" `
+  "/reference:$automationAssembly" `
+  $sourcePath
+
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to compile native launcher."
+}
+Remove-Item -LiteralPath $sourcePath -Force
 
 Write-Output "created $ExePath"

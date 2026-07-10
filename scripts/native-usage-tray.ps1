@@ -13,6 +13,7 @@ $HistoryDir = Join-Path $StatusDir "history"
 $CodexPidPath = Join-Path $StatusDir "poller.pid"
 $ClaudePidPath = Join-Path $StatusDir "claude-poller.pid"
 $DashboardUrl = "http://127.0.0.1:8767"
+$AppIconPath = Join-Path $Root "assets\codex-claude-usage.ico"
 $DefaultPollIntervalMs = 60000
 function Get-PollIntervalMs {
   param([string]$SpecificValue, [string]$FallbackValue)
@@ -318,6 +319,7 @@ function Show-SetupWindow {
   $setup.BackColor = $bgColor
   $setup.ForeColor = $whiteColor
   $setup.Font = $font
+  $setup.Icon = $AppIcon
 
   $setupRoot = New-Object System.Windows.Forms.TableLayoutPanel
   $setupRoot.Dock = "Fill"
@@ -484,6 +486,12 @@ public static class NativeWindowDrag
 }
 "@
 
+$AppIcon = if (Test-Path -LiteralPath $AppIconPath) {
+  New-Object System.Drawing.Icon($AppIconPath)
+} else {
+  [System.Drawing.SystemIcons]::Application
+}
+
 Start-Collectors
 
 $font = New-Object System.Drawing.Font("Segoe UI", 8.8)
@@ -560,6 +568,7 @@ $form.ShowInTaskbar = $true
 $form.BackColor = $bgColor
 $form.ForeColor = [System.Drawing.Color]::White
 $form.Font = $font
+$form.Icon = $AppIcon
 
 $rootLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $rootLayout.Dock = "Fill"
@@ -1005,7 +1014,7 @@ $dashboardButton.Add_Click({ Start-Dashboard })
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Text = "Codex Claude Usage"
 $notify.Visible = $true
-$notify.Icon = [System.Drawing.SystemIcons]::Application
+$notify.Icon = $AppIcon
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 [void]$menu.Items.Add((U "C5F4 AE30"), $null, { $form.Show(); $form.WindowState = "Normal"; $form.Activate() })
 [void]$menu.Items.Add("Setup", $null, { Show-SetupWindow })
