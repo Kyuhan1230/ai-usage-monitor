@@ -484,7 +484,7 @@ $titleBar.RowCount = 1
 $titleBar.BackColor = $chromeColor
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 68))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 44))) | Out-Null
 $rootLayout.Controls.Add($titleBar, 0, 0)
 
 $brandMark = New-Object System.Windows.Forms.Panel
@@ -498,13 +498,14 @@ $titleText.TextAlign = "MiddleLeft"
 $titleText.ForeColor = $whiteColor
 $titleText.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.7, [System.Drawing.FontStyle]::Bold)
 $closeButtonChrome = New-Object System.Windows.Forms.Label
-$closeButtonChrome.Text = "Close"
+$closeButtonChrome.Text = ""
 $closeButtonChrome.Dock = "Fill"
 $closeButtonChrome.TextAlign = "MiddleCenter"
 $closeButtonChrome.ForeColor = $whiteColor
-$closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(91, 45, 52)
-$closeButtonChrome.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5, [System.Drawing.FontStyle]::Bold)
+$closeButtonChrome.BackColor = $chromeColor
+$closeButtonChrome.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8, [System.Drawing.FontStyle]::Bold)
 $closeButtonChrome.Cursor = [System.Windows.Forms.Cursors]::Hand
+$closeButtonChrome.Tag = @{ Hover = $false }
 foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
   $dragControl.Add_MouseDown({
     param($sender, $event)
@@ -514,8 +515,27 @@ foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
     }
   })
 }
-$closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(126, 56, 65); $closeButtonChrome.ForeColor = $whiteColor })
-$closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(91, 45, 52); $closeButtonChrome.ForeColor = $whiteColor })
+$closeButtonChrome.Add_Paint({
+  param($sender, $event)
+  $graphics = $event.Graphics
+  $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $state = $sender.Tag
+  $fill = if ($state.Hover) { [System.Drawing.Color]::FromArgb(178, 73, 82) } else { [System.Drawing.Color]::FromArgb(112, 52, 60) }
+  $brush = New-Object System.Drawing.SolidBrush($fill)
+  $textBrush = New-Object System.Drawing.SolidBrush($whiteColor)
+  $bounds = New-Object System.Drawing.Rectangle(12, 8, 20, 20)
+  $textBounds = New-Object System.Drawing.RectangleF(12, 7, 20, 20)
+  $graphics.FillEllipse($brush, $bounds)
+  $format = New-Object System.Drawing.StringFormat
+  $format.Alignment = [System.Drawing.StringAlignment]::Center
+  $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+  $graphics.DrawString("X", $sender.Font, $textBrush, $textBounds, $format)
+  $format.Dispose()
+  $brush.Dispose()
+  $textBrush.Dispose()
+})
+$closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.Tag = @{ Hover = $true }; $closeButtonChrome.Invalidate() })
+$closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.Tag = @{ Hover = $false }; $closeButtonChrome.Invalidate() })
 $closeButtonChrome.Add_Click({ $form.Close() })
 $titleBar.Controls.Add($brandMark, 0, 0)
 $titleBar.Controls.Add($titleText, 1, 0)
@@ -546,6 +566,22 @@ function New-Label {
   $label.ForeColor = $Color
   $label.Font = $UseFont
   return $label
+}
+
+function New-RoundedRectanglePath {
+  param(
+    [System.Drawing.Rectangle]$Rect,
+    [int]$Radius
+  )
+
+  $diameter = $Radius * 2
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddArc($Rect.X, $Rect.Y, $diameter, $diameter, 180, 90)
+  $path.AddArc(($Rect.Right - $diameter), $Rect.Y, $diameter, $diameter, 270, 90)
+  $path.AddArc(($Rect.Right - $diameter), ($Rect.Bottom - $diameter), $diameter, $diameter, 0, 90)
+  $path.AddArc($Rect.X, ($Rect.Bottom - $diameter), $diameter, $diameter, 90, 90)
+  $path.CloseFigure()
+  return $path
 }
 
 function Get-ToneColor {
@@ -814,17 +850,42 @@ $controls.SetColumnSpan($startup, 2)
 function New-Button {
   param([string]$Text)
   $button = New-Object System.Windows.Forms.Label
-  $button.Text = $Text
+  $button.Text = ""
   $button.Dock = "Fill"
   $button.Margin = New-Object System.Windows.Forms.Padding(0, 6, 8, 0)
-  $button.BackColor = $buttonColor
+  $button.BackColor = $bgColor
   $button.ForeColor = $whiteColor
   $button.Font = $buttonFont
   $button.TextAlign = "MiddleCenter"
   $button.Cursor = [System.Windows.Forms.Cursors]::Hand
   $button.BorderStyle = "None"
-  $button.Add_MouseEnter({ param($sender, $event) $sender.BackColor = $buttonHotColor })
-  $button.Add_MouseLeave({ param($sender, $event) $sender.BackColor = $buttonColor })
+  $button.Tag = @{ Hover = $false; Text = $Text }
+  $button.Add_Paint({
+    param($sender, $event)
+    $graphics = $event.Graphics
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $state = $sender.Tag
+    $rect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
+    $fill = if ($state.Hover) { $buttonHotColor } else { $buttonColor }
+    $brush = New-Object System.Drawing.SolidBrush($fill)
+    $pen = New-Object System.Drawing.Pen($lineColor)
+    $textBrush = New-Object System.Drawing.SolidBrush($whiteColor)
+    $path = New-RoundedRectanglePath $rect 5
+    $graphics.FillPath($brush, $path)
+    $graphics.DrawPath($pen, $path)
+    $format = New-Object System.Drawing.StringFormat
+    $format.Alignment = [System.Drawing.StringAlignment]::Center
+    $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $textBounds = New-Object System.Drawing.RectangleF(0, 0, $sender.Width, $sender.Height)
+    $graphics.DrawString([string]$state.Text, $sender.Font, $textBrush, $textBounds, $format)
+    $format.Dispose()
+    $path.Dispose()
+    $brush.Dispose()
+    $pen.Dispose()
+    $textBrush.Dispose()
+  })
+  $button.Add_MouseEnter({ param($sender, $event) $sender.Tag = @{ Hover = $true; Text = $sender.Tag.Text }; $sender.Invalidate() })
+  $button.Add_MouseLeave({ param($sender, $event) $sender.Tag = @{ Hover = $false; Text = $sender.Tag.Text }; $sender.Invalidate() })
   return $button
 }
 
