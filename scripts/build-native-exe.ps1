@@ -55,9 +55,11 @@ $source = @"
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Management.Automation;
 
 public static class Program
 {
+    [STAThread]
     public static int Main()
     {
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -68,21 +70,36 @@ public static class Program
             return 1;
         }
 
-        var info = new ProcessStartInfo();
-        info.FileName = "powershell.exe";
-        info.Arguments = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File \"" + scriptPath + "\"";
-        info.WorkingDirectory = baseDir;
-        info.UseShellExecute = false;
-        info.CreateNoWindow = true;
-        Process.Start(info);
+        Directory.SetCurrentDirectory(baseDir);
+        using (PowerShell powerShell = PowerShell.Create())
+        {
+            powerShell.AddCommand("Set-ExecutionPolicy")
+                .AddParameter("ExecutionPolicy", "Bypass")
+                .AddParameter("Scope", "Process")
+                .AddParameter("Force");
+            powerShell.Invoke();
+            powerShell.Commands.Clear();
+
+            powerShell.AddCommand(scriptPath);
+            powerShell.Invoke();
+            if (powerShell.HadErrors)
+            {
+                return 1;
+            }
+        }
         return 0;
     }
 }
 "@
 
+$automationAssembly = Join-Path $env:WINDIR "Microsoft.NET\assembly\GAC_MSIL\System.Management.Automation\v4.0_3.0.0.0__31bf3856ad364e35\System.Management.Automation.dll"
+if (-not (Test-Path -LiteralPath $automationAssembly)) {
+  throw "System.Management.Automation.dll was not found: $automationAssembly"
+}
+
 Add-Type `
   -TypeDefinition $source `
-  -ReferencedAssemblies @("System.dll", "System.Windows.Forms.dll") `
+  -ReferencedAssemblies @("System.dll", "System.Windows.Forms.dll", $automationAssembly) `
   -OutputAssembly $ExePath `
   -OutputType WindowsApplication
 
