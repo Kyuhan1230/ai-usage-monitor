@@ -310,25 +310,77 @@ function New-StatusRow {
 
 function Show-SetupWindow {
   $setup = New-Object System.Windows.Forms.Form
-  $setup.Text = "Codex Claude Usage Setup"
-  $setup.Size = New-Object System.Drawing.Size(440, 360)
-  $setup.MinimumSize = New-Object System.Drawing.Size(420, 340)
+  $setup.Text = "Setup"
+  $setup.Size = New-Object System.Drawing.Size(456, 372)
+  $setup.MinimumSize = New-Object System.Drawing.Size(440, 352)
   $setup.StartPosition = "CenterParent"
+  $setup.FormBorderStyle = "None"
   $setup.BackColor = $bgColor
   $setup.ForeColor = $whiteColor
   $setup.Font = $font
 
+  $setupRoot = New-Object System.Windows.Forms.TableLayoutPanel
+  $setupRoot.Dock = "Fill"
+  $setupRoot.RowCount = 2
+  $setupRoot.ColumnCount = 1
+  $setupRoot.Padding = New-Object System.Windows.Forms.Padding(1)
+  $setupRoot.BackColor = $lineColor
+  $setupRoot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 34))) | Out-Null
+  $setupRoot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+  $setup.Controls.Add($setupRoot)
+
+  $setupChrome = New-Object System.Windows.Forms.TableLayoutPanel
+  $setupChrome.Dock = "Fill"
+  $setupChrome.ColumnCount = 3
+  $setupChrome.RowCount = 1
+  $setupChrome.BackColor = $chromeColor
+  $setupChrome.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 104))) | Out-Null
+  $setupChrome.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+  $setupChrome.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 44))) | Out-Null
+  $setupRoot.Controls.Add($setupChrome, 0, 0)
+
+  $setupMark = New-Object System.Windows.Forms.Label
+  $setupMark.Dock = "Fill"
+  $setupMark.Margin = New-Object System.Windows.Forms.Padding(10, 0, 0, 0)
+  $setupMark.BackColor = $chromeColor
+  $setupMark.Text = "SETUP"
+  $setupMark.TextAlign = "MiddleLeft"
+  $setupMark.ForeColor = $codexColor
+  $setupMark.Font = New-Object System.Drawing.Font("Cascadia Mono", 8, [System.Drawing.FontStyle]::Bold)
+
+  $setupTitle = New-Object System.Windows.Forms.Label
+  $setupTitle.Dock = "Fill"
+  $setupTitle.Text = "Connections and startup"
+  $setupTitle.TextAlign = "MiddleLeft"
+  $setupTitle.ForeColor = $mutedColor
+  $setupTitle.Font = New-Object System.Drawing.Font("Segoe UI", 8.2)
+
+  $setupClose = New-WindowCloseControl
+  $setupClose.Add_Click({ $setup.Close() })
+  foreach ($dragControl in @($setupChrome, $setupMark, $setupTitle)) {
+    $dragControl.Add_MouseDown({
+      param($sender, $event)
+      if ($event.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        [NativeWindowDrag]::ReleaseCapture() | Out-Null
+        [NativeWindowDrag]::SendMessage($setup.Handle, 0xA1, 0x2, 0) | Out-Null
+      }
+    })
+  }
+  $setupChrome.Controls.Add($setupMark, 0, 0)
+  $setupChrome.Controls.Add($setupTitle, 1, 0)
+  $setupChrome.Controls.Add($setupClose, 2, 0)
+
   $setupLayout = New-Object System.Windows.Forms.TableLayoutPanel
   $setupLayout.Dock = "Fill"
-  $setupLayout.Padding = New-Object System.Windows.Forms.Padding(16)
+  $setupLayout.Padding = New-Object System.Windows.Forms.Padding(18, 14, 18, 16)
   $setupLayout.ColumnCount = 1
   $setupLayout.RowCount = 4
   $setupLayout.BackColor = $bgColor
-  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 48))) | Out-Null
-  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 112))) | Out-Null
+  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44))) | Out-Null
+  $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
   $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
   $setupLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44))) | Out-Null
-  $setup.Controls.Add($setupLayout)
+  $setupRoot.Controls.Add($setupLayout, 0, 1)
 
   $setupHeader = New-Label "Setup" $titleFont $whiteColor
   $setupHeader.AutoSize = $false
@@ -341,6 +393,7 @@ function Show-SetupWindow {
   $statusPanel.RowCount = 4
   $statusPanel.BackColor = $cardColor
   $statusPanel.Padding = New-Object System.Windows.Forms.Padding(12)
+  $statusPanel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
   $statusPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 65))) | Out-Null
   $statusPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 35))) | Out-Null
   for ($index = 0; $index -lt 4; $index += 1) {
@@ -371,7 +424,7 @@ function Show-SetupWindow {
   $buttonGrid.Controls.Add($openDashboardButton, 1, 1)
   $setupLayout.Controls.Add($buttonGrid, 0, 2)
 
-  $closeButton = New-Button "Close"
+  $closeButton = New-Button "Done"
   $setupLayout.Controls.Add($closeButton, 0, 3)
 
   $codexLoginButton.Add_Click({ Start-VisibleCommand "codex login" })
@@ -455,6 +508,47 @@ $buttonColor = [System.Drawing.Color]::FromArgb(30, 36, 47)
 $buttonHotColor = [System.Drawing.Color]::FromArgb(43, 51, 66)
 $whiteColor = [System.Drawing.Color]::FromArgb(238, 242, 248)
 
+function New-WindowCloseControl {
+  $control = New-Object System.Windows.Forms.Label
+  $control.Text = ""
+  $control.Dock = "Fill"
+  $control.TextAlign = "MiddleCenter"
+  $control.BackColor = $chromeColor
+  $control.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $control.Tag = @{ Hover = $false }
+  $control.Add_Paint({
+    param($sender, $event)
+    $graphics = $event.Graphics
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $state = $sender.Tag
+    $rect = New-Object System.Drawing.Rectangle(8, 6, ($sender.Width - 16), ($sender.Height - 12))
+    $fill = if ($state.Hover) { [System.Drawing.Color]::FromArgb(70, 39, 47) } else { $chromeColor }
+    $border = if ($state.Hover) { [System.Drawing.Color]::FromArgb(172, 83, 93) } else { [System.Drawing.Color]::FromArgb(72, 82, 98) }
+    $text = if ($state.Hover) { $whiteColor } else { $mutedColor }
+    $brush = New-Object System.Drawing.SolidBrush($fill)
+    $pen = New-Object System.Drawing.Pen($border)
+    $textBrush = New-Object System.Drawing.SolidBrush($text)
+    $path = New-RoundedRectanglePath $rect 4
+    $graphics.FillPath($brush, $path)
+    $graphics.DrawPath($pen, $path)
+    $format = New-Object System.Drawing.StringFormat
+    $format.Alignment = [System.Drawing.StringAlignment]::Center
+    $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $textBounds = New-Object System.Drawing.RectangleF($rect.X, ($rect.Y - 1), $rect.Width, $rect.Height)
+    $font = New-Object System.Drawing.Font("Segoe UI Semibold", 7.5, [System.Drawing.FontStyle]::Bold)
+    $graphics.DrawString("X", $font, $textBrush, $textBounds, $format)
+    $font.Dispose()
+    $format.Dispose()
+    $path.Dispose()
+    $brush.Dispose()
+    $pen.Dispose()
+    $textBrush.Dispose()
+  })
+  $control.Add_MouseEnter({ param($sender, $event) $sender.Tag = @{ Hover = $true }; $sender.Invalidate() })
+  $control.Add_MouseLeave({ param($sender, $event) $sender.Tag = @{ Hover = $false }; $sender.Invalidate() })
+  return $control
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Codex Claude Usage"
 $form.Size = New-Object System.Drawing.Size(410, 456)
@@ -501,15 +595,7 @@ $titleText.Dock = "Fill"
 $titleText.TextAlign = "MiddleLeft"
 $titleText.ForeColor = $mutedColor
 $titleText.Font = New-Object System.Drawing.Font("Segoe UI", 8.2)
-$closeButtonChrome = New-Object System.Windows.Forms.Label
-$closeButtonChrome.Text = ""
-$closeButtonChrome.Dock = "Fill"
-$closeButtonChrome.TextAlign = "MiddleCenter"
-$closeButtonChrome.ForeColor = $whiteColor
-$closeButtonChrome.BackColor = $chromeColor
-$closeButtonChrome.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8, [System.Drawing.FontStyle]::Bold)
-$closeButtonChrome.Cursor = [System.Windows.Forms.Cursors]::Hand
-$closeButtonChrome.Tag = @{ Hover = $false }
+$closeButtonChrome = New-WindowCloseControl
 foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
   $dragControl.Add_MouseDown({
     param($sender, $event)
@@ -519,27 +605,6 @@ foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
     }
   })
 }
-$closeButtonChrome.Add_Paint({
-  param($sender, $event)
-  $graphics = $event.Graphics
-  $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $state = $sender.Tag
-  $fill = if ($state.Hover) { [System.Drawing.Color]::FromArgb(178, 73, 82) } else { [System.Drawing.Color]::FromArgb(112, 52, 60) }
-  $brush = New-Object System.Drawing.SolidBrush($fill)
-  $textBrush = New-Object System.Drawing.SolidBrush($whiteColor)
-  $bounds = New-Object System.Drawing.Rectangle(12, 8, 20, 20)
-  $textBounds = New-Object System.Drawing.RectangleF(12, 7, 20, 20)
-  $graphics.FillEllipse($brush, $bounds)
-  $format = New-Object System.Drawing.StringFormat
-  $format.Alignment = [System.Drawing.StringAlignment]::Center
-  $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-  $graphics.DrawString("X", $sender.Font, $textBrush, $textBounds, $format)
-  $format.Dispose()
-  $brush.Dispose()
-  $textBrush.Dispose()
-})
-$closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.Tag = @{ Hover = $true }; $closeButtonChrome.Invalidate() })
-$closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.Tag = @{ Hover = $false }; $closeButtonChrome.Invalidate() })
 $closeButtonChrome.Add_Click({ $form.Close() })
 $titleBar.Controls.Add($brandMark, 0, 0)
 $titleBar.Controls.Add($titleText, 1, 0)
