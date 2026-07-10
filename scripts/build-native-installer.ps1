@@ -64,6 +64,8 @@ UninstPage uninstConfirm
 UninstPage instfiles
 
 Section "Install"
+  IfFileExists "`$INSTDIR\*.*" 0 +2
+  RMDir /r "`$INSTDIR"
   SetOutPath "`$INSTDIR"
   File /r "$portableEscaped\*"
   CreateDirectory "`$SMPROGRAMS\$AppName"
