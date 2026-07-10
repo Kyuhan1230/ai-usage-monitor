@@ -33,6 +33,12 @@ $ClaudePollIntervalMs = Get-PollIntervalMs $env:CODEX_USAGE_CLAUDE_POLL_INTERVAL
 $DashboardProcess = $null
 $CodexPollerProcess = $null
 $ClaudePollerProcess = $null
+$ExitRequested = $false
+$AppScriptPath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+  [string](Resolve-Path -LiteralPath $PSCommandPath)
+} else {
+  [string](Resolve-Path -LiteralPath $MyInvocation.MyCommand.Path)
+}
 
 function U {
   param([string]$Hex)
@@ -364,7 +370,7 @@ function Set-StartupRegistration {
   $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
   $name = "Codex Claude Usage Lite"
   if ($Enabled) {
-    $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f $MyInvocation.MyCommand.Path
+    $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f $script:AppScriptPath
     New-ItemProperty -Path $runKey -Name $name -Value $command -PropertyType String -Force | Out-Null
   } else {
     Remove-ItemProperty -Path $runKey -Name $name -ErrorAction SilentlyContinue
@@ -374,7 +380,13 @@ function Set-StartupRegistration {
 function Test-StartupRegistration {
   $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
   $value = Get-ItemProperty -Path $runKey -Name "Codex Claude Usage Lite" -ErrorAction SilentlyContinue
-  return $null -ne $value
+  if ($null -eq $value) {
+    return $false
+  }
+  $command = [string]$value."Codex Claude Usage Lite"
+  return -not [string]::IsNullOrWhiteSpace($command) -and
+    $command.Contains("-File") -and
+    $command.Contains($script:AppScriptPath)
 }
 
 if ($SelfTest) {
@@ -753,7 +765,7 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 [void]$menu.Items.Add((U "C5F4 AE30"), $null, { $form.Show(); $form.WindowState = "Normal"; $form.Activate() })
 [void]$menu.Items.Add("Setup", $null, { Show-SetupWindow })
 [void]$menu.Items.Add((U "B300 C2DC BCF4 B4DC"), $null, { Start-Dashboard })
-[void]$menu.Items.Add((U "C885 B8CC"), $null, { $form.Close() })
+[void]$menu.Items.Add((U "C885 B8CC"), $null, { $script:ExitRequested = $true; $form.Close() })
 $notify.ContextMenuStrip = $menu
 $notify.Add_DoubleClick({ $form.Show(); $form.WindowState = "Normal"; $form.Activate() })
 
@@ -763,6 +775,14 @@ $timer.Add_Tick({ Update-Ui })
 $timer.Start()
 
 $form.Add_FormClosing({
+  param($sender, $event)
+
+  if (-not $script:ExitRequested) {
+    $event.Cancel = $true
+    $form.Hide()
+    return
+  }
+
   $timer.Stop()
   $notify.Visible = $false
   Stop-Collectors
