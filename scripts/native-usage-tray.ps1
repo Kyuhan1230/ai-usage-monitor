@@ -479,13 +479,12 @@ $form.Controls.Add($rootLayout)
 
 $titleBar = New-Object System.Windows.Forms.TableLayoutPanel
 $titleBar.Dock = "Fill"
-$titleBar.ColumnCount = 4
+$titleBar.ColumnCount = 3
 $titleBar.RowCount = 1
 $titleBar.BackColor = $chromeColor
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
-$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 36))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 40))) | Out-Null
 $rootLayout.Controls.Add($titleBar, 0, 0)
 
 $brandMark = New-Object System.Windows.Forms.Panel
@@ -498,12 +497,6 @@ $titleText.Dock = "Fill"
 $titleText.TextAlign = "MiddleLeft"
 $titleText.ForeColor = $whiteColor
 $titleText.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.7, [System.Drawing.FontStyle]::Bold)
-$minButton = New-Object System.Windows.Forms.Label
-$minButton.Text = "-"
-$minButton.Dock = "Fill"
-$minButton.TextAlign = "MiddleCenter"
-$minButton.ForeColor = $mutedColor
-$minButton.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
 $closeButtonChrome = New-Object System.Windows.Forms.Label
 $closeButtonChrome.Text = "x"
 $closeButtonChrome.Dock = "Fill"
@@ -519,16 +512,12 @@ foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
     }
   })
 }
-$minButton.Add_MouseEnter({ $minButton.BackColor = $buttonHotColor })
-$minButton.Add_MouseLeave({ $minButton.BackColor = $chromeColor })
-$minButton.Add_Click({ $form.WindowState = "Minimized" })
 $closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(76, 38, 44); $closeButtonChrome.ForeColor = $whiteColor })
 $closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.BackColor = $chromeColor; $closeButtonChrome.ForeColor = $mutedColor })
 $closeButtonChrome.Add_Click({ $form.Close() })
 $titleBar.Controls.Add($brandMark, 0, 0)
 $titleBar.Controls.Add($titleText, 1, 0)
-$titleBar.Controls.Add($minButton, 2, 0)
-$titleBar.Controls.Add($closeButtonChrome, 3, 0)
+$titleBar.Controls.Add($closeButtonChrome, 2, 0)
 
 $layout = New-Object System.Windows.Forms.TableLayoutPanel
 $layout.Dock = "Fill"
