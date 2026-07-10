@@ -482,21 +482,25 @@ $titleBar.Dock = "Fill"
 $titleBar.ColumnCount = 3
 $titleBar.RowCount = 1
 $titleBar.BackColor = $chromeColor
-$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 118))) | Out-Null
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 44))) | Out-Null
 $rootLayout.Controls.Add($titleBar, 0, 0)
 
-$brandMark = New-Object System.Windows.Forms.Panel
+$brandMark = New-Object System.Windows.Forms.Label
 $brandMark.Dock = "Fill"
-$brandMark.Margin = New-Object System.Windows.Forms.Padding(10, 9, 8, 9)
-$brandMark.BackColor = $codexColor
+$brandMark.Margin = New-Object System.Windows.Forms.Padding(10, 0, 0, 0)
+$brandMark.BackColor = $chromeColor
+$brandMark.Text = "LOCAL QUOTA"
+$brandMark.TextAlign = "MiddleLeft"
+$brandMark.ForeColor = $codexColor
+$brandMark.Font = New-Object System.Drawing.Font("Cascadia Mono", 8, [System.Drawing.FontStyle]::Bold)
 $titleText = New-Object System.Windows.Forms.Label
-$titleText.Text = "Codex Claude Usage"
+$titleText.Text = "Codex / Claude Usage"
 $titleText.Dock = "Fill"
 $titleText.TextAlign = "MiddleLeft"
-$titleText.ForeColor = $whiteColor
-$titleText.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.7, [System.Drawing.FontStyle]::Bold)
+$titleText.ForeColor = $mutedColor
+$titleText.Font = New-Object System.Drawing.Font("Segoe UI", 8.2)
 $closeButtonChrome = New-Object System.Windows.Forms.Label
 $closeButtonChrome.Text = ""
 $closeButtonChrome.Dock = "Fill"
@@ -792,7 +796,7 @@ $header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Wi
 $header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 78))) | Out-Null
 $header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 20))) | Out-Null
 $header.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$headerSub = New-Label "LOCAL QUOTA INSTRUMENT" $monoFont $mutedColor
+$headerSub = New-Label "STATUS MONITOR" $monoFont $mutedColor
 $headerTitle = New-Label "Codex / Claude" $titleFont $whiteColor
 $livePill = New-Object System.Windows.Forms.Label
 $livePill.Text = "LIVE"
