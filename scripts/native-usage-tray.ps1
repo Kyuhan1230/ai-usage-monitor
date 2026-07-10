@@ -484,7 +484,7 @@ $titleBar.RowCount = 1
 $titleBar.BackColor = $chromeColor
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 28))) | Out-Null
 $titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
-$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 40))) | Out-Null
+$titleBar.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 68))) | Out-Null
 $rootLayout.Controls.Add($titleBar, 0, 0)
 
 $brandMark = New-Object System.Windows.Forms.Panel
@@ -498,11 +498,13 @@ $titleText.TextAlign = "MiddleLeft"
 $titleText.ForeColor = $whiteColor
 $titleText.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.7, [System.Drawing.FontStyle]::Bold)
 $closeButtonChrome = New-Object System.Windows.Forms.Label
-$closeButtonChrome.Text = "x"
+$closeButtonChrome.Text = "Close"
 $closeButtonChrome.Dock = "Fill"
 $closeButtonChrome.TextAlign = "MiddleCenter"
-$closeButtonChrome.ForeColor = $mutedColor
-$closeButtonChrome.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
+$closeButtonChrome.ForeColor = $whiteColor
+$closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(91, 45, 52)
+$closeButtonChrome.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5, [System.Drawing.FontStyle]::Bold)
+$closeButtonChrome.Cursor = [System.Windows.Forms.Cursors]::Hand
 foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
   $dragControl.Add_MouseDown({
     param($sender, $event)
@@ -512,8 +514,8 @@ foreach ($dragControl in @($titleBar, $titleText, $brandMark)) {
     }
   })
 }
-$closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(76, 38, 44); $closeButtonChrome.ForeColor = $whiteColor })
-$closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.BackColor = $chromeColor; $closeButtonChrome.ForeColor = $mutedColor })
+$closeButtonChrome.Add_MouseEnter({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(126, 56, 65); $closeButtonChrome.ForeColor = $whiteColor })
+$closeButtonChrome.Add_MouseLeave({ $closeButtonChrome.BackColor = [System.Drawing.Color]::FromArgb(91, 45, 52); $closeButtonChrome.ForeColor = $whiteColor })
 $closeButtonChrome.Add_Click({ $form.Close() })
 $titleBar.Controls.Add($brandMark, 0, 0)
 $titleBar.Controls.Add($titleText, 1, 0)
