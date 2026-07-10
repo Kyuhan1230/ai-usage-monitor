@@ -77,11 +77,12 @@ Section "Install"
   SetOutPath "`$INSTDIR"
   File /r "$portableEscaped\*"
   CreateDirectory "`$SMPROGRAMS\$AppName"
-  CreateShortcut "`$SMPROGRAMS\$AppName\$AppName.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\$AppName.exe" 0
-  CreateShortcut "`$DESKTOP\$AppName.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\$AppName.exe" 0
+  CreateShortcut "`$SMPROGRAMS\$AppName\$AppName.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\assets\codex-claude-usage.ico" 0
+  CreateShortcut "`$DESKTOP\$AppName.lnk" "`$INSTDIR\$AppName.exe" "" "`$INSTDIR\assets\codex-claude-usage.ico" 0
   WriteUninstaller "`$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "DisplayName" "$AppName"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "UninstallString" '"`$INSTDIR\Uninstall.exe"'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "DisplayIcon" "`$INSTDIR\assets\codex-claude-usage.ico"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "InstallLocation" "`$INSTDIR"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName" "NoRepair" 1
