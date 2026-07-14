@@ -93,6 +93,16 @@ if (process.argv.includes("--claude-usage-poller")) {
 app.setName(APP_NAME);
 app.setAppUserModelId("local.codex-claude-usage");
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  return;
+}
+
+app.on("second-instance", () => {
+  showCompactWindow();
+});
+
 function readJsonSafe(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -213,7 +223,17 @@ function isPollerStatusFresh(statusPath, pollIntervalMs, expectedCaptureMethod) 
   return Date.now() - timestamp <= maxAgeMs;
 }
 
-function pollerArgs() {
+function childRuntime() {
+  if (app.isPackaged) {
+    return { command: process.execPath, entryArgs: [] };
+  }
+  if (process.env.npm_node_execpath) {
+    return { command: process.env.npm_node_execpath, entryArgs: [path.join(__dirname, "main.js")] };
+  }
+  return { command: process.execPath, entryArgs: [ROOT] };
+}
+
+function pollerArgs(startupDelayMs = null) {
   const args = [
     "--codex-status-poller",
     "--status-path",
@@ -225,10 +245,13 @@ function pollerArgs() {
     "--codex-command",
     process.platform === "win32" ? "codex.exe" : "codex",
   ];
-  return app.isPackaged ? args : [ROOT, ...args];
+  if (startupDelayMs !== null) {
+    args.push("--startup-delay-ms", String(startupDelayMs));
+  }
+  return args;
 }
 
-function claudePollerArgs() {
+function claudePollerArgs(startupDelayMs = null) {
   const args = [
     "--claude-usage-poller",
     "--status-path",
@@ -238,17 +261,25 @@ function claudePollerArgs() {
     "--claude-command",
     process.platform === "win32" ? "claude.exe" : "claude",
   ];
-  return app.isPackaged ? args : [ROOT, ...args];
+  if (startupDelayMs !== null) {
+    args.push("--startup-delay-ms", String(startupDelayMs));
+  }
+  return args;
 }
 
-function startStatusPoller() {
+function startStatusPoller({ force = false, startupDelayMs = null } = {}) {
   if (statusPollerProcess && statusPollerProcess.exitCode === null) {
-    return;
+    if (force) {
+      stopStatusPoller();
+    } else {
+      return;
+    }
   }
 
   const existingPid = readPollerPid(POLLER_PID_PATH);
   if (
-    existingPid !== null
+    !force
+    && existingPid !== null
     && isPidRunning(existingPid)
     && isKnownStatusPollerPid(existingPid)
     && isPollerStatusFresh(CODEX_STATUS_PATH, CODEX_POLL_INTERVAL_MS, "codex_status_poller")
@@ -264,7 +295,8 @@ function startStatusPoller() {
   }
 
   fs.mkdirSync(STATUS_DIR, { recursive: true });
-  statusPollerProcess = spawn(process.execPath, pollerArgs(), {
+  const runtime = childRuntime();
+  statusPollerProcess = spawn(runtime.command, [...runtime.entryArgs, ...pollerArgs(startupDelayMs)], {
     cwd: ROOT,
     env: process.env,
     windowsHide: true,
@@ -282,14 +314,19 @@ function startStatusPoller() {
   });
 }
 
-function startClaudeUsagePoller() {
+function startClaudeUsagePoller({ force = false, startupDelayMs = null } = {}) {
   if (claudePollerProcess && claudePollerProcess.exitCode === null) {
-    return;
+    if (force) {
+      stopClaudeUsagePoller();
+    } else {
+      return;
+    }
   }
 
   const existingPid = readPollerPid(CLAUDE_POLLER_PID_PATH);
   if (
-    existingPid !== null
+    !force
+    && existingPid !== null
     && isPidRunning(existingPid)
     && isKnownStatusPollerPid(existingPid)
     && isPollerStatusFresh(CLAUDE_STATUS_PATH, CLAUDE_POLL_INTERVAL_MS, "claude_usage_command")
@@ -305,7 +342,8 @@ function startClaudeUsagePoller() {
   }
 
   fs.mkdirSync(STATUS_DIR, { recursive: true });
-  claudePollerProcess = spawn(process.execPath, claudePollerArgs(), {
+  const runtime = childRuntime();
+  claudePollerProcess = spawn(runtime.command, [...runtime.entryArgs, ...claudePollerArgs(startupDelayMs)], {
     cwd: ROOT,
     env: process.env,
     windowsHide: true,
@@ -448,20 +486,41 @@ function detectClaudeHook() {
   return normalizedCommand.includes("--claude-status-hook") || normalizedCommand.includes(CLAUDE_HOOK_PATH.toLowerCase());
 }
 
+function executableCandidates(command) {
+  if (path.extname(command)) {
+    return [command];
+  }
+  const pathExt = process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD";
+  return pathExt.split(";").filter(Boolean).map((extension) => `${command}${extension.toLowerCase()}`);
+}
+
 function commandExists(command) {
-  const result = spawnSync("where.exe", [command], {
-    windowsHide: true,
-    encoding: "utf8",
-  });
-  return result.status === 0;
+  const pathEntries = String(process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  for (const entry of pathEntries) {
+    for (const candidate of executableCandidates(command)) {
+      try {
+        if (fs.existsSync(path.join(entry, candidate))) {
+          return true;
+        }
+      } catch (error) {
+        // Ignore invalid PATH entries and keep checking the rest.
+      }
+    }
+  }
+  return false;
+}
+
+function commandExistsAny(...commands) {
+  return commands.some((command) => commandExists(command));
 }
 
 function claudeHookCommand() {
-  const exe = process.execPath.replace(/"/g, '\\"');
+  const runtime = childRuntime();
+  const exe = runtime.command.replace(/"/g, '\\"');
   if (app.isPackaged) {
     return `"${exe}" --claude-status-hook`;
   }
-  return `"${exe}" "${ROOT.replace(/"/g, '\\"')}" --claude-status-hook`;
+  return `"${exe}" "${path.join(__dirname, "main.js").replace(/"/g, '\\"')}" --claude-status-hook`;
 }
 
 function installClaudeHook() {
@@ -553,12 +612,18 @@ function buildSetupSnapshot() {
   return {
     ...buildSnapshot(),
     setup: {
-      codexCommand: commandExists("codex.exe") || commandExists("codex"),
-      claudeCommand: commandExists("claude.exe") || commandExists("claude"),
-      uvicornCommand: commandExists("uvicorn.exe") || commandExists("uvicorn"),
+      codexCommand: commandExistsAny("codex.exe", "codex"),
+      claudeCommand: commandExistsAny("claude.exe", "claude"),
+      uvicornCommand: commandExistsAny("uvicorn.exe", "uvicorn"),
       hookCommand: claudeHookCommand(),
     }
   };
+}
+
+function refreshUsageSnapshot() {
+  startStatusPoller({ force: true, startupDelayMs: 0 });
+  startClaudeUsagePoller({ force: true, startupDelayMs: 0 });
+  return buildSnapshot();
 }
 
 function showSetupWindow() {
@@ -610,7 +675,9 @@ function createTray() {
 }
 
 ipcMain.handle("status:snapshot", () => buildSnapshot());
+ipcMain.handle("status:refresh", () => refreshUsageSnapshot());
 ipcMain.handle("setup:snapshot", () => buildSetupSnapshot());
+ipcMain.handle("setup:refresh", () => buildSetupSnapshot());
 ipcMain.handle("window:setAlwaysOnTop", (_event, enabled) => {
   if (compactWindow) {
     compactWindow.setAlwaysOnTop(Boolean(enabled), "floating");
@@ -637,7 +704,7 @@ ipcMain.handle("dashboard:open", () => {
 });
 ipcMain.handle("setup:open", () => {
   showSetupWindow();
-  return buildSetupSnapshot();
+  return true;
 });
 ipcMain.handle("setup:installClaudeHook", () => {
   installClaudeHook();

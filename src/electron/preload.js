@@ -4,7 +4,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("usageApp", {
   snapshot: () => ipcRenderer.invoke("status:snapshot"),
+  refreshSnapshot: () => ipcRenderer.invoke("status:refresh"),
   setupSnapshot: () => ipcRenderer.invoke("setup:snapshot"),
+  refreshSetupSnapshot: () => ipcRenderer.invoke("setup:refresh"),
   setAlwaysOnTop: (enabled) => ipcRenderer.invoke("window:setAlwaysOnTop", enabled),
   setOpacity: (value) => ipcRenderer.invoke("window:setOpacity", value),
   minimize: () => ipcRenderer.invoke("window:minimize"),
