@@ -20,6 +20,7 @@ const ids = [
   "minimize",
   "quit",
   "refresh",
+  "open-setup",
   "open-dashboard",
 ];
 
@@ -38,13 +39,6 @@ function tone(percent) {
   return "var(--ok)";
 }
 
-function limitText(limit, fallback) {
-  if (!limit || !Number.isInteger(limit.remaining_percent)) {
-    return fallback;
-  }
-  return `${limit.remaining_percent}% 남음`;
-}
-
 function percentText(limit) {
   if (!limit || !Number.isInteger(limit.remaining_percent)) {
     return "--";
@@ -57,6 +51,13 @@ function resetText(limit) {
     return "reset 정보 없음";
   }
   return normalizeResetText(limit.reset_text);
+}
+
+function firstResetText(...limits) {
+  const limit = limits.find((candidate) => (
+    candidate && typeof candidate.reset_text === "string" && candidate.reset_text
+  ));
+  return resetText(limit);
 }
 
 function normalizeResetText(value) {
@@ -126,27 +127,34 @@ function render(snapshot) {
   el["claude-state"].textContent = stateText(snapshot.claude.connected, snapshot.claude.ageMs, "오래됨");
   el["claude-five-hour"].textContent = percentText(claudeFiveHour);
   el["claude-seven-day"].textContent = percentText(claudeSevenDay);
-  el["claude-reset"].textContent = resetText(claudeLimit);
+  el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
   el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
 
   el["always-on-top"].checked = Boolean(snapshot.window.alwaysOnTop);
   el.opacity.value = Math.round((snapshot.window.opacity || 0.96) * 100);
 }
 
-async function refresh() {
-  const snapshot = await window.usageApp.snapshot();
+async function refresh(force = false) {
+  const snapshot = force ? await window.usageApp.refreshSnapshot() : await window.usageApp.snapshot();
   render(snapshot);
 }
 
 el["always-on-top"].addEventListener("change", async () => {
   render(await window.usageApp.setAlwaysOnTop(el["always-on-top"].checked));
 });
-el.opacity.addEventListener("input", async () => {
-  render(await window.usageApp.setOpacity(Number(el.opacity.value) / 100));
+
+let opacityTimer = null;
+el.opacity.addEventListener("input", () => {
+  clearTimeout(opacityTimer);
+  opacityTimer = setTimeout(async () => {
+    render(await window.usageApp.setOpacity(Number(el.opacity.value) / 100));
+  }, 120);
 });
+
 el.minimize.addEventListener("click", () => window.usageApp.minimize());
 el.quit.addEventListener("click", () => window.usageApp.quit());
-el.refresh.addEventListener("click", refresh);
+el.refresh.addEventListener("click", () => refresh(true));
+el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
 el["open-dashboard"].addEventListener("click", () => window.usageApp.openDashboard());
 
 refresh();

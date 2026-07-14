@@ -40,8 +40,8 @@ function statusText(commandOk, connected, ageMs, missingCommand, staleHelp) {
   return `정상: ${ageText(ageMs)}`;
 }
 
-async function refresh() {
-  const snapshot = await window.usageApp.setupSnapshot();
+async function refresh(force = false) {
+  const snapshot = force ? await window.usageApp.refreshSetupSnapshot() : await window.usageApp.setupSnapshot();
   codexDetail.textContent = statusText(
     snapshot.setup.codexCommand,
     snapshot.codex.connected,
@@ -57,13 +57,13 @@ async function refresh() {
     "백그라운드 수집기가 1분마다 claude /usage를 다시 캡처합니다.",
   );
   hookDetail.textContent = snapshot.claude.hookInstalled
-    ? `선택: statusLine hook도 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`
-    : "선택: claude /usage 수집만으로도 잔여율은 갱신됩니다. statusLine 연동이 필요하면 hook 설치를 누르세요.";
+    ? `선택: statusLine hook이 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`
+    : "선택: claude /usage 수집만으로도 요약은 갱신됩니다. statusLine 연동이 필요하면 hook 설치를 누르세요.";
   runtimeDetail.textContent = snapshot.setup.uvicornCommand
-    ? "정상: uvicorn을 찾았습니다. 내부 대시보드 서버를 띄울 수 있습니다."
+    ? "정상: uvicorn을 찾았습니다. 대시보드 서버를 띄울 수 있습니다."
     : "필요: uvicorn 명령을 찾지 못했습니다. Python 환경에 fastapi/uvicorn 설치가 필요합니다.";
   startupDetail.textContent = snapshot.launchAtLogin
-    ? "정상: Windows 로그인 후 앱이 자동 실행됩니다."
+    ? "정상: Windows 로그인 때 앱이 자동 실행됩니다."
     : "주의: 자동 실행 등록이 확인되지 않았습니다. 앱을 다시 시작하면 재등록을 시도합니다.";
   startupBadge.textContent = snapshot.launchAtLogin ? "정상" : "주의";
 }
@@ -75,6 +75,6 @@ document.getElementById("install-hook").addEventListener("click", async () => {
   await refresh();
 });
 document.getElementById("open-dashboard").addEventListener("click", () => window.usageApp.openDashboard());
-document.getElementById("refresh").addEventListener("click", refresh);
+document.getElementById("refresh").addEventListener("click", () => refresh(true));
 
 refresh();
