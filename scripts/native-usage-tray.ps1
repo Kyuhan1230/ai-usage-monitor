@@ -126,6 +126,17 @@ function Get-ResetText {
   return [string]$Limit.reset_text
 }
 
+function Get-FirstResetText {
+  param($Limits)
+
+  foreach ($limit in @($Limits)) {
+    if ($null -ne $limit -and -not [string]::IsNullOrWhiteSpace($limit.reset_text)) {
+      return [string]$limit.reset_text
+    }
+  }
+  return U "0072 0065 0073 0065 0074 0020 C815 BCF4 0020 C5C6 C74C"
+}
+
 function Start-HiddenProcess {
   param([string]$FilePath, [string[]]$ArgumentList)
 
@@ -217,6 +228,8 @@ function Stop-PidFileProcess {
 }
 
 function Start-Collectors {
+  param([switch]$Immediate)
+
   New-Item -ItemType Directory -Path $StatusDir -Force | Out-Null
   $node = (Get-Command node.exe -ErrorAction Stop).Source
   Stop-PidFileProcess -PidPath $CodexPidPath
@@ -225,21 +238,29 @@ function Start-Collectors {
   $codexScript = Join-Path $Root "src\node\codex-status-poller.js"
   $claudeScript = Join-Path $Root "src\node\claude-usage-poller.js"
 
-  $script:CodexPollerProcess = Start-HiddenProcess $node @(
+  $codexArgs = @(
     $codexScript,
     "--status-path", $CodexStatusPath,
     "--history-dir", $HistoryDir,
     "--poll-interval-ms", "$CodexPollIntervalMs",
     "--codex-command", "codex.exe"
   )
+  if ($Immediate) {
+    $codexArgs += @("--startup-delay-ms", "0")
+  }
+  $script:CodexPollerProcess = Start-HiddenProcess $node $codexArgs
   Set-Content -LiteralPath $CodexPidPath -Value $script:CodexPollerProcess.Id -Encoding UTF8
 
-  $script:ClaudePollerProcess = Start-HiddenProcess $node @(
+  $claudeArgs = @(
     $claudeScript,
     "--status-path", $ClaudeStatusPath,
     "--poll-interval-ms", "$ClaudePollIntervalMs",
     "--claude-command", "claude.exe"
   )
+  if ($Immediate) {
+    $claudeArgs += @("--startup-delay-ms", "0")
+  }
+  $script:ClaudePollerProcess = Start-HiddenProcess $node $claudeArgs
   Set-Content -LiteralPath $ClaudePidPath -Value $script:ClaudePollerProcess.Id -Encoding UTF8
 }
 
@@ -489,6 +510,7 @@ function Set-StartupRegistration {
 
   $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
   $name = "Codex Claude Usage Lite"
+  Remove-LegacyStartupRegistrations
   if ($Enabled) {
     $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f $script:AppScriptPath
     New-ItemProperty -Path $runKey -Name $name -Value $command -PropertyType String -Force | Out-Null
@@ -499,6 +521,7 @@ function Set-StartupRegistration {
 
 function Test-StartupRegistration {
   $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+  Remove-StaleStartupRegistration
   $value = Get-ItemProperty -Path $runKey -Name "Codex Claude Usage Lite" -ErrorAction SilentlyContinue
   if ($null -eq $value) {
     return $false
@@ -507,6 +530,25 @@ function Test-StartupRegistration {
   return -not [string]::IsNullOrWhiteSpace($command) -and
     $command.Contains("-File") -and
     $command.Contains($script:AppScriptPath)
+}
+
+function Remove-StaleStartupRegistration {
+  $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+  $value = Get-ItemProperty -Path $runKey -Name "Codex Claude Usage Lite" -ErrorAction SilentlyContinue
+  if ($null -eq $value) {
+    return
+  }
+  $command = [string]$value."Codex Claude Usage Lite"
+  if (-not [string]::IsNullOrWhiteSpace($command) -and -not $command.Contains($script:AppScriptPath)) {
+    Remove-ItemProperty -Path $runKey -Name "Codex Claude Usage Lite" -ErrorAction SilentlyContinue
+  }
+}
+
+function Remove-LegacyStartupRegistrations {
+  $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+  foreach ($name in @("local.codex-claude-usage", "electron.app.Electron")) {
+    Remove-ItemProperty -Path $runKey -Name $name -ErrorAction SilentlyContinue
+  }
 }
 
 if ($SelfTest) {
@@ -520,6 +562,8 @@ if ($SelfTest) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+Remove-LegacyStartupRegistrations
+Remove-StaleStartupRegistration
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -1049,12 +1093,20 @@ function Update-Ui {
   $claudeCard.State.Text = Get-StateText $claude
   $claudeCard.First.Text = if ($claudeFiveHour) { Get-PercentText $claudeFiveHour } else { Get-UsageWindowText $claudeDayWindow }
   $claudeCard.Second.Text = if ($claudeSevenDay) { Get-PercentText $claudeSevenDay } else { Get-UsageWindowText $claudeWeekWindow }
-  $claudeCard.Reset.Text = Get-ResetText $claudeMain
+  $claudeCard.Reset.Text = Get-FirstResetText @($claudeMain, $claudeSevenDay, $claudeFiveHour)
   $claudeCard.Age.Text = Get-StatusAgeText $claude
   Set-Dial $claudeCard $claudeRemainingValue
 }
 
-$refreshButton.Add_Click({ Update-Ui })
+function Refresh-Now {
+  try {
+    Start-Collectors -Immediate
+  } catch {
+  }
+  Update-Ui
+}
+
+$refreshButton.Add_Click({ Refresh-Now })
 $setupButton.Add_Click({ Show-SetupWindow })
 $dashboardButton.Add_Click({ Start-Dashboard })
 
