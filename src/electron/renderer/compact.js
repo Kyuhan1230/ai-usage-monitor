@@ -135,8 +135,31 @@ function render(snapshot) {
 }
 
 async function refresh(force = false) {
-  const snapshot = force ? await window.usageApp.refreshSnapshot() : await window.usageApp.snapshot();
-  render(snapshot);
+  if (!force) {
+    render(await window.usageApp.snapshot());
+    return;
+  }
+
+  el.refresh.disabled = true;
+  let progressPending = false;
+  const progressTimer = setInterval(async () => {
+    if (progressPending) {
+      return;
+    }
+    progressPending = true;
+    try {
+      render(await window.usageApp.snapshot());
+    } finally {
+      progressPending = false;
+    }
+  }, 1000);
+
+  try {
+    render(await window.usageApp.refreshSnapshot());
+  } finally {
+    clearInterval(progressTimer);
+    el.refresh.disabled = false;
+  }
 }
 
 el["always-on-top"].addEventListener("change", async () => {

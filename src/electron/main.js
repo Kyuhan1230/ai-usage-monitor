@@ -300,19 +300,26 @@ function startStatusPoller({ force = false, startupDelayMs = null } = {}) {
 
   fs.mkdirSync(STATUS_DIR, { recursive: true });
   const runtime = childRuntime();
-  statusPollerProcess = spawn(runtime.command, [...runtime.entryArgs, ...pollerArgs(startupDelayMs)], {
+  const child = spawn(runtime.command, [...runtime.entryArgs, ...pollerArgs(startupDelayMs)], {
     cwd: ROOT,
     env: process.env,
     windowsHide: true,
     stdio: "ignore",
   });
-  fs.writeFileSync(POLLER_PID_PATH, String(statusPollerProcess.pid), "utf8");
+  statusPollerProcess = child;
+  fs.writeFileSync(POLLER_PID_PATH, String(child.pid), "utf8");
 
-  statusPollerProcess.on("error", () => {
+  child.on("error", () => {
+    if (statusPollerProcess !== child) {
+      return;
+    }
     statusPollerProcess = null;
     scheduleStatusPollerRestart();
   });
-  statusPollerProcess.on("exit", () => {
+  child.on("exit", () => {
+    if (statusPollerProcess !== child) {
+      return;
+    }
     statusPollerProcess = null;
     scheduleStatusPollerRestart();
   });
@@ -347,19 +354,26 @@ function startClaudeUsagePoller({ force = false, startupDelayMs = null } = {}) {
 
   fs.mkdirSync(STATUS_DIR, { recursive: true });
   const runtime = childRuntime();
-  claudePollerProcess = spawn(runtime.command, [...runtime.entryArgs, ...claudePollerArgs(startupDelayMs)], {
+  const child = spawn(runtime.command, [...runtime.entryArgs, ...claudePollerArgs(startupDelayMs)], {
     cwd: ROOT,
     env: process.env,
     windowsHide: true,
     stdio: "ignore",
   });
-  fs.writeFileSync(CLAUDE_POLLER_PID_PATH, String(claudePollerProcess.pid), "utf8");
+  claudePollerProcess = child;
+  fs.writeFileSync(CLAUDE_POLLER_PID_PATH, String(child.pid), "utf8");
 
-  claudePollerProcess.on("error", () => {
+  child.on("error", () => {
+    if (claudePollerProcess !== child) {
+      return;
+    }
     claudePollerProcess = null;
     scheduleClaudePollerRestart();
   });
-  claudePollerProcess.on("exit", () => {
+  child.on("exit", () => {
+    if (claudePollerProcess !== child) {
+      return;
+    }
     claudePollerProcess = null;
     scheduleClaudePollerRestart();
   });
@@ -391,8 +405,9 @@ function stopStatusPoller() {
   if (!statusPollerProcess || statusPollerProcess.exitCode !== null) {
     return;
   }
-  statusPollerProcess.kill();
+  const child = statusPollerProcess;
   statusPollerProcess = null;
+  child.kill();
 }
 
 function stopClaudeUsagePoller() {
@@ -401,8 +416,9 @@ function stopClaudeUsagePoller() {
   if (!claudePollerProcess || claudePollerProcess.exitCode !== null) {
     return;
   }
-  claudePollerProcess.kill();
+  const child = claudePollerProcess;
   claudePollerProcess = null;
+  child.kill();
 }
 
 function showCompactWindow() {
