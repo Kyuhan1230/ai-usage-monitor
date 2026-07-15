@@ -211,6 +211,12 @@ function captureOnce(options, callback) {
   });
 }
 
+function captureOnceAsync(options) {
+  return new Promise((resolve) => {
+    captureOnce(options, resolve);
+  });
+}
+
 function startPoller(options) {
   let stopped = false;
   let timer = null;
@@ -254,6 +260,7 @@ if (require.main === module) {
 module.exports = {
   buildStatus,
   captureOnce,
+  captureOnceAsync,
   mergePreviousLimits,
   parseArgs,
   parseUsageText,

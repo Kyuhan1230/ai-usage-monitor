@@ -845,6 +845,24 @@ async function testClaudeUsagePollerParsesUsageCommand() {
   assert.strictEqual(week.reset_text, "resets 07/14 09:00");
 }
 
+async function testClaudeUsageCaptureAsyncWaitsForStatusWrite() {
+  const tempDir = makeTempDir("claude-usage-capture-async");
+  const statusPath = path.join(tempDir, "claude-status.json");
+  const { captureOnceAsync } = require(path.join(ROOT, "src", "node", "claude-usage-poller.js"));
+
+  await captureOnceAsync({
+    statusPath,
+    claudeCommand: path.join(tempDir, "missing-claude-command"),
+    pollIntervalMs: 60000,
+    timeoutMs: 1000,
+  });
+
+  const status = readJson(statusPath);
+  assert.strictEqual(status.parse_status, "failed");
+  assert.strictEqual(status.poller.state, "capture_failed");
+  assert.ok(status.poller.heartbeat_at);
+}
+
 async function testClaudeUsagePollerAcceptsSubscriptionSummary() {
   const { buildStatus } = require(path.join(ROOT, "src", "node", "claude-usage-poller.js"));
   const rawText = [
@@ -1280,6 +1298,7 @@ async function main() {
   await testClaudeStatusHookSurvivesMalformedPayload();
   await testClaudeStatusHookPreservesFreshUsageCommandStatus();
   await testClaudeUsagePollerParsesUsageCommand();
+  await testClaudeUsageCaptureAsyncWaitsForStatusWrite();
   await testClaudeUsagePollerAcceptsSubscriptionSummary();
   await testClaudeUsagePollerPreservesLimitsOnSummaryOnly();
   await testClaudeStatusHookInstallDoesNotOverwriteExistingCommand();

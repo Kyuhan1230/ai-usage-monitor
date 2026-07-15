@@ -5,7 +5,11 @@ const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { parseArgs: parseClaudePollerArgs, startPoller: startClaudePoller } = require("../node/claude-usage-poller");
+const {
+  captureOnceAsync: captureClaudeUsageOnce,
+  parseArgs: parseClaudePollerArgs,
+  startPoller: startClaudePoller,
+} = require("../node/claude-usage-poller");
 const { parseArgs: parsePollerArgs, startPoller } = require("../node/codex-status-poller");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { writeJsonAtomic } = require("../node/status-capture");
@@ -620,9 +624,10 @@ function buildSetupSnapshot() {
   };
 }
 
-function refreshUsageSnapshot() {
+async function refreshUsageSnapshot() {
   startStatusPoller({ force: true, startupDelayMs: 0 });
-  startClaudeUsagePoller({ force: true, startupDelayMs: 0 });
+  startClaudeUsagePoller({ force: true, startupDelayMs: CLAUDE_POLL_INTERVAL_MS });
+  await captureClaudeUsageOnce(parseClaudePollerArgs(claudePollerArgs()));
   return buildSnapshot();
 }
 
