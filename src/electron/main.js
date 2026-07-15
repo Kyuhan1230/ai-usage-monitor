@@ -16,6 +16,7 @@ const { writeJsonAtomic } = require("../node/status-capture");
 
 const APP_NAME = "Codex Claude Usage";
 const ROOT = path.resolve(__dirname, "..", "..");
+const APP_ICON_PATH = path.join(ROOT, "assets", "codex-claude-usage.ico");
 const DASHBOARD_URL = "http://127.0.0.1:8767";
 const STATUS_DIR = path.join(os.homedir(), ".codex-usage-wrapper");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
@@ -116,14 +117,11 @@ function readJsonSafe(filePath) {
 }
 
 function createTrayImage() {
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">',
-    '<rect width="32" height="32" rx="7" fill="#151820"/>',
-    '<path d="M8 21V11h4.5c3 0 5 2 5 5s-2 5-5 5H8Z" fill="#9bd1ff"/>',
-    '<path d="M19 21V11h5l-3 5 3 5h-5l-3-5 3-5Z" fill="#e4b363"/>',
-    "</svg>",
-  ].join("");
-  return nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+  const image = nativeImage.createFromPath(APP_ICON_PATH);
+  if (image.isEmpty()) {
+    throw new Error(`App icon could not be loaded: ${APP_ICON_PATH}`);
+  }
+  return image;
 }
 
 function startDashboardServer() {
@@ -439,6 +437,7 @@ function showCompactWindow() {
     skipTaskbar: false,
     opacity: 0.96,
     backgroundColor: "#12151c",
+    icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -465,6 +464,7 @@ function showDashboardWindow() {
     minWidth: 900,
     minHeight: 620,
     backgroundColor: "#11141b",
+    icon: APP_ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -660,6 +660,7 @@ function showSetupWindow() {
     minWidth: 500,
     minHeight: 520,
     backgroundColor: "#12151c",
+    icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

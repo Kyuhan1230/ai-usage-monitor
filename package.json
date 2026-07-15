@@ -4,6 +4,7 @@
   "private": true,
   "productName": "Codex Claude Usage",
   "author": "CodexUsage",
+  "license": "MIT",
   "description": "Local Codex CLI usage wrapper and dashboard.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -42,10 +43,12 @@
     },
     "files": [
       "package.json",
+      "assets/**/*",
       "src/**/*",
       "node_modules/**/*"
     ],
     "win": {
+      "icon": "assets/codex-claude-usage.ico",
       "target": [
         "nsis"
       ]
@@ -55,7 +58,9 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerIcon": "assets/codex-claude-usage.ico",
+      "uninstallerIcon": "assets/codex-claude-usage.ico"
     }
   }
 }

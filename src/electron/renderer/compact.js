@@ -1,5 +1,7 @@
 "use strict";
 
+const { stateText } = window.usageStatusHealth;
+
 const ids = [
   "codex-state",
   "codex-dial",
@@ -74,10 +76,6 @@ function normalizeResetText(value) {
   return value;
 }
 
-function isFresh(ageMs) {
-  return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
-}
-
 function ageText(ageMs) {
   if (!Number.isFinite(ageMs)) {
     return "갱신 기록 없음";
@@ -92,13 +90,6 @@ function ageText(ageMs) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours}시간 ${rest}분 전 갱신` : `${hours}시간 전 갱신`;
-}
-
-function stateText(connected, ageMs, staleText) {
-  if (!connected) {
-    return "확인 필요";
-  }
-  return isFresh(ageMs) ? "최신" : staleText;
 }
 
 function renderDial(prefix, limit) {
@@ -117,14 +108,30 @@ function render(snapshot) {
   const claudeLimit = claudeFiveHour || claudeSevenDay;
 
   renderDial("codex", codexLimit);
-  el["codex-state"].textContent = stateText(snapshot.codex.connected, snapshot.codex.ageMs, "지연");
+  el["codex-state"].textContent = stateText({
+    connected: snapshot.codex.connected,
+    ageMs: snapshot.codex.ageMs,
+    staleText: "지연",
+    pollerState: snapshot.codex.status && snapshot.codex.status.poller
+      ? snapshot.codex.status.poller.state
+      : null,
+    pollIntervalMs: snapshot.poller.codexIntervalMs,
+  });
   el["codex-five-hour"].textContent = percentText(codexFiveHour);
   el["codex-weekly"].textContent = percentText(codexWeekly);
   el["codex-reset"].textContent = resetText(codexLimit);
   el["codex-stamp"].textContent = ageText(snapshot.codex.ageMs);
 
   renderDial("claude", claudeLimit);
-  el["claude-state"].textContent = stateText(snapshot.claude.connected, snapshot.claude.ageMs, "오래됨");
+  el["claude-state"].textContent = stateText({
+    connected: snapshot.claude.connected,
+    ageMs: snapshot.claude.ageMs,
+    staleText: "오래됨",
+    pollerState: snapshot.claude.status && snapshot.claude.status.poller
+      ? snapshot.claude.status.poller.state
+      : null,
+    pollIntervalMs: snapshot.poller.claudeIntervalMs,
+  });
   el["claude-five-hour"].textContent = percentText(claudeFiveHour);
   el["claude-seven-day"].textContent = percentText(claudeSevenDay);
   el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);

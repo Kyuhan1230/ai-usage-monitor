@@ -845,6 +845,44 @@ async function testClaudeUsagePollerParsesUsageCommand() {
   assert.strictEqual(week.reset_text, "resets 07/14 09:00");
 }
 
+function testElectronIconConfiguration() {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const iconPath = "assets/codex-claude-usage.ico";
+
+  assert.ok(packageJson.build.files.includes("assets/**/*"));
+  assert.strictEqual(packageJson.build.win.icon, iconPath);
+  assert.strictEqual(packageJson.build.nsis.installerIcon, iconPath);
+  assert.strictEqual(packageJson.build.nsis.uninstallerIcon, iconPath);
+  assert.ok(fs.existsSync(path.join(ROOT, iconPath)));
+}
+
+function testCompactStatusHealthUsesPollIntervalAndPollerState() {
+  const { isFresh, stateText } = require(path.join(
+    ROOT,
+    "src",
+    "electron",
+    "renderer",
+    "status-health.js",
+  ));
+
+  assert.strictEqual(isFresh(120000, 60000), true);
+  assert.strictEqual(isFresh(240000, 60000), false);
+  assert.strictEqual(stateText({
+    connected: true,
+    ageMs: 30000,
+    staleText: "지연",
+    pollerState: "parse_failed_retrying",
+    pollIntervalMs: 60000,
+  }), "재시도");
+  assert.strictEqual(stateText({
+    connected: true,
+    ageMs: 240000,
+    staleText: "지연",
+    pollerState: "waiting_next_poll",
+    pollIntervalMs: 60000,
+  }), "지연");
+}
+
 async function testClaudeUsageCaptureAsyncWaitsForStatusWrite() {
   const tempDir = makeTempDir("claude-usage-capture-async");
   const statusPath = path.join(tempDir, "claude-status.json");
@@ -1298,6 +1336,8 @@ async function main() {
   await testClaudeStatusHookSurvivesMalformedPayload();
   await testClaudeStatusHookPreservesFreshUsageCommandStatus();
   await testClaudeUsagePollerParsesUsageCommand();
+  testElectronIconConfiguration();
+  testCompactStatusHealthUsesPollIntervalAndPollerState();
   await testClaudeUsageCaptureAsyncWaitsForStatusWrite();
   await testClaudeUsagePollerAcceptsSubscriptionSummary();
   await testClaudeUsagePollerPreservesLimitsOnSummaryOnly();
