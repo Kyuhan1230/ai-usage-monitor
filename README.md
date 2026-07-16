@@ -4,6 +4,8 @@ Codex CLI와 Claude Code 사용량을 한 화면에서 확인하는 로컬 Elect
 
 이 앱은 이미 로그인된 CLI의 공개 출력과 로컬 세션 로그만 읽는다. OpenAI 또는 Anthropic 인증 토큰, 브라우저 쿠키, 비공개 Usage API는 읽거나 호출하지 않는다. 수집한 데이터는 사용자 PC 안의 `~\.codex-usage-wrapper` 폴더에만 저장된다.
 
+이 프로젝트는 OpenAI 또는 Anthropic의 공식 제품이 아니며 두 회사가 제작, 보증 또는 후원하지 않는다. OpenAI, Codex, Anthropic, Claude의 이름과 표장은 각 권리자의 자산이다.
+
 ## 주요 기능
 
 - Codex 5-hour, weekly 잔여율 표시
@@ -16,6 +18,7 @@ Codex CLI와 Claude Code 사용량을 한 화면에서 확인하는 로컬 Elect
 - Setup 화면에서 Codex, Claude, hook, 자동 실행 상태 점검
 - Windows 로그인 시 자동 실행 등록
 - 설치용 `Setup.exe` 생성
+- GitHub Releases 기반 새 버전 확인, 다운로드, 재시작 설치 안내
 - 로컬 파일 캐시를 사용해 큰 세션 폴더에서도 빠른 갱신
 
 ## 화면
@@ -39,26 +42,29 @@ Dashboard 버튼을 누르면 앱은 먼저 `http://127.0.0.1:8767/status.json` 
 릴리스 산출물로 설치하려면 아래 파일을 실행한다.
 
 ```text
-dist\Codex Claude Usage Setup.exe
+dist\Codex Claude Usage-Setup-<version>.exe
 ```
 
 설치 후 시작 메뉴 또는 바탕화면에서 `Codex Claude Usage`를 실행한다. 앱을 닫아도 트레이에 남아 백그라운드 수집을 계속한다. 완전히 종료하려면 트레이 메뉴에서 종료를 선택한다.
 
 ## 필요 조건
 
-대상 PC에는 아래 프로그램이 필요하다.
+GitHub Release 설치본을 사용하는 대상 PC에는 아래 프로그램만 필요하다. 대시보드용 Python과 Node.js는 앱에 포함된다.
 
 - Windows 10 이상
 - Codex CLI
 - Claude Code
-- Node.js
-- Python 3.11 이상
-- Python 패키지 `fastapi`, `uvicorn`
 
-Python 패키지는 다음 명령으로 설치할 수 있다.
+소스 실행 및 빌드 환경에는 다음 항목이 추가로 필요하다.
+
+- Node.js 22.12 이상
+- Python 3.13
+- Python 패키지 `fastapi`, `uvicorn`, `tzdata`
+
+Python 패키지는 다음 명령으로 설치한다. Windows의 `Asia/Seoul` 시간대 지원에 필요한 `tzdata`도 함께 설치된다.
 
 ```powershell
-python -m pip install fastapi uvicorn
+python -m pip install -r requirements.txt
 ```
 
 Codex와 Claude는 각 CLI에서 먼저 로그인해야 한다.
@@ -116,10 +122,14 @@ npm run dashboard:dev
 npm run dist
 ```
 
+빌드 명령은 Python.org의 공식 CPython 3.13 embeddable 배포본을 내려받아 SHA-256을 검증하고, 대시보드 의존성을 설치본에 포함한다. 이 때문에 최초 빌드는 네트워크 연결이 필요하다.
+
 생성되는 주요 산출물은 다음과 같다.
 
 ```text
-dist\Codex Claude Usage Setup.exe
+dist\Codex Claude Usage-Setup-<version>.exe
+dist\Codex Claude Usage-Setup-<version>.exe.blockmap
+dist\latest.yml
 ```
 
 친구나 팀원에게 전달할 때는 보통 Electron NSIS 설치본 하나를 주면 된다. legacy native 산출물은 `npm run dist:legacy-native`로 별도 생성한다.
@@ -133,6 +143,51 @@ Setup은 현재 사용자 영역에 설치한다.
 설치본은 시작 메뉴, 바탕화면 바로가기, 제거 항목, 트레이 아이콘에 같은 앱 아이콘을 사용한다.
 
 소스 파일만 수정한 경우 이미 설치된 앱에는 자동 반영되지 않는다. 설치본에 반영하려면 `npm run dist`로 Setup을 다시 만들고 재설치하거나, 개발 중에는 `npm run app`으로 Electron 앱을 직접 실행한다.
+
+### GitHub Actions CI/CD
+
+`main` 브랜치 push와 pull request에서는 `.github/workflows/ci.yml`이 다음 작업을 수행한다.
+
+- Node.js 22.12와 Python 3.13 준비
+- JavaScript, Python 의존성 설치
+- 전체 테스트 실행
+- 해시를 검증한 Python embeddable 런타임 준비
+- Windows NSIS 설치본 빌드
+- 설치본과 자동 업데이트 메타데이터를 Actions artifact로 14일간 보관
+
+정식 배포는 `package.json` 버전과 같은 `v<version>` 태그를 push하면 시작된다. 예를 들어 patch 버전을 올려 배포하려면 다음과 같이 실행한다.
+
+```powershell
+npm version patch
+git push origin main --follow-tags
+```
+
+`.github/workflows/release.yml`은 태그와 앱 버전이 일치하는지 확인하고, 테스트와 Windows 빌드를 통과한 뒤 GitHub Releases에 아래 파일을 공개한다.
+
+- Windows 설치 파일 `.exe`
+- 차등 업데이트 파일 `.blockmap`
+- 업데이트 메타데이터 `latest.yml`
+
+별도 Personal Access Token은 필요하지 않다. 워크플로는 저장소가 제공하는 `GITHUB_TOKEN`과 `contents: write` 권한을 사용한다.
+
+### 설치된 앱의 자동 업데이트
+
+GitHub Release에서 설치한 앱은 다음 시점에 새 공개 릴리스를 확인한다.
+
+- 앱 시작 15초 후
+- 앱 실행 중 6시간마다
+- 트레이 메뉴의 `Check for updates...` 선택 시
+
+새 버전이 있으면 먼저 다운로드 여부를 묻고, 다운로드가 끝나면 즉시 재시작해 설치할지 묻는다. `종료할 때 설치`를 선택하면 앱을 다음에 종료할 때 설치된다. 개발 모드인 `npm run app`에서는 자동 업데이트가 동작하지 않는다.
+
+처음 한 번은 GitHub Releases에서 설치 파일을 직접 내려받아 설치해야 한다. 그 설치본부터 이후 공개 릴리스 업데이트 안내를 받을 수 있다. 현재 Windows 코드 서명 인증서를 설정하지 않았으므로 다른 PC에서는 첫 설치 때 Windows SmartScreen의 게시자 경고가 표시될 수 있다.
+
+### Code signing policy
+
+- [코드 서명 정책](docs/CODE_SIGNING_POLICY.md)
+- [개인정보 처리방침](docs/PRIVACY.md)
+- [Windows 코드 서명 설정 절차](docs/SIGNING_SETUP.md)
+- [제3자 오픈소스 고지](THIRD_PARTY_NOTICES.md)
 
 ## 데이터 수집 방식
 
@@ -289,8 +344,8 @@ Codex 값이 오래됨으로 표시될 때:
 
 Dashboard runtime이 필요로 표시될 때:
 
-- Python이 설치되어 있는지 확인한다.
-- `fastapi`, `uvicorn`이 현재 Python 환경에서 실행 가능한지 확인한다.
+- 설치본이라면 앱을 최신 GitHub Release 버전으로 다시 설치한다.
+- 개발 모드라면 Python 3.13과 `fastapi`, `uvicorn`이 현재 환경에서 실행 가능한지 확인한다.
 
 Dashboard 버튼을 눌렀는데 앱만 흐려지거나 비활성화된 것처럼 보일 때:
 
@@ -330,5 +385,5 @@ npm test
 - Codex 잔여율은 Codex CLI `/status` 화면 출력 포맷에 의존한다.
 - Claude 잔여율은 `claude /usage` 출력 포맷에 의존한다.
 - Codex와 Claude의 정확한 요금제 이름은 안정적으로 자동 판별하지 않는다.
-- 설치본은 Node.js, Python, Codex CLI, Claude Code 런타임을 함께 설치하지 않는다.
-- 완전 독립 실행형 앱으로 만들려면 Node.js와 Python 서버를 번들링하거나 서버를 단일 런타임으로 옮겨야 한다.
+- 설치본은 Electron의 Node.js와 대시보드용 Python 런타임을 포함하지만 Codex CLI와 Claude Code는 포함하지 않는다.
+- 각 CLI가 없거나 로그인되지 않은 PC에서는 해당 서비스의 사용량을 수집할 수 없다.

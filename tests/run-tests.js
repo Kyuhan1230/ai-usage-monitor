@@ -8,6 +8,7 @@ const net = require("net");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
+const { EventEmitter } = require("events");
 
 const ROOT = path.resolve(__dirname, "..");
 const NODE_DIR = path.join(ROOT, "src", "node");
@@ -856,6 +857,175 @@ function testElectronIconConfiguration() {
   assert.ok(fs.existsSync(path.join(ROOT, iconPath)));
 }
 
+function testElectronReleaseConfiguration() {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const publish = packageJson.build.publish[0];
+
+  assert.ok(packageJson.dependencies["electron-updater"]);
+  assert.strictEqual(packageJson.repository.url, "https://github.com/Kyuhan1230/ai-usage-monitor.git");
+  assert.strictEqual(packageJson.build.artifactName, "${productName}-Setup-${version}.${ext}");
+  assert.strictEqual(publish.provider, "github");
+  assert.strictEqual(publish.owner, "Kyuhan1230");
+  assert.strictEqual(publish.repo, "ai-usage-monitor");
+  assert.strictEqual(publish.releaseType, "draft");
+  assert.strictEqual(packageJson.build.asar, true);
+  assert.ok(packageJson.build.asarUnpack.includes("runtime/**/*"));
+  assert.ok(packageJson.build.asarUnpack.includes("src/python/**/*"));
+  assert.ok(packageJson.build.files.includes("runtime/**/*"));
+  assert.ok(packageJson.build.files.includes("LICENSE"));
+  assert.ok(packageJson.build.files.includes("THIRD_PARTY_NOTICES.md"));
+  assert.match(packageJson.scripts["prepare:runtime"], /prepare-python-runtime\.ps1/);
+  assert.match(packageJson.scripts.dist, /prepare:runtime/);
+  assert.ok(fs.existsSync(path.join(ROOT, "scripts", "prepare-python-runtime.ps1")));
+  assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
+  assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "CODE_SIGNING_POLICY.md")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "PRIVACY.md")));
+}
+
+function testDashboardRuntimePrefersBundledPython() {
+  const { resolveDashboardRuntime } = require(path.join(ROOT, "src", "electron", "dashboard-runtime.js"));
+  const root = path.join("C:\\", "app", "resources", "app");
+  const bundledPath = path.join(root, "runtime", "python", "python.exe");
+
+  const bundled = resolveDashboardRuntime({
+    root,
+    isPackaged: true,
+    platform: "win32",
+    commandExists: () => false,
+    fileExists: (candidate) => candidate === bundledPath,
+  });
+  assert.strictEqual(bundled.command, bundledPath);
+  assert.deepStrictEqual(bundled.entryArgs, ["-m", "uvicorn"]);
+  assert.strictEqual(bundled.bundled, true);
+
+  const fallback = resolveDashboardRuntime({
+    root,
+    isPackaged: false,
+    platform: "win32",
+    commandExists: (candidate) => candidate === "python.exe",
+    fileExists: () => false,
+  });
+  assert.strictEqual(fallback.command, "python.exe");
+  assert.deepStrictEqual(fallback.entryArgs, ["-m", "uvicorn"]);
+  assert.strictEqual(fallback.bundled, false);
+}
+
+async function testElectronUpdaterPromptsAndInstalls() {
+  class MockUpdater extends EventEmitter {
+    constructor() {
+      super();
+      this.checkCount = 0;
+      this.downloadCount = 0;
+      this.installCount = 0;
+    }
+
+    async checkForUpdates() {
+      this.checkCount += 1;
+    }
+
+    async downloadUpdate() {
+      this.downloadCount += 1;
+    }
+
+    quitAndInstall() {
+      this.installCount += 1;
+    }
+  }
+
+  const updater = new MockUpdater();
+  const messages = [];
+  const fakeWindow = { isDestroyed: () => false };
+  const dialog = {
+    showMessageBox: async (...args) => {
+      messages.push(args.length === 2 ? args[1] : args[0]);
+      return { response: 0 };
+    },
+  };
+  const inertTimer = () => ({ unref() {} });
+  const { createUpdaterController } = require(path.join(ROOT, "src", "electron", "updater.js"));
+  const controller = createUpdaterController({
+    app: { isPackaged: true, getVersion: () => "0.1.0" },
+    autoUpdater: updater,
+    dialog,
+    getWindow: () => fakeWindow,
+    logger: { error() {} },
+    platform: "win32",
+    setTimeoutFn: inertTimer,
+    setIntervalFn: inertTimer,
+  });
+
+  assert.strictEqual(controller.start(), true);
+  assert.strictEqual(updater.autoDownload, false);
+  assert.strictEqual(updater.autoInstallOnAppQuit, true);
+  assert.strictEqual(await controller.check(true), true);
+  assert.strictEqual(updater.checkCount, 1);
+
+  updater.emit("update-available", { version: "0.2.0" });
+  await wait(0);
+  assert.strictEqual(updater.downloadCount, 1);
+  assert.match(messages[0].message, /0\.2\.0/);
+
+  updater.emit("update-downloaded", { version: "0.2.0" });
+  await wait(0);
+  assert.strictEqual(updater.installCount, 1);
+  assert.match(messages[1].message, /0\.2\.0/);
+}
+
+function testElectronLaunchAtLoginPreferencePersists() {
+  const tempDir = makeTempDir("electron-preferences");
+  const preferencesPath = path.join(tempDir, "preferences.json");
+  const {
+    getLaunchAtLoginPreference,
+    readPreferences,
+    setLaunchAtLoginPreference,
+  } = require(path.join(ROOT, "src", "electron", "app-preferences.js"));
+
+  assert.strictEqual(getLaunchAtLoginPreference(preferencesPath), false);
+  assert.strictEqual(setLaunchAtLoginPreference(preferencesPath, true), true);
+  assert.strictEqual(getLaunchAtLoginPreference(preferencesPath), true);
+  assert.strictEqual(setLaunchAtLoginPreference(preferencesPath, false), false);
+  assert.strictEqual(getLaunchAtLoginPreference(preferencesPath), false);
+  assert.deepStrictEqual(readPreferences(preferencesPath), { launchAtLogin: false });
+}
+
+async function testElectronClaudeHookPreservesAndBacksUpExistingCommand() {
+  const tempDir = makeTempDir("electron-claude-hook");
+  const settingsPath = path.join(tempDir, "settings.json");
+  const originalSettings = {
+    statusLine: { type: "command", command: "node existing-statusline.js" },
+    theme: "dark",
+  };
+  fs.writeFileSync(settingsPath, `${JSON.stringify(originalSettings, null, 2)}\n`, "utf8");
+  const { installClaudeHookSettings } = require(path.join(
+    ROOT,
+    "src",
+    "electron",
+    "claude-hook-settings.js",
+  ));
+
+  const preserved = await installClaudeHookSettings({
+    settingsPath,
+    command: '"app.exe" --claude-status-hook',
+    confirmReplace: async () => false,
+  });
+  assert.strictEqual(preserved.status, "preserved");
+  assert.deepStrictEqual(readJson(settingsPath), originalSettings);
+
+  const installed = await installClaudeHookSettings({
+    settingsPath,
+    command: '"app.exe" --claude-status-hook',
+    confirmReplace: async () => true,
+    now: new Date("2026-07-16T00:00:00.000Z"),
+  });
+  assert.strictEqual(installed.status, "installed");
+  assert.ok(installed.backupPath);
+  assert.deepStrictEqual(readJson(installed.backupPath), originalSettings);
+  const updated = readJson(settingsPath);
+  assert.strictEqual(updated.theme, "dark");
+  assert.strictEqual(updated.statusLine.command, '"app.exe" --claude-status-hook');
+}
+
 function testCompactStatusHealthUsesPollIntervalAndPollerState() {
   const { isFresh, stateText } = require(path.join(
     ROOT,
@@ -1311,6 +1481,10 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-usage-poller.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "main.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "app-preferences.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "claude-hook-settings.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "dashboard-runtime.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "updater.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "setup.js")]);
@@ -1337,6 +1511,13 @@ async function main() {
   await testClaudeStatusHookPreservesFreshUsageCommandStatus();
   await testClaudeUsagePollerParsesUsageCommand();
   testElectronIconConfiguration();
+  testElectronReleaseConfiguration();
+  testDashboardRuntimePrefersBundledPython();
+  await testElectronUpdaterPromptsAndInstalls();
+  testElectronLaunchAtLoginPreferencePersists();
+  await testElectronClaudeHookPreservesAndBacksUpExistingCommand();
+  const releaseVersion = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+  await run(NODE, [path.join("scripts", "verify-release-tag.js"), `v${releaseVersion}`]);
   testCompactStatusHealthUsesPollIntervalAndPollerState();
   await testClaudeUsageCaptureAsyncWaitsForStatusWrite();
   await testClaudeUsagePollerAcceptsSubscriptionSummary();

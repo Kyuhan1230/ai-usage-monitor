@@ -6,16 +6,21 @@
   "author": "CodexUsage",
   "license": "MIT",
   "description": "Local Codex CLI usage wrapper and dashboard.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kyuhan1230/ai-usage-monitor.git"
+  },
   "main": "src/electron/main.js",
   "scripts": {
     "app": "electron .",
     "app:electron": "electron .",
     "app:legacy-tray": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
     "app:lite": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis",
-    "dist:electron": "electron-builder --win nsis",
-    "dist:installer": "electron-builder --win nsis",
+    "prepare:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-python-runtime.ps1",
+    "pack": "npm run prepare:runtime && electron-builder --dir",
+    "dist": "npm run prepare:runtime && electron-builder --win nsis",
+    "dist:electron": "npm run prepare:runtime && electron-builder --win nsis",
+    "dist:installer": "npm run prepare:runtime && electron-builder --win nsis",
     "dist:legacy-native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-installer.ps1",
     "dist:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-installer.ps1",
     "dist:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-exe.ps1",
@@ -24,9 +29,11 @@
     "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 0.0.0.0 --port 8767",
     "dashboard:dev": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --reload --host 0.0.0.0 --port 8767",
     "dashboard:legacy": "python src/python/codex_status_dashboard.py --serve",
+    "verify:release-tag": "node scripts/verify-release-tag.js",
     "test": "node tests/run-tests.js"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
@@ -36,14 +43,24 @@
   "build": {
     "appId": "local.codex-claude-usage",
     "productName": "Codex Claude Usage",
-    "asar": false,
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "runtime/**/*",
+      "src/python/**/*"
+    ],
     "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
     "files": [
       "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
       "assets/**/*",
+      "docs/CODE_SIGNING_POLICY.md",
+      "docs/PRIVACY.md",
+      "runtime/**/*",
       "src/**/*",
       "node_modules/**/*"
     ],
@@ -53,6 +70,14 @@
         "nsis"
       ]
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Kyuhan1230",
+        "repo": "ai-usage-monitor",
+        "releaseType": "draft"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

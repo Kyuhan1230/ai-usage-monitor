@@ -1,6 +1,7 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -13,12 +14,19 @@ const {
 const { parseArgs: parsePollerArgs, startPoller } = require("../node/codex-status-poller");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { writeJsonAtomic } = require("../node/status-capture");
+const { getLaunchAtLoginPreference, setLaunchAtLoginPreference } = require("./app-preferences");
+const { installClaudeHookSettings } = require("./claude-hook-settings");
+const { resolveDashboardRuntime } = require("./dashboard-runtime");
+const { createUpdaterController } = require("./updater");
 
 const APP_NAME = "Codex Claude Usage";
 const ROOT = path.resolve(__dirname, "..", "..");
+const EXTERNAL_ROOT = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : ROOT;
+const PROCESS_CWD = app.isPackaged ? process.resourcesPath : ROOT;
 const APP_ICON_PATH = path.join(ROOT, "assets", "codex-claude-usage.ico");
 const DASHBOARD_URL = "http://127.0.0.1:8767";
 const STATUS_DIR = path.join(os.homedir(), ".codex-usage-wrapper");
+const PREFERENCES_PATH = path.join(STATUS_DIR, "preferences.json");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
 const CLAUDE_STATUS_PATH = path.join(STATUS_DIR, "claude-status.json");
 const HISTORY_DIR = path.join(STATUS_DIR, "history");
@@ -44,6 +52,12 @@ let compactWindow = null;
 let dashboardWindow = null;
 let setupWindow = null;
 let isQuitting = false;
+const updaterController = createUpdaterController({
+  app,
+  autoUpdater,
+  dialog,
+  getWindow: () => compactWindow || setupWindow || dashboardWindow,
+});
 
 function parsePositiveInt(value) {
   const parsed = Number(value);
@@ -129,12 +143,17 @@ function startDashboardServer() {
     return;
   }
 
+  const runtime = dashboardRuntime();
+  if (!runtime) {
+    return;
+  }
+
   dashboardProcess = spawn(
-    "uvicorn",
-    ["--app-dir", path.join(ROOT, "src", "python"), "codex_dashboard_fastapi:app", "--host", "127.0.0.1", "--port", "8767"],
+    runtime.command,
+    [...runtime.entryArgs, "--app-dir", path.join(EXTERNAL_ROOT, "src", "python"), "codex_dashboard_fastapi:app", "--host", "127.0.0.1", "--port", "8767"],
     {
-      cwd: ROOT,
-      env: { ...process.env, PYTHONPATH: path.join(ROOT, "src", "python") },
+      cwd: PROCESS_CWD,
+      env: { ...process.env, PYTHONPATH: path.join(EXTERNAL_ROOT, "src", "python") },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -299,7 +318,7 @@ function startStatusPoller({ force = false, startupDelayMs = null } = {}) {
   fs.mkdirSync(STATUS_DIR, { recursive: true });
   const runtime = childRuntime();
   const child = spawn(runtime.command, [...runtime.entryArgs, ...pollerArgs(startupDelayMs)], {
-    cwd: ROOT,
+    cwd: PROCESS_CWD,
     env: process.env,
     windowsHide: true,
     stdio: "ignore",
@@ -353,7 +372,7 @@ function startClaudeUsagePoller({ force = false, startupDelayMs = null } = {}) {
   fs.mkdirSync(STATUS_DIR, { recursive: true });
   const runtime = childRuntime();
   const child = spawn(runtime.command, [...runtime.entryArgs, ...claudePollerArgs(startupDelayMs)], {
-    cwd: ROOT,
+    cwd: PROCESS_CWD,
     env: process.env,
     windowsHide: true,
     stdio: "ignore",
@@ -534,6 +553,16 @@ function commandExistsAny(...commands) {
   return commands.some((command) => commandExists(command));
 }
 
+function dashboardRuntime() {
+  return resolveDashboardRuntime({
+    root: EXTERNAL_ROOT,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    commandExists,
+    fileExists: fs.existsSync,
+  });
+}
+
 function claudeHookCommand() {
   const runtime = childRuntime();
   const exe = runtime.command.replace(/"/g, '\\"');
@@ -543,20 +572,30 @@ function claudeHookCommand() {
   return `"${exe}" "${path.join(__dirname, "main.js").replace(/"/g, '\\"')}" --claude-status-hook`;
 }
 
-function installClaudeHook() {
-  const settings = readJsonSafe(CLAUDE_SETTINGS_PATH) || {};
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
-    throw new Error("Claude settings.json is not an object");
-  }
-  fs.mkdirSync(path.dirname(CLAUDE_SETTINGS_PATH), { recursive: true });
-  settings.statusLine = {
-    type: "command",
+async function installClaudeHook() {
+  return installClaudeHookSettings({
+    settingsPath: CLAUDE_SETTINGS_PATH,
     command: claudeHookCommand(),
-  };
-  writeJsonAtomic(CLAUDE_SETTINGS_PATH, settings);
+    confirmReplace: async (existingCommand) => {
+      const options = {
+        type: "warning",
+        title: "기존 Claude statusLine 설정 발견",
+        message: "다른 statusLine 명령이 이미 설정되어 있습니다.",
+        detail: `기존 명령:\n${existingCommand}\n\n교체하면 원본 settings.json을 먼저 백업합니다.`,
+        buttons: ["기존 설정 유지", "백업 후 교체"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const result = setupWindow
+        ? await dialog.showMessageBox(setupWindow, options)
+        : await dialog.showMessageBox(options);
+      return result.response === 1;
+    },
+  });
 }
 
-function ensureLaunchAtLogin() {
+function applyLaunchAtLoginPreference() {
   if (process.platform === "win32") {
     const legacyName = "electron.app.Electron";
     const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -572,7 +611,7 @@ function ensureLaunchAtLogin() {
     }
   }
   app.setLoginItemSettings({
-    openAtLogin: true,
+    openAtLogin: getLaunchAtLoginPreference(PREFERENCES_PATH),
     path: process.execPath,
     args: app.isPackaged ? [] : [ROOT],
   });
@@ -629,12 +668,14 @@ function buildSnapshot() {
 }
 
 function buildSetupSnapshot() {
+  const runtime = dashboardRuntime();
   return {
     ...buildSnapshot(),
     setup: {
       codexCommand: commandExistsAny("codex.exe", "codex"),
       claudeCommand: commandExistsAny("claude.exe", "claude"),
-      uvicornCommand: commandExistsAny("uvicorn.exe", "uvicorn"),
+      uvicornCommand: Boolean(runtime),
+      runtimeBundled: Boolean(runtime && runtime.bundled),
       hookCommand: claudeHookCommand(),
     }
   };
@@ -689,6 +730,7 @@ function createTray() {
       { label: "Compact window", click: showCompactWindow },
       { label: "Full dashboard", click: showDashboardWindow },
       { label: "Setup", click: showSetupWindow },
+      { label: "Check for updates...", click: () => updaterController.check(true) },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
     ]),
@@ -728,9 +770,9 @@ ipcMain.handle("setup:open", () => {
   showSetupWindow();
   return true;
 });
-ipcMain.handle("setup:installClaudeHook", () => {
-  installClaudeHook();
-  return buildSetupSnapshot();
+ipcMain.handle("setup:installClaudeHook", async () => {
+  const result = await installClaudeHook();
+  return { result, snapshot: buildSetupSnapshot() };
 });
 ipcMain.handle("setup:openCodexLogin", () => {
   openCommand("codex login");
@@ -741,8 +783,9 @@ ipcMain.handle("setup:openClaudeAuth", () => {
   return true;
 });
 ipcMain.handle("app:setLaunchAtLogin", (_event, enabled) => {
+  const openAtLogin = setLaunchAtLoginPreference(PREFERENCES_PATH, enabled);
   app.setLoginItemSettings({
-    openAtLogin: Boolean(enabled),
+    openAtLogin,
     path: process.execPath,
     args: app.isPackaged ? [] : [ROOT],
   });
@@ -753,11 +796,12 @@ ipcMain.handle("app:quit", () => {
 });
 
 app.whenReady().then(() => {
-  ensureLaunchAtLogin();
+  applyLaunchAtLoginPreference();
   startStatusPoller();
   startClaudeUsagePoller();
   createTray();
   showCompactWindow();
+  updaterController.start();
 });
 
 app.on("window-all-closed", () => {});

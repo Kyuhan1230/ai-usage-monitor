@@ -1,4 +1,6 @@
 node_modules/
+.venv/
+runtime/
 __pycache__/
 *.pyc
 tmp_status.json
