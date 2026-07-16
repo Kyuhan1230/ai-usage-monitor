@@ -31,7 +31,14 @@ if (-not (Test-Path -LiteralPath $archivePath)) {
     Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
 }
 
-$actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+$archiveStream = [System.IO.File]::OpenRead($archivePath)
+try {
+    $actualSha256 = [System.BitConverter]::ToString($sha256.ComputeHash($archiveStream)).Replace("-", "").ToLowerInvariant()
+} finally {
+    $archiveStream.Dispose()
+    $sha256.Dispose()
+}
 if ($actualSha256 -ne $expectedSha256) {
     Remove-Item -LiteralPath $archivePath -Force
     throw "CPython archive checksum mismatch. Expected $expectedSha256, got $actualSha256"
