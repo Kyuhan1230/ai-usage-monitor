@@ -867,7 +867,7 @@ function testElectronReleaseConfiguration() {
   assert.strictEqual(publish.provider, "github");
   assert.strictEqual(publish.owner, "Kyuhan1230");
   assert.strictEqual(publish.repo, "ai-usage-monitor");
-  assert.strictEqual(publish.releaseType, "release");
+  assert.strictEqual(publish.releaseType, "draft");
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
 }

@@ -65,7 +65,7 @@
         "provider": "github",
         "owner": "Kyuhan1230",
         "repo": "ai-usage-monitor",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "nsis": {

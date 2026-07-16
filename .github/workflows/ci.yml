@@ -39,7 +39,7 @@ jobs:
         run: npm test
 
       - name: Build Windows installer
-        run: npm run dist -- --publish never
+        run: npx electron-builder --win nsis --publish never
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4

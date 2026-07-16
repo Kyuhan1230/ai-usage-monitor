@@ -44,7 +44,12 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build and publish GitHub Release
-        run: npm run dist -- --publish always
+      - name: Build and upload draft GitHub Release
+        run: npx electron-builder --win nsis --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish completed GitHub Release
+        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
