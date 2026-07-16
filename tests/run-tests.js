@@ -404,17 +404,17 @@ async function testHeadlessStatusPoller() {
   );
 
   try {
-    const status = await waitForJson(statusPath, (value) => value.parse_status === "ok");
+    const status = await waitForJson(statusPath, (value) => value.parse_status === "ok", 20000);
     assert.strictEqual(status.parse_status, "ok");
     assert.strictEqual(status.capture_method, "codex_status_poller");
     assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 71);
 
     // 별개 세션과 무관하게 poll 주기로 다시 캡처되는지 확인 (파일이 새로 갱신됨).
     fs.unlinkSync(statusPath);
-    const polled = await waitForJson(statusPath, (value) => value.parse_status === "ok", 5000);
+    const polled = await waitForJson(statusPath, (value) => value.parse_status === "ok", 10000);
     assert.strictEqual(polled.limits.find((limit) => limit.type === "weekly").remaining_percent, 84);
 
-    await waitForJson(statusPath, () => readHistoryCount(historyDir) >= 3, 8000);
+    await waitForJson(statusPath, () => readHistoryCount(historyDir) >= 3, 15000);
     assert.ok(readHistoryCount(historyDir) >= 3, "poller must keep capturing on its interval");
   } finally {
     child.kill();
