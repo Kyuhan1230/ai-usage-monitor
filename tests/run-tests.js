@@ -868,8 +868,43 @@ function testElectronReleaseConfiguration() {
   assert.strictEqual(publish.owner, "Kyuhan1230");
   assert.strictEqual(publish.repo, "ai-usage-monitor");
   assert.strictEqual(publish.releaseType, "draft");
+  assert.strictEqual(packageJson.build.asar, true);
+  assert.ok(packageJson.build.asarUnpack.includes("runtime/**/*"));
+  assert.ok(packageJson.build.asarUnpack.includes("src/python/**/*"));
+  assert.ok(packageJson.build.files.includes("runtime/**/*"));
+  assert.match(packageJson.scripts["prepare:runtime"], /prepare-python-runtime\.ps1/);
+  assert.match(packageJson.scripts.dist, /prepare:runtime/);
+  assert.ok(fs.existsSync(path.join(ROOT, "scripts", "prepare-python-runtime.ps1")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
+}
+
+function testDashboardRuntimePrefersBundledPython() {
+  const { resolveDashboardRuntime } = require(path.join(ROOT, "src", "electron", "dashboard-runtime.js"));
+  const root = path.join("C:\\", "app", "resources", "app");
+  const bundledPath = path.join(root, "runtime", "python", "python.exe");
+
+  const bundled = resolveDashboardRuntime({
+    root,
+    isPackaged: true,
+    platform: "win32",
+    commandExists: () => false,
+    fileExists: (candidate) => candidate === bundledPath,
+  });
+  assert.strictEqual(bundled.command, bundledPath);
+  assert.deepStrictEqual(bundled.entryArgs, ["-m", "uvicorn"]);
+  assert.strictEqual(bundled.bundled, true);
+
+  const fallback = resolveDashboardRuntime({
+    root,
+    isPackaged: false,
+    platform: "win32",
+    commandExists: (candidate) => candidate === "python.exe",
+    fileExists: () => false,
+  });
+  assert.strictEqual(fallback.command, "python.exe");
+  assert.deepStrictEqual(fallback.entryArgs, ["-m", "uvicorn"]);
+  assert.strictEqual(fallback.bundled, false);
 }
 
 async function testElectronUpdaterPromptsAndInstalls() {
@@ -1444,6 +1479,7 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "electron", "main.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "app-preferences.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "claude-hook-settings.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "dashboard-runtime.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "updater.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
@@ -1472,6 +1508,7 @@ async function main() {
   await testClaudeUsagePollerParsesUsageCommand();
   testElectronIconConfiguration();
   testElectronReleaseConfiguration();
+  testDashboardRuntimePrefersBundledPython();
   await testElectronUpdaterPromptsAndInstalls();
   testElectronLaunchAtLoginPreferencePersists();
   await testElectronClaudeHookPreservesAndBacksUpExistingCommand();

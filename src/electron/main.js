@@ -16,10 +16,13 @@ const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = req
 const { writeJsonAtomic } = require("../node/status-capture");
 const { getLaunchAtLoginPreference, setLaunchAtLoginPreference } = require("./app-preferences");
 const { installClaudeHookSettings } = require("./claude-hook-settings");
+const { resolveDashboardRuntime } = require("./dashboard-runtime");
 const { createUpdaterController } = require("./updater");
 
 const APP_NAME = "Codex Claude Usage";
 const ROOT = path.resolve(__dirname, "..", "..");
+const EXTERNAL_ROOT = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : ROOT;
+const PROCESS_CWD = app.isPackaged ? process.resourcesPath : ROOT;
 const APP_ICON_PATH = path.join(ROOT, "assets", "codex-claude-usage.ico");
 const DASHBOARD_URL = "http://127.0.0.1:8767";
 const STATUS_DIR = path.join(os.homedir(), ".codex-usage-wrapper");
@@ -140,12 +143,17 @@ function startDashboardServer() {
     return;
   }
 
+  const runtime = dashboardRuntime();
+  if (!runtime) {
+    return;
+  }
+
   dashboardProcess = spawn(
-    "uvicorn",
-    ["--app-dir", path.join(ROOT, "src", "python"), "codex_dashboard_fastapi:app", "--host", "127.0.0.1", "--port", "8767"],
+    runtime.command,
+    [...runtime.entryArgs, "--app-dir", path.join(EXTERNAL_ROOT, "src", "python"), "codex_dashboard_fastapi:app", "--host", "127.0.0.1", "--port", "8767"],
     {
-      cwd: ROOT,
-      env: { ...process.env, PYTHONPATH: path.join(ROOT, "src", "python") },
+      cwd: PROCESS_CWD,
+      env: { ...process.env, PYTHONPATH: path.join(EXTERNAL_ROOT, "src", "python") },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -310,7 +318,7 @@ function startStatusPoller({ force = false, startupDelayMs = null } = {}) {
   fs.mkdirSync(STATUS_DIR, { recursive: true });
   const runtime = childRuntime();
   const child = spawn(runtime.command, [...runtime.entryArgs, ...pollerArgs(startupDelayMs)], {
-    cwd: ROOT,
+    cwd: PROCESS_CWD,
     env: process.env,
     windowsHide: true,
     stdio: "ignore",
@@ -364,7 +372,7 @@ function startClaudeUsagePoller({ force = false, startupDelayMs = null } = {}) {
   fs.mkdirSync(STATUS_DIR, { recursive: true });
   const runtime = childRuntime();
   const child = spawn(runtime.command, [...runtime.entryArgs, ...claudePollerArgs(startupDelayMs)], {
-    cwd: ROOT,
+    cwd: PROCESS_CWD,
     env: process.env,
     windowsHide: true,
     stdio: "ignore",
@@ -545,6 +553,16 @@ function commandExistsAny(...commands) {
   return commands.some((command) => commandExists(command));
 }
 
+function dashboardRuntime() {
+  return resolveDashboardRuntime({
+    root: EXTERNAL_ROOT,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    commandExists,
+    fileExists: fs.existsSync,
+  });
+}
+
 function claudeHookCommand() {
   const runtime = childRuntime();
   const exe = runtime.command.replace(/"/g, '\\"');
@@ -650,12 +668,14 @@ function buildSnapshot() {
 }
 
 function buildSetupSnapshot() {
+  const runtime = dashboardRuntime();
   return {
     ...buildSnapshot(),
     setup: {
       codexCommand: commandExistsAny("codex.exe", "codex"),
       claudeCommand: commandExistsAny("claude.exe", "claude"),
-      uvicornCommand: commandExistsAny("uvicorn.exe", "uvicorn"),
+      uvicornCommand: Boolean(runtime),
+      runtimeBundled: Boolean(runtime && runtime.bundled),
       hookCommand: claudeHookCommand(),
     }
   };

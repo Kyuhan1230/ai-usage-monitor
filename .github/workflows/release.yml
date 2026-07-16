@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Install Python runtime dependencies
         run: python -m pip install -r requirements.txt
@@ -43,6 +43,9 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Prepare bundled Python runtime
+        run: npm run prepare:runtime
 
       - name: Build and upload draft GitHub Release
         run: npx electron-builder --win nsis --publish always

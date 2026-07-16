@@ -59,8 +59,10 @@ async function refresh(force = false) {
   hookDetail.textContent = snapshot.claude.hookInstalled
     ? `선택: statusLine hook이 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`
     : "선택: claude /usage 수집만으로도 요약은 갱신됩니다. statusLine 연동이 필요하면 hook 설치를 누르세요.";
-  runtimeDetail.textContent = snapshot.setup.uvicornCommand
-    ? "정상: uvicorn을 찾았습니다. 대시보드 서버를 띄울 수 있습니다."
+  runtimeDetail.textContent = snapshot.setup.runtimeBundled
+    ? "정상: 설치 파일에 포함된 Python 런타임으로 대시보드를 실행합니다."
+    : snapshot.setup.uvicornCommand
+    ? "정상: 시스템 Python 런타임으로 대시보드를 실행할 수 있습니다."
     : "필요: uvicorn 명령을 찾지 못했습니다. Python 환경에 fastapi/uvicorn 설치가 필요합니다.";
   startupDetail.textContent = snapshot.launchAtLogin
     ? "정상: Windows 로그인 때 앱이 자동 실행됩니다."

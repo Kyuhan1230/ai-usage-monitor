@@ -47,14 +47,17 @@ dist\Codex Claude Usage-Setup-<version>.exe
 
 ## 필요 조건
 
-대상 PC에는 아래 프로그램이 필요하다.
+GitHub Release 설치본을 사용하는 대상 PC에는 아래 프로그램만 필요하다. 대시보드용 Python과 Node.js는 앱에 포함된다.
 
 - Windows 10 이상
 - Codex CLI
 - Claude Code
-- Node.js 22.12 이상(소스 실행 및 빌드 시)
-- Python 3.11 이상
-- Python 패키지 `fastapi`, `uvicorn`
+
+소스 실행 및 빌드 환경에는 다음 항목이 추가로 필요하다.
+
+- Node.js 22.12 이상
+- Python 3.13
+- Python 패키지 `fastapi`, `uvicorn`, `tzdata`
 
 Python 패키지는 다음 명령으로 설치한다. Windows의 `Asia/Seoul` 시간대 지원에 필요한 `tzdata`도 함께 설치된다.
 
@@ -117,6 +120,8 @@ npm run dashboard:dev
 npm run dist
 ```
 
+빌드 명령은 Python.org의 공식 CPython 3.13 embeddable 배포본을 내려받아 SHA-256을 검증하고, 대시보드 의존성을 설치본에 포함한다. 이 때문에 최초 빌드는 네트워크 연결이 필요하다.
+
 생성되는 주요 산출물은 다음과 같다.
 
 ```text
@@ -141,9 +146,10 @@ Setup은 현재 사용자 영역에 설치한다.
 
 `main` 브랜치 push와 pull request에서는 `.github/workflows/ci.yml`이 다음 작업을 수행한다.
 
-- Node.js 22.12와 Python 3.11 준비
+- Node.js 22.12와 Python 3.13 준비
 - JavaScript, Python 의존성 설치
 - 전체 테스트 실행
+- 해시를 검증한 Python embeddable 런타임 준비
 - Windows NSIS 설치본 빌드
 - 설치본과 자동 업데이트 메타데이터를 Actions artifact로 14일간 보관
 
@@ -329,8 +335,8 @@ Codex 값이 오래됨으로 표시될 때:
 
 Dashboard runtime이 필요로 표시될 때:
 
-- Python이 설치되어 있는지 확인한다.
-- `fastapi`, `uvicorn`이 현재 Python 환경에서 실행 가능한지 확인한다.
+- 설치본이라면 앱을 최신 GitHub Release 버전으로 다시 설치한다.
+- 개발 모드라면 Python 3.13과 `fastapi`, `uvicorn`이 현재 환경에서 실행 가능한지 확인한다.
 
 Dashboard 버튼을 눌렀는데 앱만 흐려지거나 비활성화된 것처럼 보일 때:
 
@@ -370,5 +376,5 @@ npm test
 - Codex 잔여율은 Codex CLI `/status` 화면 출력 포맷에 의존한다.
 - Claude 잔여율은 `claude /usage` 출력 포맷에 의존한다.
 - Codex와 Claude의 정확한 요금제 이름은 안정적으로 자동 판별하지 않는다.
-- 설치본은 Node.js, Python, Codex CLI, Claude Code 런타임을 함께 설치하지 않는다.
-- 완전 독립 실행형 앱으로 만들려면 Node.js와 Python 서버를 번들링하거나 서버를 단일 런타임으로 옮겨야 한다.
+- 설치본은 Electron의 Node.js와 대시보드용 Python 런타임을 포함하지만 Codex CLI와 Claude Code는 포함하지 않는다.
+- 각 CLI가 없거나 로그인되지 않은 PC에서는 해당 서비스의 사용량을 수집할 수 없다.

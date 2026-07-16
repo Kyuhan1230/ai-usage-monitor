@@ -16,10 +16,11 @@
     "app:electron": "electron .",
     "app:legacy-tray": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
     "app:lite": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis",
-    "dist:electron": "electron-builder --win nsis",
-    "dist:installer": "electron-builder --win nsis",
+    "prepare:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-python-runtime.ps1",
+    "pack": "npm run prepare:runtime && electron-builder --dir",
+    "dist": "npm run prepare:runtime && electron-builder --win nsis",
+    "dist:electron": "npm run prepare:runtime && electron-builder --win nsis",
+    "dist:installer": "npm run prepare:runtime && electron-builder --win nsis",
     "dist:legacy-native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-installer.ps1",
     "dist:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-installer.ps1",
     "dist:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-exe.ps1",
@@ -43,7 +44,11 @@
     "appId": "local.codex-claude-usage",
     "productName": "Codex Claude Usage",
     "artifactName": "${productName}-Setup-${version}.${ext}",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "runtime/**/*",
+      "src/python/**/*"
+    ],
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -51,6 +56,7 @@
     "files": [
       "package.json",
       "assets/**/*",
+      "runtime/**/*",
       "src/**/*",
       "node_modules/**/*"
     ],
