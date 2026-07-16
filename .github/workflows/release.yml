@@ -47,12 +47,66 @@ jobs:
       - name: Prepare bundled Python runtime
         run: npm run prepare:runtime
 
-      - name: Build and upload draft GitHub Release
-        run: npx electron-builder --win nsis --publish always
+      - name: Build Windows release assets
+        run: npx electron-builder --win nsis --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Create or update draft GitHub Release
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = (Resolve-Path "dist/Codex-Claude-Usage-Setup-$version.exe").Path
+          $blockmap = (Resolve-Path "dist/Codex-Claude-Usage-Setup-$version.exe.blockmap").Path
+          $metadata = (Resolve-Path "dist/latest.yml").Path
+
+          gh release view "${{ github.ref_name }}" --json isDraft 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            $release = gh release view "${{ github.ref_name }}" --json isDraft | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw "Refusing to replace an already published release"
+            }
+            gh release upload "${{ github.ref_name }}" $installer $blockmap $metadata --clobber
+          } else {
+            gh release create "${{ github.ref_name }}" $installer $blockmap $metadata --draft --title "Codex Claude Usage $version" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Uploading release assets failed with exit code $LASTEXITCODE"
+          }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify draft GitHub Release assets
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $expectedNames = @(
+            "Codex-Claude-Usage-Setup-$version.exe",
+            "Codex-Claude-Usage-Setup-$version.exe.blockmap",
+            "latest.yml"
+          )
+          $release = gh release view "${{ github.ref_name }}" --json isDraft,assets | ConvertFrom-Json
+          if (-not $release.isDraft) {
+            throw "Release must remain draft until asset verification succeeds"
+          }
+          $actualNames = @($release.assets.name)
+          if (Compare-Object $expectedNames $actualNames) {
+            throw "Unexpected release assets: $($actualNames -join ', ')"
+          }
+          foreach ($name in $expectedNames) {
+            $localSize = (Get-Item (Join-Path dist $name)).Length
+            $remoteSize = ($release.assets | Where-Object name -eq $name).size
+            if ($localSize -ne $remoteSize) {
+              throw "Release asset size mismatch for $name"
+            }
+          }
+          $metadata = Get-Content dist/latest.yml -Raw
+          if ($metadata -notmatch [regex]::Escape($expectedNames[0])) {
+            throw "latest.yml does not reference the published installer"
+          }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish completed GitHub Release
         run: gh release edit "${{ github.ref_name }}" --draft=false --latest

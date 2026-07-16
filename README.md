@@ -42,7 +42,7 @@ Dashboard 버튼을 누르면 앱은 먼저 `http://127.0.0.1:8767/status.json` 
 릴리스 산출물로 설치하려면 아래 파일을 실행한다.
 
 ```text
-dist\Codex Claude Usage-Setup-<version>.exe
+dist\Codex-Claude-Usage-Setup-<version>.exe
 ```
 
 설치 후 시작 메뉴 또는 바탕화면에서 `Codex Claude Usage`를 실행한다. 앱을 닫아도 트레이에 남아 백그라운드 수집을 계속한다. 완전히 종료하려면 트레이 메뉴에서 종료를 선택한다.
@@ -127,8 +127,8 @@ npm run dist
 생성되는 주요 산출물은 다음과 같다.
 
 ```text
-dist\Codex Claude Usage-Setup-<version>.exe
-dist\Codex Claude Usage-Setup-<version>.exe.blockmap
+dist\Codex-Claude-Usage-Setup-<version>.exe
+dist\Codex-Claude-Usage-Setup-<version>.exe.blockmap
 dist\latest.yml
 ```
 

@@ -43,7 +43,7 @@
   "build": {
     "appId": "local.codex-claude-usage",
     "productName": "Codex Claude Usage",
-    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "artifactName": "Codex-Claude-Usage-Setup-${version}.${ext}",
     "asar": true,
     "asarUnpack": [
       "runtime/**/*",

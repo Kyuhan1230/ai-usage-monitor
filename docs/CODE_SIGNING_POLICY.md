@@ -25,5 +25,5 @@ Codex Claude Usage의 공식 Windows 설치 파일은 이 저장소의 GitHub Ac
 서명된 파일의 게시자와 유효성은 Windows 파일 속성의 `디지털 서명` 탭 또는 다음 명령으로 확인할 수 있다.
 
 ```powershell
-Get-AuthenticodeSignature '.\Codex Claude Usage-Setup-<version>.exe' | Format-List
+Get-AuthenticodeSignature '.\Codex-Claude-Usage-Setup-<version>.exe' | Format-List
 ```
