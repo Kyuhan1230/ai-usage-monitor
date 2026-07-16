@@ -931,6 +931,7 @@ async function testElectronUpdaterPromptsAndInstalls() {
       this.checkCount = 0;
       this.downloadCount = 0;
       this.installCount = 0;
+      this.installArgs = null;
     }
 
     async checkForUpdates() {
@@ -941,8 +942,9 @@ async function testElectronUpdaterPromptsAndInstalls() {
       this.downloadCount += 1;
     }
 
-    quitAndInstall() {
+    quitAndInstall(...args) {
       this.installCount += 1;
+      this.installArgs = args;
     }
   }
 
@@ -971,6 +973,7 @@ async function testElectronUpdaterPromptsAndInstalls() {
   assert.strictEqual(controller.start(), true);
   assert.strictEqual(updater.autoDownload, false);
   assert.strictEqual(updater.autoInstallOnAppQuit, true);
+  assert.strictEqual(updater.disableWebInstaller, true);
   assert.strictEqual(await controller.check(true), true);
   assert.strictEqual(updater.checkCount, 1);
 
@@ -982,6 +985,7 @@ async function testElectronUpdaterPromptsAndInstalls() {
   updater.emit("update-downloaded", { version: "0.2.0" });
   await wait(0);
   assert.strictEqual(updater.installCount, 1);
+  assert.deepStrictEqual(updater.installArgs, [true, true]);
   assert.match(messages[1].message, /0\.2\.0/);
 }
 
