@@ -2,6 +2,7 @@
 "use strict";
 
 const assert = require("assert");
+const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
@@ -9,6 +10,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 const { EventEmitter } = require("events");
+const zlib = require("zlib");
 
 const ROOT = path.resolve(__dirname, "..");
 const NODE_DIR = path.join(ROOT, "src", "node");
@@ -873,6 +875,7 @@ function testElectronIconConfiguration() {
 function testElectronReleaseConfiguration() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
   const publish = packageJson.build.publish[0];
+  const releaseWorkflow = fs.readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
 
   assert.ok(packageJson.dependencies["electron-updater"]);
   assert.strictEqual(packageJson.repository.url, "https://github.com/Kyuhan1230/ai-usage-monitor.git");
@@ -888,12 +891,41 @@ function testElectronReleaseConfiguration() {
   assert.ok(packageJson.build.files.includes("LICENSE"));
   assert.ok(packageJson.build.files.includes("THIRD_PARTY_NOTICES.md"));
   assert.match(packageJson.scripts["prepare:runtime"], /prepare-python-runtime\.ps1/);
+  assert.match(packageJson.scripts["refresh:release-metadata"], /refresh-release-metadata\.js/);
   assert.match(packageJson.scripts.dist, /prepare:runtime/);
   assert.ok(fs.existsSync(path.join(ROOT, "scripts", "prepare-python-runtime.ps1")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "CODE_SIGNING_POLICY.md")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "PRIVACY.md")));
+  assert.match(releaseWorkflow, /actions\/upload-artifact@v7/);
+  assert.match(releaseWorkflow, /signpath\/github-action-submit-signing-request@v2/);
+  assert.ok(releaseWorkflow.indexOf("Replace installer with signed artifact") < releaseWorkflow.indexOf("Refresh updater metadata from final installer"));
+  assert.ok(releaseWorkflow.indexOf("Refresh updater metadata from final installer") < releaseWorkflow.indexOf("Create or update draft GitHub Release"));
+}
+
+async function testReleaseMetadataRefreshUsesFinalInstallerBytes() {
+  const tempDir = makeTempDir("release-metadata");
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const installerName = `Codex-Claude-Usage-Setup-${packageJson.version}.exe`;
+  const installerPath = path.join(tempDir, installerName);
+  const installerBytes = Buffer.from("final signed installer bytes\n", "utf8");
+  fs.writeFileSync(installerPath, installerBytes);
+
+  await run(NODE, [path.join("scripts", "refresh-release-metadata.js"), installerPath]);
+
+  const expectedSha512 = crypto.createHash("sha512").update(installerBytes).digest("base64");
+  const metadata = fs.readFileSync(path.join(tempDir, "latest.yml"), "utf8");
+  assert.match(metadata, new RegExp(`version: ${packageJson.version.replace(/\./g, "\\.")}`));
+  assert.ok(metadata.includes(`url: ${installerName}`));
+  assert.ok(metadata.includes(`sha512: ${expectedSha512}`));
+  assert.ok(metadata.includes(`size: ${installerBytes.length}`));
+
+  const compressedBlockmap = fs.readFileSync(`${installerPath}.blockmap`);
+  const blockmap = JSON.parse(zlib.gunzipSync(compressedBlockmap).toString("utf8"));
+  assert.strictEqual(blockmap.version, "2");
+  assert.strictEqual(blockmap.files.length, 1);
+  assert.strictEqual(blockmap.files[0].sizes.reduce((total, size) => total + size, 0), installerBytes.length);
 }
 
 function testDashboardRuntimePrefersBundledPython() {
@@ -1503,6 +1535,7 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "setup.js")]);
+  await run(NODE, ["--check", path.join("scripts", "refresh-release-metadata.js")]);
   await run("python", ["-m", "py_compile", path.join("src", "python", "codex_status_dashboard.py"), path.join("src", "python", "codex_usage_report.py"), path.join("src", "python", "claude_usage_report.py"), path.join("src", "python", "dashboard_common.py")]);
   await testParseRawStdin();
   await testDuplicateLimitsKeepFirstGeneralLimit();
@@ -1527,6 +1560,7 @@ async function main() {
   await testClaudeUsagePollerParsesUsageCommand();
   testElectronIconConfiguration();
   testElectronReleaseConfiguration();
+  await testReleaseMetadataRefreshUsesFinalInstallerBytes();
   testDashboardRuntimePrefersBundledPython();
   await testElectronUpdaterPromptsAndInstalls();
   testElectronLaunchAtLoginPreferencePersists();
