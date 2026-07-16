@@ -872,11 +872,15 @@ function testElectronReleaseConfiguration() {
   assert.ok(packageJson.build.asarUnpack.includes("runtime/**/*"));
   assert.ok(packageJson.build.asarUnpack.includes("src/python/**/*"));
   assert.ok(packageJson.build.files.includes("runtime/**/*"));
+  assert.ok(packageJson.build.files.includes("LICENSE"));
+  assert.ok(packageJson.build.files.includes("THIRD_PARTY_NOTICES.md"));
   assert.match(packageJson.scripts["prepare:runtime"], /prepare-python-runtime\.ps1/);
   assert.match(packageJson.scripts.dist, /prepare:runtime/);
   assert.ok(fs.existsSync(path.join(ROOT, "scripts", "prepare-python-runtime.ps1")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "CODE_SIGNING_POLICY.md")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "PRIVACY.md")));
 }
 
 function testDashboardRuntimePrefersBundledPython() {
