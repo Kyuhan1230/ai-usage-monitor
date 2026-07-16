@@ -117,6 +117,20 @@ async function httpGet(url) {
   });
 }
 
+async function waitForHttp(url, timeoutMs = 15000) {
+  const startedAt = Date.now();
+  let lastError = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return await httpGet(url);
+    } catch (error) {
+      lastError = error;
+      await wait(200);
+    }
+  }
+  throw lastError || new Error(`Timed out waiting for ${url}`);
+}
+
 async function testParseRawStdin() {
   const tempDir = makeTempDir("codex-wrapper-parse");
   const statusPath = path.join(tempDir, "status.json");
@@ -367,8 +381,7 @@ async function testDashboardReadsWrapperStatus() {
   );
 
   try {
-    await wait(1000);
-    const response = await httpGet(`http://127.0.0.1:${port}/`);
+    const response = await waitForHttp(`http://127.0.0.1:${port}/`);
     assert.strictEqual(response.statusCode, 200);
     assert.match(response.body, /71%/);
     assert.match(response.body, /84%/);
@@ -1277,8 +1290,7 @@ async function testMergedDashboardShowsUsageAndStatus() {
   );
 
   try {
-    await wait(1000);
-    const response = await httpGet(`http://127.0.0.1:${port}/`);
+    const response = await waitForHttp(`http://127.0.0.1:${port}/`);
     assert.strictEqual(response.statusCode, 200);
     assert.match(response.body, /Codex, Claude Usage Dashboard/);
     assert.match(response.body, /theme-toggle/);
@@ -1374,7 +1386,7 @@ async function testDashboardSurvivesClientDisconnect() {
   });
 
   try {
-    await wait(1000);
+    await waitForHttp(`http://127.0.0.1:${port}/status.json`);
 
     for (let i = 0; i < 20; i += 1) {
       await sendAndAbortRequest(port, i % 3 === 0 ? "/status.json" : i % 3 === 1 ? "/fragment" : "/");
@@ -1444,8 +1456,7 @@ async function testDashboardSurvivesMissingClaudeSessionsDir() {
   );
 
   try {
-    await wait(1000);
-    const response = await httpGet(`http://127.0.0.1:${port}/`);
+    const response = await waitForHttp(`http://127.0.0.1:${port}/`);
     assert.strictEqual(response.statusCode, 200);
     assert.match(response.body, /gpt-codex-intact/);
     assert.match(response.body, /Claude 사용량/);
