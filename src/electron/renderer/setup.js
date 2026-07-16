@@ -5,7 +5,7 @@ const claudeDetail = document.getElementById("claude-detail");
 const hookDetail = document.getElementById("hook-detail");
 const runtimeDetail = document.getElementById("runtime-detail");
 const startupDetail = document.getElementById("startup-detail");
-const startupBadge = document.getElementById("startup-badge");
+const launchAtLogin = document.getElementById("launch-at-login");
 
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
@@ -64,8 +64,8 @@ async function refresh(force = false) {
     : "필요: uvicorn 명령을 찾지 못했습니다. Python 환경에 fastapi/uvicorn 설치가 필요합니다.";
   startupDetail.textContent = snapshot.launchAtLogin
     ? "정상: Windows 로그인 때 앱이 자동 실행됩니다."
-    : "주의: 자동 실행 등록이 확인되지 않았습니다. 앱을 다시 시작하면 재등록을 시도합니다.";
-  startupBadge.textContent = snapshot.launchAtLogin ? "정상" : "주의";
+    : "선택 안 함: 앱은 사용자가 직접 실행할 때만 시작됩니다.";
+  launchAtLogin.checked = snapshot.launchAtLogin;
 }
 
 document.getElementById("codex-login").addEventListener("click", () => window.usageApp.openCodexLogin());
@@ -75,6 +75,10 @@ document.getElementById("install-hook").addEventListener("click", async () => {
   await refresh();
 });
 document.getElementById("open-dashboard").addEventListener("click", () => window.usageApp.openDashboard());
+launchAtLogin.addEventListener("change", async () => {
+  await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
+  await refresh();
+});
 document.getElementById("refresh").addEventListener("click", () => refresh(true));
 
 refresh();

@@ -14,6 +14,8 @@ const {
 const { parseArgs: parsePollerArgs, startPoller } = require("../node/codex-status-poller");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { writeJsonAtomic } = require("../node/status-capture");
+const { getLaunchAtLoginPreference, setLaunchAtLoginPreference } = require("./app-preferences");
+const { installClaudeHookSettings } = require("./claude-hook-settings");
 const { createUpdaterController } = require("./updater");
 
 const APP_NAME = "Codex Claude Usage";
@@ -21,6 +23,7 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const APP_ICON_PATH = path.join(ROOT, "assets", "codex-claude-usage.ico");
 const DASHBOARD_URL = "http://127.0.0.1:8767";
 const STATUS_DIR = path.join(os.homedir(), ".codex-usage-wrapper");
+const PREFERENCES_PATH = path.join(STATUS_DIR, "preferences.json");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
 const CLAUDE_STATUS_PATH = path.join(STATUS_DIR, "claude-status.json");
 const HISTORY_DIR = path.join(STATUS_DIR, "history");
@@ -551,20 +554,30 @@ function claudeHookCommand() {
   return `"${exe}" "${path.join(__dirname, "main.js").replace(/"/g, '\\"')}" --claude-status-hook`;
 }
 
-function installClaudeHook() {
-  const settings = readJsonSafe(CLAUDE_SETTINGS_PATH) || {};
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
-    throw new Error("Claude settings.json is not an object");
-  }
-  fs.mkdirSync(path.dirname(CLAUDE_SETTINGS_PATH), { recursive: true });
-  settings.statusLine = {
-    type: "command",
+async function installClaudeHook() {
+  return installClaudeHookSettings({
+    settingsPath: CLAUDE_SETTINGS_PATH,
     command: claudeHookCommand(),
-  };
-  writeJsonAtomic(CLAUDE_SETTINGS_PATH, settings);
+    confirmReplace: async (existingCommand) => {
+      const options = {
+        type: "warning",
+        title: "기존 Claude statusLine 설정 발견",
+        message: "다른 statusLine 명령이 이미 설정되어 있습니다.",
+        detail: `기존 명령:\n${existingCommand}\n\n교체하면 원본 settings.json을 먼저 백업합니다.`,
+        buttons: ["기존 설정 유지", "백업 후 교체"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const result = setupWindow
+        ? await dialog.showMessageBox(setupWindow, options)
+        : await dialog.showMessageBox(options);
+      return result.response === 1;
+    },
+  });
 }
 
-function ensureLaunchAtLogin() {
+function applyLaunchAtLoginPreference() {
   if (process.platform === "win32") {
     const legacyName = "electron.app.Electron";
     const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -580,7 +593,7 @@ function ensureLaunchAtLogin() {
     }
   }
   app.setLoginItemSettings({
-    openAtLogin: true,
+    openAtLogin: getLaunchAtLoginPreference(PREFERENCES_PATH),
     path: process.execPath,
     args: app.isPackaged ? [] : [ROOT],
   });
@@ -737,9 +750,9 @@ ipcMain.handle("setup:open", () => {
   showSetupWindow();
   return true;
 });
-ipcMain.handle("setup:installClaudeHook", () => {
-  installClaudeHook();
-  return buildSetupSnapshot();
+ipcMain.handle("setup:installClaudeHook", async () => {
+  const result = await installClaudeHook();
+  return { result, snapshot: buildSetupSnapshot() };
 });
 ipcMain.handle("setup:openCodexLogin", () => {
   openCommand("codex login");
@@ -750,8 +763,9 @@ ipcMain.handle("setup:openClaudeAuth", () => {
   return true;
 });
 ipcMain.handle("app:setLaunchAtLogin", (_event, enabled) => {
+  const openAtLogin = setLaunchAtLoginPreference(PREFERENCES_PATH, enabled);
   app.setLoginItemSettings({
-    openAtLogin: Boolean(enabled),
+    openAtLogin,
     path: process.execPath,
     args: app.isPackaged ? [] : [ROOT],
   });
@@ -762,7 +776,7 @@ ipcMain.handle("app:quit", () => {
 });
 
 app.whenReady().then(() => {
-  ensureLaunchAtLogin();
+  applyLaunchAtLoginPreference();
   startStatusPoller();
   startClaudeUsagePoller();
   createTray();

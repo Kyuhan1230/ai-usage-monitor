@@ -74,7 +74,8 @@ p {
 }
 
 button,
-.badge {
+.badge,
+.toggle {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel-2);
@@ -101,6 +102,17 @@ button:focus-visible {
   display: inline-flex;
   align-items: center;
   color: var(--ok);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.toggle input {
+  accent-color: var(--ok);
 }
 
 footer {

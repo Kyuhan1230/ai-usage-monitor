@@ -933,6 +933,60 @@ async function testElectronUpdaterPromptsAndInstalls() {
   assert.match(messages[1].message, /0\.2\.0/);
 }
 
+function testElectronLaunchAtLoginPreferencePersists() {
+  const tempDir = makeTempDir("electron-preferences");
+  const preferencesPath = path.join(tempDir, "preferences.json");
+  const {
+    getLaunchAtLoginPreference,
+    readPreferences,
+    setLaunchAtLoginPreference,
+  } = require(path.join(ROOT, "src", "electron", "app-preferences.js"));
+
+  assert.strictEqual(getLaunchAtLoginPreference(preferencesPath), false);
+  assert.strictEqual(setLaunchAtLoginPreference(preferencesPath, true), true);
+  assert.strictEqual(getLaunchAtLoginPreference(preferencesPath), true);
+  assert.strictEqual(setLaunchAtLoginPreference(preferencesPath, false), false);
+  assert.strictEqual(getLaunchAtLoginPreference(preferencesPath), false);
+  assert.deepStrictEqual(readPreferences(preferencesPath), { launchAtLogin: false });
+}
+
+async function testElectronClaudeHookPreservesAndBacksUpExistingCommand() {
+  const tempDir = makeTempDir("electron-claude-hook");
+  const settingsPath = path.join(tempDir, "settings.json");
+  const originalSettings = {
+    statusLine: { type: "command", command: "node existing-statusline.js" },
+    theme: "dark",
+  };
+  fs.writeFileSync(settingsPath, `${JSON.stringify(originalSettings, null, 2)}\n`, "utf8");
+  const { installClaudeHookSettings } = require(path.join(
+    ROOT,
+    "src",
+    "electron",
+    "claude-hook-settings.js",
+  ));
+
+  const preserved = await installClaudeHookSettings({
+    settingsPath,
+    command: '"app.exe" --claude-status-hook',
+    confirmReplace: async () => false,
+  });
+  assert.strictEqual(preserved.status, "preserved");
+  assert.deepStrictEqual(readJson(settingsPath), originalSettings);
+
+  const installed = await installClaudeHookSettings({
+    settingsPath,
+    command: '"app.exe" --claude-status-hook',
+    confirmReplace: async () => true,
+    now: new Date("2026-07-16T00:00:00.000Z"),
+  });
+  assert.strictEqual(installed.status, "installed");
+  assert.ok(installed.backupPath);
+  assert.deepStrictEqual(readJson(installed.backupPath), originalSettings);
+  const updated = readJson(settingsPath);
+  assert.strictEqual(updated.theme, "dark");
+  assert.strictEqual(updated.statusLine.command, '"app.exe" --claude-status-hook');
+}
+
 function testCompactStatusHealthUsesPollIntervalAndPollerState() {
   const { isFresh, stateText } = require(path.join(
     ROOT,
@@ -1388,6 +1442,8 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-usage-poller.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "main.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "app-preferences.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "claude-hook-settings.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "updater.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
@@ -1417,6 +1473,8 @@ async function main() {
   testElectronIconConfiguration();
   testElectronReleaseConfiguration();
   await testElectronUpdaterPromptsAndInstalls();
+  testElectronLaunchAtLoginPreferencePersists();
+  await testElectronClaudeHookPreservesAndBacksUpExistingCommand();
   const releaseVersion = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
   await run(NODE, [path.join("scripts", "verify-release-tag.js"), `v${releaseVersion}`]);
   testCompactStatusHealthUsesPollIntervalAndPollerState();
