@@ -863,7 +863,7 @@ function testElectronReleaseConfiguration() {
 
   assert.ok(packageJson.dependencies["electron-updater"]);
   assert.strictEqual(packageJson.repository.url, "https://github.com/Kyuhan1230/ai-usage-monitor.git");
-  assert.strictEqual(packageJson.build.artifactName, "${productName}-Setup-${version}.${ext}");
+  assert.strictEqual(packageJson.build.artifactName, "Codex-Claude-Usage-Setup-${version}.${ext}");
   assert.strictEqual(publish.provider, "github");
   assert.strictEqual(publish.owner, "Kyuhan1230");
   assert.strictEqual(publish.repo, "ai-usage-monitor");
