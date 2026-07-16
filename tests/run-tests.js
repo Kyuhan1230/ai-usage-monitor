@@ -891,6 +891,7 @@ function testElectronReleaseConfiguration() {
   assert.ok(packageJson.build.files.includes("LICENSE"));
   assert.ok(packageJson.build.files.includes("THIRD_PARTY_NOTICES.md"));
   assert.match(packageJson.scripts["prepare:runtime"], /prepare-python-runtime\.ps1/);
+  assert.match(packageJson.scripts["docs:screenshots"], /capture-readme-screenshots\.js/);
   assert.match(packageJson.scripts["refresh:release-metadata"], /refresh-release-metadata\.js/);
   assert.match(packageJson.scripts.dist, /prepare:runtime/);
   assert.ok(fs.existsSync(path.join(ROOT, "scripts", "prepare-python-runtime.ps1")));
@@ -898,6 +899,9 @@ function testElectronReleaseConfiguration() {
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "CODE_SIGNING_POLICY.md")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "PRIVACY.md")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "app-compact.png")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "app-setup.png")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "dashboard-overview.png")));
   assert.match(releaseWorkflow, /actions\/upload-artifact@v7/);
   assert.match(releaseWorkflow, /signpath\/github-action-submit-signing-request@v2/);
   assert.ok(releaseWorkflow.indexOf("Replace installer with signed artifact") < releaseWorkflow.indexOf("Refresh updater metadata from final installer"));
@@ -1535,6 +1539,7 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "setup.js")]);
+  await run(NODE, ["--check", path.join("scripts", "capture-readme-screenshots.js")]);
   await run(NODE, ["--check", path.join("scripts", "refresh-release-metadata.js")]);
   await run("python", ["-m", "py_compile", path.join("src", "python", "codex_status_dashboard.py"), path.join("src", "python", "codex_usage_report.py"), path.join("src", "python", "claude_usage_report.py"), path.join("src", "python", "dashboard_common.py")]);
   await testParseRawStdin();

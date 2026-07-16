@@ -1,0 +1,74 @@
+name: Bug report
+description: 재현 가능한 오류나 예기치 않은 동작을 알려주세요.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        신고해 주셔서 감사합니다. 원본 세션 JSONL, 인증 정보 또는 사용자 홈 경로가 포함된 로그는 첨부하지 마세요.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Setup 또는 GitHub Release에서 확인한 버전입니다.
+      placeholder: 0.1.3
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Compact window
+        - Setup
+        - Full dashboard
+        - Codex collection
+        - Claude collection
+        - Installer or updater
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: 문제를 재현할 수 있는 최소 단계를 적어주세요.
+      placeholder: |
+        1. 앱을 실행합니다.
+        2. ...
+        3. 오류가 나타납니다.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: 토큰, 사용자 이름, 로컬 경로와 세션 원문을 제거한 자료만 첨부해 주세요.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: 첨부 자료에서 인증 정보, 사용자 홈 경로와 원본 세션 내용을 제거했습니다.
+          required: true

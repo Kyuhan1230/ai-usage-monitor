@@ -1,396 +1,275 @@
-# Codex Claude Usage
+<p align="center">
+  <img src="assets/codex-claude-usage.png" width="112" alt="Codex Claude Usage icon">
+</p>
 
-Codex CLI와 Claude Code 사용량을 한 화면에서 확인하는 로컬 Electron 기반 Windows 트레이 앱이다.
+<h1 align="center">Codex Claude Usage</h1>
 
-이 앱은 이미 로그인된 CLI의 공개 출력과 로컬 세션 로그만 읽는다. OpenAI 또는 Anthropic 인증 토큰, 브라우저 쿠키, 비공개 Usage API는 읽거나 호출하지 않는다. 수집한 데이터는 사용자 PC 안의 `~\.codex-usage-wrapper` 폴더에만 저장된다.
+<p align="center">
+  Codex CLI와 Claude Code의 한도·토큰 사용량을 한곳에서 확인하는<br>
+  로컬 우선 Windows 데스크톱 모니터입니다.
+</p>
 
-이 프로젝트는 OpenAI 또는 Anthropic의 공식 제품이 아니며 두 회사가 제작, 보증 또는 후원하지 않는다. OpenAI, Codex, Anthropic, Claude의 이름과 표장은 각 권리자의 자산이다.
+<p align="center">
+  <a href="https://github.com/Kyuhan1230/ai-usage-monitor/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Kyuhan1230/ai-usage-monitor/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Kyuhan1230/ai-usage-monitor?display_name=tag&sort=semver"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Kyuhan1230/ai-usage-monitor"></a>
+  <img alt="Windows 10+" src="https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows">
+  <a href="https://github.com/Kyuhan1230/ai-usage-monitor/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Kyuhan1230/ai-usage-monitor/total"></a>
+</p>
 
-## 주요 기능
+<p align="center">
+  <a href="https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest"><strong>Windows용 다운로드</strong></a>
+  · <a href="#screenshots">Screenshots</a>
+  · <a href="#quick-start">Quick start</a>
+  · <a href="#development">Development</a>
+  · <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-- Codex 5-hour, weekly 잔여율 표시
-- Claude current session, current week 잔여율 표시
-- Codex와 Claude 토큰 사용량을 날짜별, 모델별로 집계
-- Windows 트레이 상주 앱
-- 창을 닫아도 백그라운드에서 계속 최신화
-- 전체 대시보드는 필요할 때만 FastAPI 서버로 실행
-- Dashboard 버튼은 서버 준비 상태를 확인한 뒤 브라우저를 실행
-- Setup 화면에서 Codex, Claude, hook, 자동 실행 상태 점검
-- Windows 로그인 시 자동 실행 등록
-- 설치용 `Setup.exe` 생성
-- GitHub Releases 기반 새 버전 확인, 다운로드, 재시작 설치 안내
-- 로컬 파일 캐시를 사용해 큰 세션 폴더에서도 빠른 갱신
+---
 
-## 화면
+Codex Claude Usage는 이미 로그인된 CLI의 공개 상태 출력과 사용자 PC의 로컬 세션 로그만 읽습니다. OpenAI·Anthropic 인증 토큰, 브라우저 쿠키 또는 비공개 Usage API를 사용하지 않으며, 집계 데이터는 외부 서버로 전송하지 않습니다.
 
-앱은 세 가지 화면을 제공한다.
+> [!IMPORTANT]
+> 이 프로젝트는 OpenAI 또는 Anthropic의 공식 제품이 아닙니다. OpenAI, Codex, Anthropic, Claude의 이름과 표장은 각 권리자의 자산입니다.
 
-- Compact window: Codex와 Claude 잔여율을 작게 보여주는 기본 창
-- Setup window: CLI 로그인, hook, dashboard runtime, 자동 실행 상태를 점검하는 설정 창
-- Full dashboard: 날짜별, 모델별 토큰 사용량과 상세 통계를 보여주는 웹 대시보드
+## Screenshots
 
-Full dashboard는 기본적으로 아래 주소에서 열린다.
+### Full dashboard
 
-```text
-http://127.0.0.1:8767
-```
+<p align="center">
+  <img src="docs/images/dashboard-overview.png" alt="Codex와 Claude 사용량을 함께 보여주는 전체 대시보드" width="100%">
+</p>
 
-Dashboard 버튼을 누르면 앱은 먼저 `http://127.0.0.1:8767/status.json` 응답을 확인한다. 서버가 아직 준비되지 않았으면 짧게 대기한 뒤 브라우저를 열고, 준비 실패 시 경고 메시지를 표시한다.
+<table>
+  <tr>
+    <th width="40%">Compact monitor</th>
+    <th width="60%">Setup &amp; health checks</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/app-compact.png" alt="Codex Claude Usage compact monitor"></td>
+    <td align="center"><img src="docs/images/app-setup.png" alt="Codex Claude Usage setup screen"></td>
+  </tr>
+  <tr>
+    <td>남은 한도, 갱신 시각, 연결 상태를 작은 창에서 확인합니다.</td>
+    <td>CLI 로그인, Claude hook, 대시보드 런타임, 자동 실행 상태를 점검합니다.</td>
+  </tr>
+</table>
 
-## 빠른 설치
+> [!NOTE]
+> 스크린샷은 실제 앱 UI를 대표 샘플 데이터로 렌더링한 것입니다. `npm run docs:screenshots`로 같은 화면을 다시 만들 수 있습니다.
 
-릴리스 산출물로 설치하려면 아래 파일을 실행한다.
+## Features
 
-```text
-dist\Codex-Claude-Usage-Setup-<version>.exe
-```
+| 영역 | 제공 기능 |
+| --- | --- |
+| 한도 모니터링 | Codex 5-hour/weekly, Claude current session/current week 잔여율 |
+| 사용량 분석 | 날짜별·모델별 input, cached input, output, reasoning token 집계 |
+| 데스크톱 앱 | Windows 트레이 상주, always-on-top, 투명도 조절, 로그인 시 자동 실행 |
+| 상태 점검 | Codex/Claude CLI, Claude statusLine hook, bundled Python runtime 확인 |
+| 로컬 대시보드 | 필요할 때만 `127.0.0.1`에 FastAPI 대시보드를 실행 |
+| 자동 업데이트 | GitHub Releases에서 새 버전을 확인하고 사용자 동의 후 설치 |
+| 빠른 집계 | 파일별 `(mtime, size)` 캐시로 변경된 세션 로그만 다시 처리 |
+| 재현 가능한 배포 | GitHub Actions 테스트, Windows 빌드, Release asset 검증 |
 
-설치 후 시작 메뉴 또는 바탕화면에서 `Codex Claude Usage`를 실행한다. 앱을 닫아도 트레이에 남아 백그라운드 수집을 계속한다. 완전히 종료하려면 트레이 메뉴에서 종료를 선택한다.
+## Quick start
 
-## 필요 조건
+### 1. 설치
 
-GitHub Release 설치본을 사용하는 대상 PC에는 아래 프로그램만 필요하다. 대시보드용 Python과 Node.js는 앱에 포함된다.
+[Latest Release](https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest)에서 `Codex-Claude-Usage-Setup-<version>.exe`를 내려받아 실행합니다.
 
-- Windows 10 이상
-- Codex CLI
-- Claude Code
+설치본에는 Electron 앱과 대시보드용 Python 런타임이 포함됩니다. 별도의 Node.js 또는 Python 설치는 필요하지 않습니다.
 
-소스 실행 및 빌드 환경에는 다음 항목이 추가로 필요하다.
+> [!WARNING]
+> SignPath Foundation 코드 서명은 심사 대기 중입니다. 승인 전 설치 파일에서는 Windows SmartScreen의 `알 수 없는 게시자` 안내가 표시될 수 있습니다. 공개된 소스와 GitHub Actions 빌드 기록을 함께 확인할 수 있습니다.
 
-- Node.js 22.12 이상
-- Python 3.13
-- Python 패키지 `fastapi`, `uvicorn`, `tzdata`
+### 2. CLI 로그인
 
-Python 패키지는 다음 명령으로 설치한다. Windows의 `Asia/Seoul` 시간대 지원에 필요한 `tzdata`도 함께 설치된다.
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-Codex와 Claude는 각 CLI에서 먼저 로그인해야 한다.
+Codex CLI와 Claude Code는 각각 설치하고 먼저 로그인해야 합니다.
 
 ```powershell
 codex login
 claude auth
 ```
 
-Claude Code 버전에 따라 `claude auth` 대신 `claude login`을 사용하는 환경도 있다. Setup 화면의 버튼은 현재 설치된 CLI 동작을 확인하기 위한 보조 기능이다.
+Claude Code 버전에 따라 `claude auth` 대신 `claude login`을 사용할 수 있습니다.
 
-## 개발 실행
+### 3. 실행
 
-저장소를 직접 받아 실행하려면 Node 의존성을 설치한다.
+시작 메뉴 또는 바탕화면에서 **Codex Claude Usage**를 실행합니다. 창을 닫아도 트레이에서 수집을 계속하며, 완전히 종료하려면 트레이 메뉴의 **종료**를 선택합니다.
 
-```powershell
-npm install
+## How it works
+
+```mermaid
+flowchart LR
+    A["Codex CLI /status"] --> C["Background pollers"]
+    B["Claude Code /usage"] --> C
+    C --> D["Local status JSON"]
+    E["Codex & Claude session JSONL"] --> F["Incremental aggregators"]
+    D --> G["Electron compact UI"]
+    D --> H["Local dashboard"]
+    F --> H
+    I["GitHub Releases"] --> J["User-approved updater"]
+    J --> G
 ```
 
-기본 Electron 앱을 실행한다.
+- Codex 상태는 백그라운드에서 `/status` 출력을 캡처해 파싱합니다.
+- Claude 상태는 `claude /usage`를 기본으로 사용하며 statusLine hook은 선택 사항입니다.
+- 상세 토큰 사용량은 `~/.codex/sessions`와 `~/.claude/projects`의 JSONL을 로컬에서 집계합니다.
+- 전체 대시보드는 버튼을 눌렀을 때만 `http://127.0.0.1:8767`에서 시작합니다.
+
+### Local data flow
+
+| 데이터 | 기본 위치 |
+| --- | --- |
+| Codex 최신 상태 | `~/.codex-usage-wrapper/status.json` |
+| Claude 최신 상태 | `~/.codex-usage-wrapper/claude-status.json` |
+| 캡처 히스토리 | `~/.codex-usage-wrapper/history/YYYY-MM-DD.jsonl` |
+| 대시보드 로그 | `~/.codex-usage-wrapper/dashboard*.log` |
+
+## Automatic updates
+
+설치된 앱은 다음 시점에 GitHub Releases의 새 버전을 확인합니다.
+
+- 앱 시작 15초 후
+- 실행 중 6시간마다
+- 트레이 메뉴의 **Check for updates...** 선택 시
+
+새 버전이 있으면 다운로드 전과 재시작 설치 전에 각각 사용자에게 확인합니다. 개발 모드인 `npm run app`에서는 자동 업데이트가 실행되지 않습니다.
+
+## CI/CD
+
+| 이벤트 | GitHub Actions 동작 |
+| --- | --- |
+| Pull request / `main` push | 전체 테스트, bundled runtime 준비, Windows NSIS 빌드, artifact 보관 |
+| `v<package-version>` 태그 | 태그/버전 검증, 설치 파일 빌드, updater metadata 검증, GitHub Release 공개 |
+| SignPath 설정 완료 후 | 앱과 설치 파일 서명, 서명된 최종 파일 기준 `.blockmap`과 `latest.yml` 재생성 |
+
+릴리스 태그와 `package.json` 버전이 다르거나, 원격 asset이 로컬 결과와 일치하지 않으면 공개 단계가 중단됩니다.
+
+## Development
+
+### Requirements
+
+- Windows 10 이상
+- Node.js 22.12 이상
+- Python 3.13
+- Codex CLI 및 Claude Code
+
+### Run from source
 
 ```powershell
+git clone https://github.com/Kyuhan1230/ai-usage-monitor.git
+cd ai-usage-monitor
+npm ci
+python -m pip install -r requirements.txt
 npm run app
 ```
 
-명시적으로 Electron 앱을 실행하려면 같은 앱을 다음 명령으로 실행할 수 있다.
-
-```powershell
-npm run app:electron
-```
-
-기존 PowerShell WinForms tray 앱은 legacy fallback으로 남아 있다.
-
-```powershell
-npm run app:legacy-tray
-```
-
-브라우저 대시보드만 실행하려면 다음 명령을 사용한다.
+대시보드만 실행하려면 다음 명령을 사용합니다.
 
 ```powershell
 npm run dashboard
 ```
 
-개발 중 Python 파일 변경을 자동 반영하려면 reload 모드를 사용한다.
-
-```powershell
-npm run dashboard:dev
-```
-
-## 빌드와 배포
-
-설치 파일을 만들려면 다음 명령을 실행한다.
-
-```powershell
-npm run dist
-```
-
-빌드 명령은 Python.org의 공식 CPython 3.13 embeddable 배포본을 내려받아 SHA-256을 검증하고, 대시보드 의존성을 설치본에 포함한다. 이 때문에 최초 빌드는 네트워크 연결이 필요하다.
-
-생성되는 주요 산출물은 다음과 같다.
-
-```text
-dist\Codex-Claude-Usage-Setup-<version>.exe
-dist\Codex-Claude-Usage-Setup-<version>.exe.blockmap
-dist\latest.yml
-```
-
-친구나 팀원에게 전달할 때는 보통 Electron NSIS 설치본 하나를 주면 된다. legacy native 산출물은 `npm run dist:legacy-native`로 별도 생성한다.
-
-Setup은 현재 사용자 영역에 설치한다.
-
-```text
-%LOCALAPPDATA%\Programs\Codex Claude Usage
-```
-
-설치본은 시작 메뉴, 바탕화면 바로가기, 제거 항목, 트레이 아이콘에 같은 앱 아이콘을 사용한다.
-
-소스 파일만 수정한 경우 이미 설치된 앱에는 자동 반영되지 않는다. 설치본에 반영하려면 `npm run dist`로 Setup을 다시 만들고 재설치하거나, 개발 중에는 `npm run app`으로 Electron 앱을 직접 실행한다.
-
-### GitHub Actions CI/CD
-
-`main` 브랜치 push와 pull request에서는 `.github/workflows/ci.yml`이 다음 작업을 수행한다.
-
-- Node.js 22.12와 Python 3.13 준비
-- JavaScript, Python 의존성 설치
-- 전체 테스트 실행
-- 해시를 검증한 Python embeddable 런타임 준비
-- Windows NSIS 설치본 빌드
-- 설치본과 자동 업데이트 메타데이터를 Actions artifact로 14일간 보관
-
-정식 배포는 `package.json` 버전과 같은 `v<version>` 태그를 push하면 시작된다. 예를 들어 patch 버전을 올려 배포하려면 다음과 같이 실행한다.
-
-```powershell
-npm version patch
-git push origin main --follow-tags
-```
-
-`.github/workflows/release.yml`은 태그와 앱 버전이 일치하는지 확인하고, 테스트와 Windows 빌드를 통과한 뒤 GitHub Releases에 아래 파일을 공개한다.
-
-- Windows 설치 파일 `.exe`
-- 차등 업데이트 파일 `.blockmap`
-- 업데이트 메타데이터 `latest.yml`
-
-별도 Personal Access Token은 필요하지 않다. 워크플로는 저장소가 제공하는 `GITHUB_TOKEN`과 `contents: write` 권한을 사용한다.
-
-### 설치된 앱의 자동 업데이트
-
-GitHub Release에서 설치한 앱은 다음 시점에 새 공개 릴리스를 확인한다.
-
-- 앱 시작 15초 후
-- 앱 실행 중 6시간마다
-- 트레이 메뉴의 `Check for updates...` 선택 시
-
-새 버전이 있으면 먼저 다운로드 여부를 묻고, 다운로드가 끝나면 즉시 재시작해 설치할지 묻는다. `종료할 때 설치`를 선택하면 앱을 다음에 종료할 때 설치된다. 개발 모드인 `npm run app`에서는 자동 업데이트가 동작하지 않는다.
-
-### Download and code signing
-
-- [최신 Windows 설치 파일 다운로드](https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest)
-- Free code signing provided by SignPath.io, certificate by SignPath Foundation.
-- SignPath Foundation 신청서는 제출했으며 현재 승인을 기다리고 있다. 승인 전 공개된 설치 파일은 서명되지 않았으며 Windows SmartScreen의 게시자 경고가 표시될 수 있다.
-
-처음 한 번은 위 GitHub Releases 링크에서 설치 파일을 직접 내려받아 설치해야 한다. 그 설치본부터 이후 공개 릴리스 업데이트 안내를 받을 수 있다.
-
-### Code signing policy
-
-- [코드 서명 정책](docs/CODE_SIGNING_POLICY.md)
-- [개인정보 처리방침](docs/PRIVACY.md)
-- [Windows 코드 서명 설정 절차](docs/SIGNING_SETUP.md)
-- [SignPath 신청서 공개 정보 초안](docs/SIGNPATH_APPLICATION.md)
-- [제3자 오픈소스 고지](THIRD_PARTY_NOTICES.md)
-
-## 데이터 수집 방식
-
-Codex 잔여율:
-
-- 앱이 백그라운드에서 Codex CLI를 실행한다.
-- `/status` 출력을 캡처하고 파싱한다.
-- `~\.codex-usage-wrapper\status.json`에 저장한다.
-- 기본적으로 1분마다 갱신한다.
-
-Claude 잔여율:
-
-- 앱이 백그라운드에서 `claude /usage`를 실행한다.
-- `Current session`, `Current week (all models)` 출력을 파싱한다.
-- `~\.codex-usage-wrapper\claude-status.json`에 저장한다.
-- Claude statusLine hook은 선택 사항이다.
-
-토큰 사용량:
-
-- Codex는 `~\.codex\sessions` JSONL 파일을 읽는다.
-- Claude는 `~\.claude\projects` 아래의 모든 JSONL 파일을 재귀적으로 읽는다.
-- 파일별 `(mtime, size)` 캐시를 사용해 변경된 파일만 다시 파싱한다.
-- 전체 대시보드를 열어둔 동안 상세 집계가 갱신된다.
-
-캡처 주기는 환경변수로 조절할 수 있다.
-
-```powershell
-$env:CODEX_USAGE_POLL_INTERVAL_MS = "180000"
-$env:CODEX_USAGE_CODEX_POLL_INTERVAL_MS = "60000"
-$env:CODEX_USAGE_CLAUDE_POLL_INTERVAL_MS = "180000"
-```
-
-## 저장 위치
-
-최신 Codex 상태:
-
-```text
-~\.codex-usage-wrapper\status.json
-```
-
-최신 Claude 상태:
-
-```text
-~\.codex-usage-wrapper\claude-status.json
-```
-
-Codex status 캡처 히스토리:
-
-```text
-~\.codex-usage-wrapper\history\YYYY-MM-DD.jsonl
-```
-
-대시보드 로그:
-
-```text
-~\.codex-usage-wrapper\dashboard.log
-~\.codex-usage-wrapper\dashboard-error.log
-```
-
-## 보안 원칙
-
-이 프로젝트는 다음을 하지 않는다.
-
-- OpenAI 인증 토큰 읽기
-- Anthropic 인증 토큰 읽기
-- 브라우저 쿠키 읽기
-- 비공개 Usage API 호출
-- 외부 서버로 사용량 데이터 전송
-- 원본 민감 로그를 외부 서비스에 업로드
-
-사용하는 입력은 로컬 CLI 출력, 로컬 status JSON, 로컬 세션 JSONL이다. GitHub issue나 로그 공유 시에는 `~\.codex-usage-wrapper`와 세션 JSONL 원본을 그대로 첨부하지 않는 것을 권장한다.
-
-## 프로젝트 구조
-
-```text
-assets/
-  codex-claude-usage.ico     Windows 앱, tray, shortcut 아이콘
-  codex-claude-usage.png     아이콘 원본 PNG
-
-scripts/
-  native-usage-tray.ps1      legacy WinForms tray 앱
-  build-native-exe.ps1       legacy native launcher exe 생성
-  build-native-installer.ps1 legacy native setup 생성
-  codex-wrapper.ps1          선택형 Codex wrapper
-  codex-wrapper.cmd          선택형 Codex wrapper
-
-src/node/
-  codex-status-poller.js     Codex /status 백그라운드 캡처
-  claude-usage-poller.js     Claude /usage 백그라운드 캡처
-  claude-status-hook.js      Claude statusLine hook 파서
-  codex-wrapper.js           Codex terminal wrapper
-  status-capture.js          status JSON 저장과 공용 파서
-
-src/python/
-  codex_dashboard_fastapi.py FastAPI 대시보드 진입점
-  codex_status_dashboard.py  통합 대시보드 렌더링
-  codex_usage_report.py      Codex JSONL 사용량 집계
-  claude_usage_report.py     Claude JSONL 사용량 집계
-  dashboard_common.py        HTML 렌더링 공용 유틸
-
-src/electron/
-  main.js                    주력 Electron 앱
-  preload.js                 Electron IPC bridge
-  renderer/                  Electron renderer UI
-
-tests/
-  run-tests.js               통합 테스트 러너
-  mock-codex*.js             Codex CLI mock
-```
-
-## 선택: Codex wrapper
-
-백그라운드 poller보다 더 빠르게 현재 Codex 세션의 `/status`를 캡처하고 싶으면 wrapper를 사용할 수 있다.
-
-```powershell
-.\scripts\codex-wrapper.ps1
-```
-
-Codex 안에서 아래 명령을 입력하면 wrapper가 `/status`를 캡처한다.
-
-```text
-:usage
-```
-
-Codex 인자를 넘기려면 `--` 뒤에 쓴다.
-
-```powershell
-.\scripts\codex-wrapper.ps1 -- --model gpt-5.5
-```
-
-## 수동 캡처
-
-자동 캡처가 깨졌을 때는 `/status` 출력을 복사해서 수동으로 저장할 수 있다.
-
-```powershell
-Get-Clipboard | python src/python/codex_status_dashboard.py --raw-stdin
-```
-
-## 문제 해결
-
-Claude 값이 오래됨으로 표시될 때:
-
-- Setup에서 Claude CLI 상태와 statusLine hook 상태를 확인한다.
-- 필요하면 hook 설치를 다시 누른다.
-- Claude Code 창을 활성화하거나 새 세션을 시작해 statusLine이 다시 그려지게 한다.
-- `~\.codex-usage-wrapper\claude-status.json` 수정 시각을 확인한다.
-
-Codex 값이 오래됨으로 표시될 때:
-
-- Codex CLI 로그인이 되어 있는지 확인한다.
-- Setup에서 Codex CLI 상태를 확인한다.
-- Full dashboard를 열어 poller heartbeat가 움직이는지 확인한다.
-- 필요하면 앱을 재시작한다.
-
-Dashboard runtime이 필요로 표시될 때:
-
-- 설치본이라면 앱을 최신 GitHub Release 버전으로 다시 설치한다.
-- 개발 모드라면 Python 3.13과 `fastapi`, `uvicorn`이 현재 환경에서 실행 가능한지 확인한다.
-
-Dashboard 버튼을 눌렀는데 앱만 흐려지거나 비활성화된 것처럼 보일 때:
-
-- Setup 창 안에서 눌렀다면 최신 설치본인지 확인한다. 오래된 설치본은 모달 Setup 창이 닫히지 않아 부모 창이 비활성화된 것처럼 보일 수 있다.
-- 브라우저에서 `http://127.0.0.1:8767`을 직접 열어 대시보드 서버가 정상 응답하는지 확인한다.
-- 설치본을 사용 중이면 최신 Setup으로 다시 설치한다.
-- 개발 중이면 Electron 앱을 완전히 종료한 뒤 `npm run app`으로 다시 실행한다.
-
-작업표시줄 또는 바로가기 아이콘이 예전 아이콘으로 보일 때:
-
-- 설치본을 최신 Setup으로 다시 설치한다.
-- 기존에 작업표시줄에 고정한 낡은 바로가기가 있으면 제거 후 다시 고정한다.
-- Windows 아이콘 캐시 때문에 잠시 늦게 갱신될 수 있다.
-
-## 검증
-
-전체 테스트:
+### Test and build
 
 ```powershell
 npm test
+npm run dist
 ```
 
-검증 범위:
+주요 빌드 결과:
 
-- JavaScript 문법 검사
-- Python 문법 검사
-- Codex `/status` 파싱
-- Codex poller 동작
-- Claude `/usage` 파싱
-- Claude statusLine hook 파싱
-- Codex와 Claude JSONL 사용량 집계
-- 통합 대시보드 렌더링
-- Electron main, preload, renderer 문법 검사
+```text
+dist/Codex-Claude-Usage-Setup-<version>.exe
+dist/Codex-Claude-Usage-Setup-<version>.exe.blockmap
+dist/latest.yml
+```
 
-## 현재 제약
+최초 빌드는 공식 CPython 3.13 embeddable 배포본을 내려받아 SHA-256을 검증하고 FastAPI 런타임을 구성하므로 네트워크 연결이 필요합니다.
 
-- Codex 잔여율은 Codex CLI `/status` 화면 출력 포맷에 의존한다.
-- Claude 잔여율은 `claude /usage` 출력 포맷에 의존한다.
-- Codex와 Claude의 정확한 요금제 이름은 안정적으로 자동 판별하지 않는다.
-- 설치본은 Electron의 Node.js와 대시보드용 Python 런타임을 포함하지만 Codex CLI와 Claude Code는 포함하지 않는다.
-- 각 CLI가 없거나 로그인되지 않은 PC에서는 해당 서비스의 사용량을 수집할 수 없다.
+### Refresh README screenshots
+
+```powershell
+npm run docs:screenshots
+```
+
+이 명령은 실제 Electron renderer와 Python 대시보드를 샘플 데이터로 실행해 `docs/images/`의 세 이미지를 갱신합니다. 개인 세션이나 로컬 사용량은 읽지 않습니다.
+
+## Project layout
+
+```text
+.github/workflows/        CI와 Release workflow
+assets/                   Windows 앱 아이콘
+docs/images/              README용 재현 가능한 UI 스크린샷
+scripts/                  runtime 준비, 패키징, 문서 캡처 도구
+src/electron/             Electron main, preload, compact/setup UI
+src/node/                 Codex/Claude poller와 상태 파서
+src/python/               FastAPI 대시보드와 JSONL 집계
+tests/                    JavaScript/Python 통합 테스트
+```
+
+## Privacy & security
+
+이 프로젝트는 다음 정보를 읽거나 전송하지 않습니다.
+
+- OpenAI 또는 Anthropic 인증 토큰
+- 브라우저 쿠키
+- 비공개 Usage API 응답
+- 원본 세션 로그의 외부 업로드
+
+버그를 신고할 때 `~/.codex-usage-wrapper` 또는 세션 JSONL 원본을 공개 이슈에 첨부하지 마세요. 보안 취약점은 [Security Policy](SECURITY.md)의 비공개 신고 절차를 이용해 주세요.
+
+- [Privacy policy](docs/PRIVACY.md)
+- [Security policy](SECURITY.md)
+- [Code signing policy](docs/CODE_SIGNING_POLICY.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+## Troubleshooting
+
+<details>
+<summary><strong>Codex 또는 Claude 값이 오래됨으로 표시됩니다.</strong></summary>
+
+1. Setup에서 해당 CLI와 로그인 상태를 확인합니다.
+2. **새로고침**을 누르고 1분 정도 기다립니다.
+3. Claude는 필요할 때 statusLine hook을 다시 연결합니다.
+4. 계속되면 `~/.codex-usage-wrapper/*-status.json` 수정 시각과 대시보드 로그를 확인합니다.
+
+</details>
+
+<details>
+<summary><strong>Dashboard 버튼을 눌러도 열리지 않습니다.</strong></summary>
+
+- 설치본은 최신 Release로 다시 설치합니다.
+- 개발 환경은 `python -m pip install -r requirements.txt` 후 `npm run dashboard`를 확인합니다.
+- `http://127.0.0.1:8767`이 다른 프로그램에서 사용 중인지 확인합니다.
+
+</details>
+
+<details>
+<summary><strong>작업표시줄 아이콘이 이전 아이콘입니다.</strong></summary>
+
+기존 고정을 해제한 뒤 최신 설치본으로 다시 고정합니다. Windows 아이콘 캐시 때문에 반영이 잠시 늦을 수 있습니다.
+
+</details>
+
+## Contributing
+
+버그 리포트, 기능 제안, 문서 개선과 코드 기여를 환영합니다.
+
+- [기여 가이드](CONTRIBUTING.md)
+- [버그 신고](https://github.com/Kyuhan1230/ai-usage-monitor/issues/new?template=bug_report.yml)
+- [기능 제안](https://github.com/Kyuhan1230/ai-usage-monitor/issues/new?template=feature_request.yml)
+
+## Current limitations
+
+- 잔여율 파싱은 Codex `/status`와 Claude `/usage`의 출력 포맷에 의존합니다.
+- 각 서비스의 정확한 요금제 이름은 자동 판별하지 않습니다.
+- Codex CLI 또는 Claude Code가 없거나 로그인되지 않은 PC에서는 해당 도구의 사용량을 수집할 수 없습니다.
+- 현재 공개 설치 파일은 SignPath Foundation 승인 전까지 Authenticode 미서명 상태입니다.
+
+## License
+
+[MIT License](LICENSE) · Copyright © 2026 kyuhan1230
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). Application submitted; approval is pending.

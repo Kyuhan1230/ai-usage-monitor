@@ -1,0 +1,32 @@
+name: Feature request
+description: 새로운 기능이나 사용성 개선을 제안해 주세요.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: 어떤 불편이나 문제를 해결하려는지 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: 원하는 동작이나 UI를 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: 현재 사용 중인 우회 방법이나 다른 선택지가 있다면 적어주세요.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: 이 제안은 로컬 우선·토큰 비수집 원칙을 유지합니다.
+          required: true
