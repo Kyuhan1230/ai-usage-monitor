@@ -92,6 +92,7 @@ function createUpdaterController({
     started = true;
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.disableWebInstaller = true;
 
     autoUpdater.on("update-available", async (info) => {
       checking = false;
@@ -155,7 +156,10 @@ function createUpdaterController({
         noLink: true,
       });
       if (result.response === 0) {
-        autoUpdater.quitAndInstall(false, true);
+        // The user already approved the update in our dialog. Run the assisted
+        // NSIS installer silently so it does not ask for installation options
+        // a second time before replacing the current version.
+        autoUpdater.quitAndInstall(true, true);
       }
     });
 
