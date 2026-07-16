@@ -29,6 +29,7 @@
     "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 0.0.0.0 --port 8767",
     "dashboard:dev": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --reload --host 0.0.0.0 --port 8767",
     "dashboard:legacy": "python src/python/codex_status_dashboard.py --serve",
+    "docs:screenshots": "electron scripts/capture-readme-screenshots.js",
     "refresh:release-metadata": "node scripts/refresh-release-metadata.js",
     "verify:release-tag": "node scripts/verify-release-tag.js",
     "test": "node tests/run-tests.js"

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Kyuhan1230/ai-usage-monitor/security/advisories/new
+    about: 보안 문제는 공개 Issue 대신 비공개로 신고해 주세요.
