@@ -16,6 +16,7 @@ Codex CLI와 Claude Code 사용량을 한 화면에서 확인하는 로컬 Elect
 - Setup 화면에서 Codex, Claude, hook, 자동 실행 상태 점검
 - Windows 로그인 시 자동 실행 등록
 - 설치용 `Setup.exe` 생성
+- GitHub Releases 기반 새 버전 확인, 다운로드, 재시작 설치 안내
 - 로컬 파일 캐시를 사용해 큰 세션 폴더에서도 빠른 갱신
 
 ## 화면
@@ -39,7 +40,7 @@ Dashboard 버튼을 누르면 앱은 먼저 `http://127.0.0.1:8767/status.json` 
 릴리스 산출물로 설치하려면 아래 파일을 실행한다.
 
 ```text
-dist\Codex Claude Usage Setup.exe
+dist\Codex Claude Usage-Setup-<version>.exe
 ```
 
 설치 후 시작 메뉴 또는 바탕화면에서 `Codex Claude Usage`를 실행한다. 앱을 닫아도 트레이에 남아 백그라운드 수집을 계속한다. 완전히 종료하려면 트레이 메뉴에서 종료를 선택한다.
@@ -51,14 +52,14 @@ dist\Codex Claude Usage Setup.exe
 - Windows 10 이상
 - Codex CLI
 - Claude Code
-- Node.js
+- Node.js 22.12 이상(소스 실행 및 빌드 시)
 - Python 3.11 이상
 - Python 패키지 `fastapi`, `uvicorn`
 
-Python 패키지는 다음 명령으로 설치할 수 있다.
+Python 패키지는 다음 명령으로 설치한다. Windows의 `Asia/Seoul` 시간대 지원에 필요한 `tzdata`도 함께 설치된다.
 
 ```powershell
-python -m pip install fastapi uvicorn
+python -m pip install -r requirements.txt
 ```
 
 Codex와 Claude는 각 CLI에서 먼저 로그인해야 한다.
@@ -119,7 +120,9 @@ npm run dist
 생성되는 주요 산출물은 다음과 같다.
 
 ```text
-dist\Codex Claude Usage Setup.exe
+dist\Codex Claude Usage-Setup-<version>.exe
+dist\Codex Claude Usage-Setup-<version>.exe.blockmap
+dist\latest.yml
 ```
 
 친구나 팀원에게 전달할 때는 보통 Electron NSIS 설치본 하나를 주면 된다. legacy native 산출물은 `npm run dist:legacy-native`로 별도 생성한다.
@@ -133,6 +136,43 @@ Setup은 현재 사용자 영역에 설치한다.
 설치본은 시작 메뉴, 바탕화면 바로가기, 제거 항목, 트레이 아이콘에 같은 앱 아이콘을 사용한다.
 
 소스 파일만 수정한 경우 이미 설치된 앱에는 자동 반영되지 않는다. 설치본에 반영하려면 `npm run dist`로 Setup을 다시 만들고 재설치하거나, 개발 중에는 `npm run app`으로 Electron 앱을 직접 실행한다.
+
+### GitHub Actions CI/CD
+
+`main` 브랜치 push와 pull request에서는 `.github/workflows/ci.yml`이 다음 작업을 수행한다.
+
+- Node.js 22.12와 Python 3.11 준비
+- JavaScript, Python 의존성 설치
+- 전체 테스트 실행
+- Windows NSIS 설치본 빌드
+- 설치본과 자동 업데이트 메타데이터를 Actions artifact로 14일간 보관
+
+정식 배포는 `package.json` 버전과 같은 `v<version>` 태그를 push하면 시작된다. 예를 들어 patch 버전을 올려 배포하려면 다음과 같이 실행한다.
+
+```powershell
+npm version patch
+git push origin main --follow-tags
+```
+
+`.github/workflows/release.yml`은 태그와 앱 버전이 일치하는지 확인하고, 테스트와 Windows 빌드를 통과한 뒤 GitHub Releases에 아래 파일을 공개한다.
+
+- Windows 설치 파일 `.exe`
+- 차등 업데이트 파일 `.blockmap`
+- 업데이트 메타데이터 `latest.yml`
+
+별도 Personal Access Token은 필요하지 않다. 워크플로는 저장소가 제공하는 `GITHUB_TOKEN`과 `contents: write` 권한을 사용한다.
+
+### 설치된 앱의 자동 업데이트
+
+GitHub Release에서 설치한 앱은 다음 시점에 새 공개 릴리스를 확인한다.
+
+- 앱 시작 15초 후
+- 앱 실행 중 6시간마다
+- 트레이 메뉴의 `Check for updates...` 선택 시
+
+새 버전이 있으면 먼저 다운로드 여부를 묻고, 다운로드가 끝나면 즉시 재시작해 설치할지 묻는다. `종료할 때 설치`를 선택하면 앱을 다음에 종료할 때 설치된다. 개발 모드인 `npm run app`에서는 자동 업데이트가 동작하지 않는다.
+
+처음 한 번은 GitHub Releases에서 설치 파일을 직접 내려받아 설치해야 한다. 그 설치본부터 이후 공개 릴리스 업데이트 안내를 받을 수 있다. 현재 Windows 코드 서명 인증서를 설정하지 않았으므로 다른 PC에서는 첫 설치 때 Windows SmartScreen의 게시자 경고가 표시될 수 있다.
 
 ## 데이터 수집 방식
 

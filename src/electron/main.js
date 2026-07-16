@@ -1,6 +1,7 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -13,6 +14,7 @@ const {
 const { parseArgs: parsePollerArgs, startPoller } = require("../node/codex-status-poller");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { writeJsonAtomic } = require("../node/status-capture");
+const { createUpdaterController } = require("./updater");
 
 const APP_NAME = "Codex Claude Usage";
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -44,6 +46,12 @@ let compactWindow = null;
 let dashboardWindow = null;
 let setupWindow = null;
 let isQuitting = false;
+const updaterController = createUpdaterController({
+  app,
+  autoUpdater,
+  dialog,
+  getWindow: () => compactWindow || setupWindow || dashboardWindow,
+});
 
 function parsePositiveInt(value) {
   const parsed = Number(value);
@@ -689,6 +697,7 @@ function createTray() {
       { label: "Compact window", click: showCompactWindow },
       { label: "Full dashboard", click: showDashboardWindow },
       { label: "Setup", click: showSetupWindow },
+      { label: "Check for updates...", click: () => updaterController.check(true) },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
     ]),
@@ -758,6 +767,7 @@ app.whenReady().then(() => {
   startClaudeUsagePoller();
   createTray();
   showCompactWindow();
+  updaterController.start();
 });
 
 app.on("window-all-closed", () => {});

@@ -6,6 +6,10 @@
   "author": "CodexUsage",
   "license": "MIT",
   "description": "Local Codex CLI usage wrapper and dashboard.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kyuhan1230/ai-usage-monitor.git"
+  },
   "main": "src/electron/main.js",
   "scripts": {
     "app": "electron .",
@@ -24,9 +28,11 @@
     "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 0.0.0.0 --port 8767",
     "dashboard:dev": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --reload --host 0.0.0.0 --port 8767",
     "dashboard:legacy": "python src/python/codex_status_dashboard.py --serve",
+    "verify:release-tag": "node scripts/verify-release-tag.js",
     "test": "node tests/run-tests.js"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
@@ -36,6 +42,7 @@
   "build": {
     "appId": "local.codex-claude-usage",
     "productName": "Codex Claude Usage",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "asar": false,
     "npmRebuild": false,
     "directories": {
@@ -53,6 +60,14 @@
         "nsis"
       ]
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Kyuhan1230",
+        "repo": "ai-usage-monitor",
+        "releaseType": "release"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

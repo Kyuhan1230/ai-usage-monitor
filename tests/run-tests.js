@@ -8,6 +8,7 @@ const net = require("net");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
+const { EventEmitter } = require("events");
 
 const ROOT = path.resolve(__dirname, "..");
 const NODE_DIR = path.join(ROOT, "src", "node");
@@ -856,6 +857,82 @@ function testElectronIconConfiguration() {
   assert.ok(fs.existsSync(path.join(ROOT, iconPath)));
 }
 
+function testElectronReleaseConfiguration() {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const publish = packageJson.build.publish[0];
+
+  assert.ok(packageJson.dependencies["electron-updater"]);
+  assert.strictEqual(packageJson.repository.url, "https://github.com/Kyuhan1230/ai-usage-monitor.git");
+  assert.strictEqual(packageJson.build.artifactName, "${productName}-Setup-${version}.${ext}");
+  assert.strictEqual(publish.provider, "github");
+  assert.strictEqual(publish.owner, "Kyuhan1230");
+  assert.strictEqual(publish.repo, "ai-usage-monitor");
+  assert.strictEqual(publish.releaseType, "release");
+  assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
+  assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
+}
+
+async function testElectronUpdaterPromptsAndInstalls() {
+  class MockUpdater extends EventEmitter {
+    constructor() {
+      super();
+      this.checkCount = 0;
+      this.downloadCount = 0;
+      this.installCount = 0;
+    }
+
+    async checkForUpdates() {
+      this.checkCount += 1;
+    }
+
+    async downloadUpdate() {
+      this.downloadCount += 1;
+    }
+
+    quitAndInstall() {
+      this.installCount += 1;
+    }
+  }
+
+  const updater = new MockUpdater();
+  const messages = [];
+  const fakeWindow = { isDestroyed: () => false };
+  const dialog = {
+    showMessageBox: async (...args) => {
+      messages.push(args.length === 2 ? args[1] : args[0]);
+      return { response: 0 };
+    },
+  };
+  const inertTimer = () => ({ unref() {} });
+  const { createUpdaterController } = require(path.join(ROOT, "src", "electron", "updater.js"));
+  const controller = createUpdaterController({
+    app: { isPackaged: true, getVersion: () => "0.1.0" },
+    autoUpdater: updater,
+    dialog,
+    getWindow: () => fakeWindow,
+    logger: { error() {} },
+    platform: "win32",
+    setTimeoutFn: inertTimer,
+    setIntervalFn: inertTimer,
+  });
+
+  assert.strictEqual(controller.start(), true);
+  assert.strictEqual(updater.autoDownload, false);
+  assert.strictEqual(updater.autoInstallOnAppQuit, true);
+  assert.strictEqual(await controller.check(true), true);
+  assert.strictEqual(updater.checkCount, 1);
+
+  updater.emit("update-available", { version: "0.2.0" });
+  await wait(0);
+  assert.strictEqual(updater.downloadCount, 1);
+  assert.match(messages[0].message, /0\.2\.0/);
+
+  updater.emit("update-downloaded", { version: "0.2.0" });
+  await wait(0);
+  assert.strictEqual(updater.installCount, 1);
+  assert.match(messages[1].message, /0\.2\.0/);
+}
+
 function testCompactStatusHealthUsesPollIntervalAndPollerState() {
   const { isFresh, stateText } = require(path.join(
     ROOT,
@@ -1311,6 +1388,7 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-usage-poller.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "main.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "updater.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "setup.js")]);
@@ -1337,6 +1415,10 @@ async function main() {
   await testClaudeStatusHookPreservesFreshUsageCommandStatus();
   await testClaudeUsagePollerParsesUsageCommand();
   testElectronIconConfiguration();
+  testElectronReleaseConfiguration();
+  await testElectronUpdaterPromptsAndInstalls();
+  const releaseVersion = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+  await run(NODE, [path.join("scripts", "verify-release-tag.js"), `v${releaseVersion}`]);
   testCompactStatusHealthUsesPollIntervalAndPollerState();
   await testClaudeUsageCaptureAsyncWaitsForStatusWrite();
   await testClaudeUsagePollerAcceptsSubscriptionSummary();
