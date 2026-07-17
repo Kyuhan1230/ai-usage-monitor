@@ -170,6 +170,32 @@ function appendHistory(historyDir, status) {
   fs.appendFileSync(historyPath, `${JSON.stringify(status)}\n`, "utf8");
 }
 
+function statusLimitSignature(status) {
+  const limits = status && Array.isArray(status.limits) ? status.limits : [];
+  return JSON.stringify(limits.map((limit) => ({
+    type: limit && limit.type,
+    remaining: limit && limit.remaining_percent,
+    reset: limit && (limit.resets_at || limit.reset_text),
+  })));
+}
+
+function appendHistoryIfChanged(historyDir, status, previousStatus = null, maximumSilenceMs = 30 * 60 * 1000) {
+  if (!status || status.parse_status !== "ok") {
+    return false;
+  }
+  const previousTime = Date.parse(previousStatus && previousStatus.captured_at);
+  const currentTime = Date.parse(status.captured_at);
+  const changed = statusLimitSignature(status) !== statusLimitSignature(previousStatus);
+  const silentTooLong = Number.isFinite(previousTime)
+    && Number.isFinite(currentTime)
+    && currentTime - previousTime >= maximumSilenceMs;
+  if (previousStatus && !changed && !silentTooLong) {
+    return false;
+  }
+  appendHistory(historyDir, status);
+  return true;
+}
+
 function readJsonSafe(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -292,6 +318,8 @@ module.exports = {
   parseStatusText,
   writeJsonAtomic,
   appendHistory,
+  appendHistoryIfChanged,
+  statusLimitSignature,
   writeStatus,
   writeStatusPreservingPrevious,
   writePollerHeartbeat,

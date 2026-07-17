@@ -14,7 +14,54 @@ const IMAGE_DIR = path.join(ROOT, "docs", "images");
 const RENDERER_DIR = path.join(ROOT, "src", "electron", "renderer");
 const PRELOAD_PATH = path.join(ROOT, "src", "electron", "preload.js");
 
+const sampleAnalytics = {
+  generatedAt: "2026-07-17T09:20:00Z",
+  historySampleCount: 28,
+  usageRowCount: 19,
+  alerts: [{ provider: "codex", limitType: "five_hour", severity: "warning", remainingPercent: 22, reason: "forecast_before_reset" }],
+  comparison: {
+    todayTokens: 376200,
+    yesterdayTokens: 298100,
+    dayOverDayPercent: 26.2,
+    currentSevenDaysTokens: 1842200,
+    previousSevenDaysTokens: 1570300,
+    weekOverWeekPercent: 17.3,
+  },
+  providers: {
+    codex: {
+      limits: {
+        five_hour: { remainingPercent: 22, sampleCount: 10, depletionRatePercentPerHour: 12.4, expectedExhaustionAt: "2026-07-17T11:06:00Z", resetAt: "2026-07-17T12:30:00Z", willExhaustBeforeReset: true, confidence: "high", anomaly: { detected: false } },
+        weekly: { remainingPercent: 48, sampleCount: 16, depletionRatePercentPerHour: 0.31, expectedExhaustionAt: "2026-07-23T20:00:00Z", resetAt: "2026-07-21T00:00:00Z", willExhaustBeforeReset: false, confidence: "high", anomaly: { detected: false } },
+        monthly: null,
+      },
+    },
+    claude: {
+      limits: {
+        five_hour: { remainingPercent: 56, sampleCount: 8, depletionRatePercentPerHour: 5.8, expectedExhaustionAt: "2026-07-17T18:59:00Z", resetAt: "2026-07-17T13:00:00Z", willExhaustBeforeReset: false, confidence: "medium", anomaly: { detected: false } },
+        seven_day: { remainingPercent: 64, sampleCount: 12, depletionRatePercentPerHour: 0.22, expectedExhaustionAt: "2026-07-29T12:00:00Z", resetAt: "2026-07-23T01:00:00Z", willExhaustBeforeReset: false, confidence: "high", anomaly: { detected: false } },
+      },
+    },
+  },
+  anomalies: {
+    codex: { detected: true, multiplier: 2.4 },
+    claude: { detected: false },
+  },
+  costs: {
+    estimatedUsd: 1.4823,
+    providers: {
+      codex: { estimatedUsd: 0.8421, totalTokens: 211300, coveragePercent: 100, savings: { fromModel: "gpt-5.3-codex", toModel: "codex-mini-latest", estimatedUsd: 0.19, percent: 31.4 } },
+      claude: { estimatedUsd: 0.6402, totalTokens: 164900, coveragePercent: 100, savings: { fromModel: "claude-sonnet-4.6", toModel: "claude-haiku-4.5", estimatedUsd: 0.37, percent: 58.1 } },
+    },
+  },
+  recommendations: [
+    { priority: "warning", action: "Codex 사용 속도를 약 20% 줄이면 reset 전 고갈을 피할 가능성이 큽니다." },
+    { priority: "warning", action: "오늘 Codex 토큰 사용량이 최근 중앙값의 2.4배입니다. 자동 반복 작업과 큰 컨텍스트 입력을 점검하세요." },
+    { priority: "info", action: "단순 Claude 작업을 claude-haiku-4.5로 보내면 같은 토큰 기준 오늘 약 $0.37를 절약할 수 있습니다." },
+  ],
+};
+
 const sampleSnapshot = {
+  analytics: sampleAnalytics,
   poller: { codexIntervalMs: 60_000, claudeIntervalMs: 180_000 },
   codex: {
     connected: true,
@@ -63,6 +110,7 @@ function registerPreviewHandlers() {
   ipcMain.handle("window:setOpacity", () => sampleSnapshot);
   ipcMain.handle("window:minimize", () => null);
   ipcMain.handle("dashboard:open", () => null);
+  ipcMain.handle("insights:open", () => null);
   ipcMain.handle("setup:open", () => null);
   ipcMain.handle("setup:installClaudeHook", () => sampleSetupSnapshot);
   ipcMain.handle("setup:openCodexLogin", () => null);
@@ -332,6 +380,12 @@ async function main() {
       height: 720,
       outputName: "app-setup.png",
       load: (previewWindow) => previewWindow.loadFile(path.join(RENDERER_DIR, "setup.html")),
+    });
+    await captureWindow(window, {
+      width: 820,
+      height: 1280,
+      outputName: "app-insights.png",
+      load: (previewWindow) => previewWindow.loadFile(path.join(RENDERER_DIR, "insights.html")),
     });
     await captureDashboard(window);
   } finally {

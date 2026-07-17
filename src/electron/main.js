@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
@@ -9,7 +9,9 @@ const path = require("path");
 const { captureOnce: captureCodexAccountOnce } = require("../node/codex-account-reader");
 const { captureOnceAsync: captureClaudeUsageOnce } = require("../node/claude-usage-poller");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
-const { writeJsonAtomic } = require("../node/status-capture");
+const { appendHistoryIfChanged, writeJsonAtomic } = require("../node/status-capture");
+const { scanTokenUsage } = require("../node/token-usage-reader");
+const { buildAnalytics, readHistoryRecords } = require("../node/usage-analytics");
 const { getLaunchAtLoginPreference, setLaunchAtLoginPreference } = require("./app-preferences");
 const { installClaudeHookSettings } = require("./claude-hook-settings");
 const { resolveDashboardRuntime } = require("./dashboard-runtime");
@@ -26,6 +28,7 @@ const PREFERENCES_PATH = path.join(STATUS_DIR, "preferences.json");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
 const CLAUDE_STATUS_PATH = path.join(STATUS_DIR, "claude-status.json");
 const HISTORY_DIR = path.join(STATUS_DIR, "history");
+const ANALYTICS_PATH = path.join(STATUS_DIR, "analytics.json");
 const ON_DEMAND_FRESHNESS_MS = 10 * 60 * 1000;
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_HOOK_PATH = path.join(ROOT, "src", "node", "claude-status-hook.js");
@@ -33,15 +36,18 @@ const CLAUDE_HOOK_PATH = path.join(ROOT, "src", "node", "claude-status-hook.js")
 let dashboardProcess = null;
 let tray = null;
 let compactWindow = null;
+let insightsWindow = null;
 let dashboardWindow = null;
 let setupWindow = null;
 let refreshPromise = null;
 let lastRefresh = { state: "idle", completedAt: null, errors: {} };
+let analyticsSnapshot = null;
+let lastAlertSignature = "";
 const updaterController = createUpdaterController({
   app,
   autoUpdater,
   dialog,
-  getWindow: () => compactWindow || setupWindow || dashboardWindow,
+  getWindow: () => compactWindow || insightsWindow || setupWindow || dashboardWindow,
 });
 
 function argValue(name) {
@@ -53,8 +59,10 @@ function runClaudeStatusHookMode() {
   const statusPath = argValue("--status-path") || CLAUDE_STATUS_PATH;
   const rawInput = fs.readFileSync(0, "utf8");
   const status = buildStatus(rawInput);
+  const previousStatus = readJsonSafe(statusPath);
   if (!shouldPreserveUsageCommandStatus(statusPath)) {
     writeJsonAtomic(statusPath, status);
+    appendHistoryIfChanged(HISTORY_DIR, status, previousStatus);
   }
   process.stdout.write(`${summaryFromStatus(status)}\n`);
 }
@@ -331,6 +339,74 @@ function statusAgeMs(status) {
   return Math.max(0, Date.now() - parsed);
 }
 
+function notifyAnalyticsAlerts(analytics) {
+  const alerts = analytics && Array.isArray(analytics.alerts)
+    ? analytics.alerts.filter((alert) => alert.severity === "critical" || alert.reason === "forecast_before_reset")
+    : [];
+  const signature = JSON.stringify(alerts.map((alert) => [alert.provider, alert.limitType, alert.reason, alert.remainingPercent]));
+  if (!alerts.length || signature === lastAlertSignature || !Notification.isSupported()) {
+    lastAlertSignature = signature;
+    return;
+  }
+  lastAlertSignature = signature;
+  const first = alerts[0];
+  const provider = first.provider === "codex" ? "Codex" : "Claude";
+  const reason = first.reason === "forecast_before_reset" ? "현재 속도면 reset 전에 고갈됩니다." : `${first.remainingPercent}% 남았습니다.`;
+  new Notification({
+    title: `${provider} 사용량 경고`,
+    body: `${reason}${alerts.length > 1 ? ` 외 ${alerts.length - 1}건` : ""}`,
+  }).show();
+}
+
+function showInsightsWindow() {
+  if (insightsWindow) {
+    insightsWindow.show();
+    insightsWindow.focus();
+    return;
+  }
+
+  insightsWindow = new BrowserWindow({
+    width: 820,
+    height: 760,
+    minWidth: 680,
+    minHeight: 600,
+    backgroundColor: "#0f131a",
+    icon: APP_ICON_PATH,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  insightsWindow.loadFile(path.join(__dirname, "renderer", "insights.html"));
+  insightsWindow.on("closed", () => {
+    insightsWindow = null;
+  });
+}
+
+function refreshAnalyticsSnapshot() {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        const next = buildAnalytics({
+          historyRecords: readHistoryRecords(HISTORY_DIR),
+          usageRows: scanTokenUsage(),
+          currentStatuses: {
+            codex: readJsonSafe(CODEX_STATUS_PATH),
+            claude: readJsonSafe(CLAUDE_STATUS_PATH),
+          },
+        });
+        writeJsonAtomic(ANALYTICS_PATH, next);
+        analyticsSnapshot = next;
+        notifyAnalyticsAlerts(next);
+        resolve(next);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
 function buildSnapshot() {
   const codex = readJsonSafe(CODEX_STATUS_PATH);
   const claude = readJsonSafe(CLAUDE_STATUS_PATH);
@@ -348,6 +424,7 @@ function buildSnapshot() {
       claudeIntervalMs: ON_DEMAND_FRESHNESS_MS,
     },
     refresh: lastRefresh,
+    analytics: analyticsSnapshot,
     codex: {
       connected: Boolean(codex && codex.parse_status === "ok"),
       ageMs: statusAgeMs(codex),
@@ -399,9 +476,10 @@ async function refreshUsageSnapshot() {
     captureClaudeUsageOnce({
       claudeCommand: process.platform === "win32" ? "claude.exe" : "claude",
       statusPath: CLAUDE_STATUS_PATH,
+      historyDir: HISTORY_DIR,
       pollIntervalMs: 0,
     }),
-  ]).then((results) => {
+  ]).then(async (results) => {
     const errors = {};
     if (results[0].status === "rejected") {
       errors.codex = results[0].reason instanceof Error
@@ -412,6 +490,15 @@ async function refreshUsageSnapshot() {
       errors.claude = results[1].reason instanceof Error
         ? results[1].reason.message
         : String(results[1].reason);
+    } else if (!results[1].value || results[1].value.parse_status !== "ok") {
+      errors.claude = results[1].value && results[1].value.error
+        ? results[1].value.error
+        : "Claude /usage did not return a usable account snapshot";
+    }
+    try {
+      await refreshAnalyticsSnapshot();
+    } catch (error) {
+      errors.analytics = error instanceof Error ? error.message : String(error);
     }
     lastRefresh = {
       state: Object.keys(errors).length === 0 ? "ok" : "partial",
@@ -466,6 +553,7 @@ function createTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Compact window", click: showCompactWindow },
+      { label: "Usage insights", click: showInsightsWindow },
       { label: "Full dashboard", click: showDashboardWindow },
       { label: "Setup", click: showSetupWindow },
       { label: "Check for updates...", click: () => updaterController.check(true) },
@@ -538,6 +626,7 @@ ipcMain.handle("app:quit", () => {
 
 app.whenReady().then(() => {
   applyLaunchAtLoginPreference();
+  analyticsSnapshot = readJsonSafe(ANALYTICS_PATH);
   createTray();
   showCompactWindow();
   refreshUsageSnapshot().catch(() => {});
@@ -548,4 +637,8 @@ app.on("window-all-closed", () => {});
 
 app.on("before-quit", () => {
   stopDashboardServer();
+});
+ipcMain.handle("insights:open", () => {
+  showInsightsWindow();
+  return true;
 });

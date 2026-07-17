@@ -5,15 +5,17 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
-const { nowKstIso, writeJsonAtomic } = require("./status-capture");
+const { appendHistoryIfChanged, nowKstIso, writeJsonAtomic } = require("./status-capture");
 
 const DEFAULT_STATUS_PATH = path.join(os.homedir(), ".codex-usage-wrapper", "claude-status.json");
+const DEFAULT_HISTORY_DIR = path.join(os.homedir(), ".codex-usage-wrapper", "history");
 const DEFAULT_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const USAGE_COMMAND_FRESH_MS = 10 * 60 * 1000;
 
 function parseArgs(argv) {
   const args = {
     statusPath: DEFAULT_STATUS_PATH,
+    historyDir: DEFAULT_HISTORY_DIR,
     settingsPath: DEFAULT_SETTINGS_PATH,
     install: false,
     originalCommand: process.env.CLAUDE_STATUSLINE_ORIGINAL_COMMAND || "",
@@ -23,6 +25,9 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--status-path") {
       args.statusPath = argv[index + 1];
+      index += 1;
+    } else if (arg === "--history-dir") {
+      args.historyDir = argv[index + 1];
       index += 1;
     } else if (arg === "--settings-path") {
       args.settingsPath = argv[index + 1];
@@ -176,7 +181,7 @@ function buildStatus(rawInput) {
     capture_method: "claude_statusline_hook",
     parse_status: limits.length > 0 ? "ok" : "failed",
     limits,
-    raw_status_text: rawInput,
+    raw_status_text: "",
   };
 }
 
@@ -298,8 +303,10 @@ function main() {
 
   const rawInput = readStdin();
   const status = buildStatus(rawInput);
+  const previousStatus = readJsonSafe(args.statusPath);
   if (!shouldPreserveUsageCommandStatus(args.statusPath)) {
     writeJsonAtomic(args.statusPath, status);
+    appendHistoryIfChanged(args.historyDir, status, previousStatus);
   }
 
   const originalOutput = runOriginalCommand(args.originalCommand, rawInput);
@@ -317,4 +324,5 @@ module.exports = {
   summaryFromStatus,
   isLegacyAppHookCommand,
   parseArgs,
+  DEFAULT_HISTORY_DIR,
 };

@@ -5,9 +5,10 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
-const { nowKstIso, writeJsonAtomic } = require("./status-capture");
+const { appendHistoryIfChanged, nowKstIso, writeJsonAtomic } = require("./status-capture");
 
 const DEFAULT_STATUS_PATH = path.join(os.homedir(), ".codex-usage-wrapper", "claude-status.json");
+const DEFAULT_HISTORY_DIR = path.join(os.homedir(), ".codex-usage-wrapper", "history");
 const DEFAULT_POLL_INTERVAL_MS = 60 * 1000;
 const DEFAULT_STARTUP_DELAY_MS = 3000;
 const DEFAULT_TIMEOUT_MS = 60 * 1000;
@@ -16,6 +17,7 @@ const CAPTURE_METHOD = "claude_usage_command";
 function parseArgs(argv) {
   const options = {
     statusPath: DEFAULT_STATUS_PATH,
+    historyDir: DEFAULT_HISTORY_DIR,
     claudeCommand: process.platform === "win32" ? "claude.exe" : "claude",
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     startupDelayMs: DEFAULT_STARTUP_DELAY_MS,
@@ -26,6 +28,9 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--status-path") {
       options.statusPath = path.resolve(argv[index + 1]);
+      index += 1;
+    } else if (arg === "--history-dir") {
+      options.historyDir = path.resolve(argv[index + 1]);
       index += 1;
     } else if (arg === "--claude-command") {
       options.claudeCommand = argv[index + 1];
@@ -162,7 +167,7 @@ function buildStatus(rawText, parseError = null) {
     limits,
     usage_windows: usageWindows,
     summary_status: hasSubscriptionSummary ? "subscription_usage_summary" : null,
-    raw_status_text: rawText,
+    raw_status_text: "",
   };
 }
 
@@ -197,17 +202,20 @@ function captureOnce(options, callback) {
     maxBuffer: 512 * 1024,
   }, (error, stdout, stderr) => {
     const rawText = [stdout, stderr].filter(Boolean).join("\n");
+    const previousStatus = readJsonSafe(options.statusPath);
     const status = mergePreviousLimits(options.statusPath, buildStatus(rawText, error ? error.message : null));
     fs.mkdirSync(path.dirname(options.statusPath), { recursive: true });
-    writeJsonAtomic(options.statusPath, {
+    const storedStatus = {
       ...status,
       poller: {
         state: status.parse_status === "ok" ? "captured_ok" : "capture_failed",
         heartbeat_at: nowKstIso(),
         poll_interval_ms: options.pollIntervalMs,
       },
-    });
-    callback(status);
+    };
+    writeJsonAtomic(options.statusPath, storedStatus);
+    appendHistoryIfChanged(options.historyDir || DEFAULT_HISTORY_DIR, storedStatus, previousStatus);
+    callback(storedStatus);
   });
 }
 
@@ -259,6 +267,7 @@ if (require.main === module) {
 
 module.exports = {
   buildStatus,
+  DEFAULT_HISTORY_DIR,
   captureOnce,
   captureOnceAsync,
   mergePreviousLimits,

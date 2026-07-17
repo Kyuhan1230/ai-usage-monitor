@@ -23,6 +23,7 @@ const ids = [
   "quit",
   "refresh",
   "open-setup",
+  "open-insights",
   "open-dashboard",
 ];
 
@@ -185,6 +186,7 @@ el.minimize.addEventListener("click", () => window.usageApp.minimize());
 el.quit.addEventListener("click", () => window.usageApp.quit());
 el.refresh.addEventListener("click", () => refresh(true));
 el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
+el["open-insights"].addEventListener("click", () => window.usageApp.openInsights());
 el["open-dashboard"].addEventListener("click", () => window.usageApp.openDashboard());
 
 refresh();

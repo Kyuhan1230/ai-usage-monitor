@@ -518,6 +518,109 @@ function testElectronMainUsesOnlyOnDemandCollectors() {
   assert.doesNotMatch(source, /startStatusPoller/);
   assert.doesNotMatch(source, /startClaudeUsagePoller/);
   assert.doesNotMatch(source, /setInterval\([^)]*capture/);
+  assert.match(source, /refreshAnalyticsSnapshot/);
+  assert.match(source, /Notification/);
+  assert.match(source, /"insights:open"/);
+}
+
+function testTokenUsageReaderAggregatesCodexAndDeduplicatesClaude() {
+  const tempDir = makeTempDir("token-usage-reader");
+  const codexDir = path.join(tempDir, "codex");
+  const claudeDir = path.join(tempDir, "claude");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.mkdirSync(claudeDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "rollout-2026-07-18T01-00.jsonl"), [
+    { timestamp: "2026-07-18T01:00:00Z", payload: { model: "gpt-5.2-codex" } },
+    { timestamp: "2026-07-18T01:01:00Z", payload: { info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 120 } } } },
+    { timestamp: "2026-07-18T01:02:00Z", payload: { collaboration_mode: { settings: { model: "codex-mini-latest" } } } },
+    { timestamp: "2026-07-18T01:03:00Z", payload: { info: { last_token_usage: { input_tokens: 50, cached_input_tokens: 10, output_tokens: 10, total_tokens: 60 } } } },
+  ].map((record) => JSON.stringify(record)).join("\n"), "utf8");
+  fs.writeFileSync(path.join(claudeDir, "session.jsonl"), [
+    { type: "assistant", timestamp: "2026-07-18T02:00:00Z", message: { id: "m1", model: "claude-sonnet-4-5-20250929", usage: { input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 30 } } },
+    { type: "assistant", timestamp: "2026-07-18T02:00:01Z", message: { id: "m1", model: "claude-sonnet-4-5-20250929", usage: { input_tokens: 210, cache_read_input_tokens: 60, cache_creation_input_tokens: 10, output_tokens: 35 } } },
+  ].map((record) => JSON.stringify(record)).join("\n"), "utf8");
+
+  const { scanTokenUsage } = require(path.join(ROOT, "src", "node", "token-usage-reader.js"));
+  const rows = scanTokenUsage({
+    codexSessionsDir: codexDir,
+    claudeSessionsDir: claudeDir,
+    cachePath: path.join(tempDir, "cache.json"),
+  });
+
+  assert.strictEqual(rows.length, 3);
+  assert.strictEqual(rows.find((row) => row.model === "gpt-5.2-codex").totalTokens, 120);
+  assert.strictEqual(rows.find((row) => row.model === "codex-mini-latest").totalTokens, 60);
+  const claude = rows.find((row) => row.provider === "claude");
+  assert.strictEqual(claude.events, 1);
+  assert.strictEqual(claude.inputTokens, 210);
+  assert.strictEqual(claude.cachedInputTokens, 60);
+  assert.strictEqual(claude.totalTokens, 315);
+}
+
+function testHistoryOnlyAppendsMeaningfulLimitChanges() {
+  const tempDir = makeTempDir("meaningful-history");
+  const { appendHistoryIfChanged } = require(path.join(ROOT, "src", "node", "status-capture.js"));
+  const previous = {
+    captured_at: "2026-07-18T10:00:00+09:00",
+    parse_status: "ok",
+    limits: [{ type: "five_hour", remaining_percent: 80, reset_text: "resets 07/18 15:00" }],
+  };
+  const unchanged = { ...previous, captured_at: "2026-07-18T10:05:00+09:00" };
+  const changed = {
+    ...previous,
+    captured_at: "2026-07-18T10:06:00+09:00",
+    limits: [{ ...previous.limits[0], remaining_percent: 79 }],
+  };
+
+  assert.strictEqual(appendHistoryIfChanged(tempDir, unchanged, previous), false);
+  assert.strictEqual(readHistoryCount(tempDir), 0);
+  assert.strictEqual(appendHistoryIfChanged(tempDir, changed, previous), true);
+  assert.strictEqual(readHistoryCount(tempDir), 1);
+}
+
+function testUsageAnalyticsProducesForecastsAlertsComparisonsCostsAndActions() {
+  const nowMs = Date.parse("2026-07-18T09:00:00Z");
+  const resetsAt = Date.parse("2026-07-18T20:00:00Z") / 1000;
+  const historyRecords = [90, 88, 86, 84, 64].map((remaining, index) => ({
+    captured_at: new Date(Date.parse("2026-07-18T05:00:00Z") + index * 60 * 60 * 1000).toISOString(),
+    source: "codex_app_server",
+    limits: [{ type: "five_hour", remaining_percent: remaining, resets_at: resetsAt }],
+  }));
+  historyRecords.push({
+    captured_at: "2026-07-18T09:00:00Z",
+    source: "claude_statusline_hook",
+    limits: [{ type: "five_hour", remaining_percent: 9, reset_text: "resets 07/19 05:00" }],
+  });
+  const usageRows = [
+    { provider: "codex", date: "2026-07-18", model: "gpt-5.2-codex", inputTokens: 100000, cachedInputTokens: 40000, outputTokens: 10000, totalTokens: 110000 },
+    { provider: "claude", date: "2026-07-18", model: "claude-sonnet-4-5-20250929", inputTokens: 30000, cachedInputTokens: 10000, cacheCreationInputTokens: 5000, outputTokens: 5000, totalTokens: 50000 },
+    ...Array.from({ length: 7 }, (_, index) => ({
+      provider: "codex",
+      date: new Date(Date.parse("2026-07-17T03:00:00Z") - index * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      model: "gpt-5.2-codex",
+      inputTokens: 9000,
+      cachedInputTokens: 0,
+      outputTokens: 1000,
+      totalTokens: 10000,
+    })),
+  ];
+  const { buildAnalytics } = require(path.join(ROOT, "src", "node", "usage-analytics.js"));
+  const analytics = buildAnalytics({ historyRecords, usageRows, nowMs });
+
+  const codex = analytics.providers.codex.limits.five_hour;
+  assert.strictEqual(codex.depletionRatePercentPerHour, 6.5);
+  assert.strictEqual(codex.willExhaustBeforeReset, true);
+  assert.strictEqual(codex.anomaly.detected, true);
+  assert.strictEqual(analytics.providers.claude.limits.five_hour.remainingPercent, 9);
+  assert.ok(analytics.alerts.some((alert) => alert.provider === "claude" && alert.severity === "critical"));
+  assert.strictEqual(analytics.comparison.todayTokens, 160000);
+  assert.strictEqual(analytics.providers.codex.comparison.dayOverDayPercent, 1000);
+  assert.strictEqual(analytics.anomalies.codex.detected, true);
+  assert.strictEqual(analytics.costs.providers.codex.estimatedUsd, 0.252);
+  assert.strictEqual(analytics.costs.providers.claude.estimatedUsd, 0.1868);
+  assert.ok(analytics.costs.providers.codex.savings.estimatedUsd > 0);
+  assert.ok(analytics.recommendations.some((recommendation) => recommendation.reason === "critical_limit"));
+  assert.ok(analytics.recommendations.some((recommendation) => recommendation.reason === "forecast_before_reset"));
 }
 
 async function testClaudeUsageDeduplicatesMessageIds() {
@@ -922,6 +1025,7 @@ async function testClaudeUsagePollerParsesUsageCommand() {
   const week = status.limits.find((limit) => limit.type === "seven_day");
   assert.strictEqual(status.parse_status, "ok");
   assert.strictEqual(status.capture_method, "claude_usage_command");
+  assert.strictEqual(status.raw_status_text, "");
   assert.strictEqual(session.used_percent, 19);
   assert.strictEqual(session.remaining_percent, 81);
   assert.strictEqual(session.reset_text, "resets 07/09 18:29");
@@ -979,6 +1083,7 @@ function testElectronReleaseConfiguration() {
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "PRIVACY.md")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "app-compact.png")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "app-setup.png")));
+  assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "app-insights.png")));
   assert.ok(fs.existsSync(path.join(ROOT, "docs", "images", "dashboard-overview.png")));
   assert.match(releaseWorkflow, /actions\/upload-artifact@v7/);
   assert.match(releaseWorkflow, /signpath\/github-action-submit-signing-request@v2/);
@@ -1607,6 +1712,8 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "node", "codex-wrapper.js")]);
   await run(NODE, ["--check", path.join("src", "node", "codex-status-poller.js")]);
   await run(NODE, ["--check", path.join("src", "node", "codex-account-reader.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "token-usage-reader.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "usage-analytics.js")]);
   await run(NODE, ["--check", path.join("src", "node", "status-capture.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-usage-poller.js")]);
@@ -1617,6 +1724,7 @@ async function main() {
   await run(NODE, ["--check", path.join("src", "electron", "updater.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "preload.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "compact.js")]);
+  await run(NODE, ["--check", path.join("src", "electron", "renderer", "insights.js")]);
   await run(NODE, ["--check", path.join("src", "electron", "renderer", "setup.js")]);
   await run(NODE, ["--check", path.join("scripts", "capture-readme-screenshots.js")]);
   await run(NODE, ["--check", path.join("scripts", "refresh-release-metadata.js")]);
@@ -1633,6 +1741,9 @@ async function main() {
   await testCodexAppServerAccountReaderUsesStableAccountMethods();
   await testCodexAppServerAccountReaderRejectsMissingCliCleanly();
   testElectronMainUsesOnlyOnDemandCollectors();
+  testTokenUsageReaderAggregatesCodexAndDeduplicatesClaude();
+  testHistoryOnlyAppendsMeaningfulLimitChanges();
+  testUsageAnalyticsProducesForecastsAlertsComparisonsCostsAndActions();
   await testStatusPollerRestartsUnhealthySession();
   await testStatusPollerSurvivesBadCodexCommand();
   await testClaudeUsageDeduplicatesMessageIds();
