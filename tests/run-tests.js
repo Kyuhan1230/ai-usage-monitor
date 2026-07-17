@@ -451,6 +451,75 @@ async function testCodexPollerAddsFastServiceTierForCodexCommand() {
   assert.deepStrictEqual(buildCodexArgs(customOptions), ["--no-alt-screen", "-c", 'service_tier="flex"']);
 }
 
+async function testCodexAppServerAccountReaderUsesStableAccountMethods() {
+  const tempDir = makeTempDir("codex-app-server-reader");
+  const statusPath = path.join(tempDir, "status.json");
+  const historyDir = path.join(tempDir, "history");
+  const requestLogPath = path.join(tempDir, "requests.jsonl");
+  const { captureOnce } = require(path.join(ROOT, "src", "node", "codex-account-reader.js"));
+
+  const status = await captureOnce({
+    codexCommand: NODE,
+    codexArgsPrefix: [path.join(ROOT, "tests", "mock-codex-app-server.js")],
+    statusPath,
+    historyDir,
+    clientVersion: "0.2.0-test",
+    timeoutMs: 5000,
+    env: { ...TEST_ENV, MOCK_CODEX_APP_SERVER_LOG: requestLogPath },
+  });
+
+  assert.strictEqual(status.capture_method, "codex_app_server");
+  assert.strictEqual(status.parse_status, "ok");
+  assert.strictEqual(status.poller.state, "on_demand_ok");
+  assert.strictEqual(status.poller.poll_interval_ms, 0);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "five_hour").remaining_percent, 73);
+  assert.strictEqual(status.limits.find((limit) => limit.type === "weekly").remaining_percent, 39);
+  assert.strictEqual(status.account_usage.summary.totalTokens, 123456);
+  assert.strictEqual(readJson(statusPath).capture_method, "codex_app_server");
+  assert.strictEqual(readHistoryCount(historyDir), 1);
+
+  const requests = fs.readFileSync(requestLogPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => JSON.parse(line));
+  const methods = requests.map((request) => request.method);
+  assert.deepStrictEqual(methods, [
+    "initialize",
+    "initialized",
+    "account/rateLimits/read",
+    "account/usage/read",
+  ]);
+  assert.ok(!methods.includes("thread/start"));
+}
+
+async function testCodexAppServerAccountReaderRejectsMissingCliCleanly() {
+  const tempDir = makeTempDir("codex-app-server-missing");
+  const { captureOnce } = require(path.join(ROOT, "src", "node", "codex-account-reader.js"));
+
+  await assert.rejects(
+    captureOnce({
+      codexCommand: path.join(tempDir, "missing-codex-command.exe"),
+      statusPath: path.join(tempDir, "status.json"),
+      historyDir: path.join(tempDir, "history"),
+      timeoutMs: 1000,
+    }),
+  );
+  assert.strictEqual(fs.existsSync(path.join(tempDir, "status.json")), false);
+}
+
+function testElectronMainUsesOnlyOnDemandCollectors() {
+  const source = fs.readFileSync(path.join(ROOT, "src", "electron", "main.js"), "utf8");
+
+  assert.match(source, /captureCodexAccountOnce/);
+  assert.match(source, /mode: "on_demand"/);
+  assert.match(source, /pollIntervalMs: 0/);
+  assert.doesNotMatch(source, /--codex-status-poller/);
+  assert.doesNotMatch(source, /--claude-usage-poller/);
+  assert.doesNotMatch(source, /startStatusPoller/);
+  assert.doesNotMatch(source, /startClaudeUsagePoller/);
+  assert.doesNotMatch(source, /setInterval\([^)]*capture/);
+}
+
 async function testClaudeUsageDeduplicatesMessageIds() {
   const tempDir = makeTempDir("claude-usage-dedup");
   const fixturePath = path.join(tempDir, "session.jsonl");
@@ -1537,6 +1606,7 @@ async function testFastApiDashboardRendersWithClaudeArguments() {
 async function main() {
   await run(NODE, ["--check", path.join("src", "node", "codex-wrapper.js")]);
   await run(NODE, ["--check", path.join("src", "node", "codex-status-poller.js")]);
+  await run(NODE, ["--check", path.join("src", "node", "codex-account-reader.js")]);
   await run(NODE, ["--check", path.join("src", "node", "status-capture.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-status-hook.js")]);
   await run(NODE, ["--check", path.join("src", "node", "claude-usage-poller.js")]);
@@ -1560,6 +1630,9 @@ async function main() {
   await testDashboardReadsWrapperStatus();
   await testHeadlessStatusPoller();
   await testCodexPollerAddsFastServiceTierForCodexCommand();
+  await testCodexAppServerAccountReaderUsesStableAccountMethods();
+  await testCodexAppServerAccountReaderRejectsMissingCliCleanly();
+  testElectronMainUsesOnlyOnDemandCollectors();
   await testStatusPollerRestartsUnhealthySession();
   await testStatusPollerSurvivesBadCodexCommand();
   await testClaudeUsageDeduplicatesMessageIds();

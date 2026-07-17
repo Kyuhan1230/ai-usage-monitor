@@ -11,7 +11,7 @@
     <header>
       <p class="eyebrow">Setup</p>
       <h1>Codex Claude Usage</h1>
-      <p class="summary">토큰이나 쿠키를 저장하지 않고, 로컬 CLI와 status 파일만 연결합니다.</p>
+      <p class="summary">토큰이나 쿠키를 저장하지 않습니다. Codex는 새로고침 때 공식 app-server를 잠깐 실행하고, Claude는 statusLine 이벤트를 로컬 파일에 기록합니다.</p>
     </header>
 
     <section class="checks">
@@ -33,10 +33,10 @@
 
       <article class="check">
         <div>
-          <h2>Claude statusLine hook</h2>
+          <h2>Claude statusLine 이벤트</h2>
           <p id="hook-detail">확인 중</p>
         </div>
-        <button id="install-hook" type="button">hook 설치</button>
+        <button id="install-hook" type="button">이벤트 연결</button>
       </article>
 
       <article class="check">
@@ -60,7 +60,7 @@
     </section>
 
     <footer>
-      <button id="refresh" type="button">다시 확인</button>
+      <button id="refresh" type="button">지금 수집</button>
     </footer>
   </main>
   <script src="setup.js"></script>

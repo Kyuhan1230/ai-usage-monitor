@@ -6,6 +6,7 @@ const hookDetail = document.getElementById("hook-detail");
 const runtimeDetail = document.getElementById("runtime-detail");
 const startupDetail = document.getElementById("startup-detail");
 const launchAtLogin = document.getElementById("launch-at-login");
+const refreshButton = document.getElementById("refresh");
 
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
@@ -13,61 +14,74 @@ function isFresh(ageMs) {
 
 function ageText(ageMs) {
   if (!Number.isFinite(ageMs)) {
-    return "갱신 기록 없음";
+    return "수집 기록 없음";
   }
   const minutes = Math.floor(ageMs / 60000);
   if (minutes < 1) {
-    return "방금 갱신";
+    return "방금 수집";
   }
   if (minutes < 60) {
-    return `${minutes}분 전 갱신`;
+    return `${minutes}분 전 수집`;
   }
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest ? `${hours}시간 ${rest}분 전 갱신` : `${hours}시간 전 갱신`;
+  return rest ? `${hours}시간 ${rest}분 전 수집` : `${hours}시간 전 수집`;
 }
 
-function statusText(commandOk, connected, ageMs, missingCommand, staleHelp) {
+function statusText(commandOk, connected, ageMs, missingCommand, staleHelp, refreshError) {
   if (!commandOk) {
     return `필요: ${missingCommand}`;
   }
+  if (refreshError) {
+    return `수집 실패: ${refreshError}`;
+  }
   if (!connected) {
-    return "주의: CLI는 있지만 status 파일이 아직 없습니다. 백그라운드 수집기가 곧 캡처합니다.";
+    return "지금 수집을 눌러 계정 사용량을 확인하세요.";
   }
   if (!isFresh(ageMs)) {
-    return `주의: 오래된 값입니다. ${ageText(ageMs)}. ${staleHelp}`;
+    return `오래된 값: ${ageText(ageMs)}. ${staleHelp}`;
   }
   return `정상: ${ageText(ageMs)}`;
 }
 
 async function refresh(force = false) {
-  const snapshot = force ? await window.usageApp.refreshSetupSnapshot() : await window.usageApp.setupSnapshot();
-  codexDetail.textContent = statusText(
-    snapshot.setup.codexCommand,
-    snapshot.codex.connected,
-    snapshot.codex.ageMs,
-    "codex 명령을 찾지 못했습니다. Codex CLI 설치가 필요합니다.",
-    "백그라운드 수집기가 1분마다 다시 캡처합니다.",
-  );
-  claudeDetail.textContent = statusText(
-    snapshot.setup.claudeCommand,
-    snapshot.claude.connected,
-    snapshot.claude.ageMs,
-    "claude 명령을 찾지 못했습니다. Claude Code 설치가 필요합니다.",
-    "백그라운드 수집기가 1분마다 claude /usage를 다시 캡처합니다.",
-  );
-  hookDetail.textContent = snapshot.claude.hookInstalled
-    ? `선택: statusLine hook이 현재 앱으로 연결됨. ${snapshot.setup.hookCommand}`
-    : "선택: claude /usage 수집만으로도 요약은 갱신됩니다. statusLine 연동이 필요하면 hook 설치를 누르세요.";
-  runtimeDetail.textContent = snapshot.setup.runtimeBundled
-    ? "정상: 설치 파일에 포함된 Python 런타임으로 대시보드를 실행합니다."
-    : snapshot.setup.uvicornCommand
-    ? "정상: 시스템 Python 런타임으로 대시보드를 실행할 수 있습니다."
-    : "필요: uvicorn 명령을 찾지 못했습니다. Python 환경에 fastapi/uvicorn 설치가 필요합니다.";
-  startupDetail.textContent = snapshot.launchAtLogin
-    ? "정상: Windows 로그인 때 앱이 자동 실행됩니다."
-    : "선택 안 함: 앱은 사용자가 직접 실행할 때만 시작됩니다.";
-  launchAtLogin.checked = snapshot.launchAtLogin;
+  refreshButton.disabled = true;
+  try {
+    const snapshot = force
+      ? await window.usageApp.refreshSetupSnapshot()
+      : await window.usageApp.setupSnapshot();
+    const errors = snapshot.refresh && snapshot.refresh.errors ? snapshot.refresh.errors : {};
+    codexDetail.textContent = statusText(
+      snapshot.setup.codexCommand,
+      snapshot.codex.connected,
+      snapshot.codex.ageMs,
+      "Codex CLI를 설치하고 로그인해야 합니다.",
+      "지금 수집을 눌러 공식 app-server 스냅샷을 갱신하세요.",
+      errors.codex,
+    );
+    claudeDetail.textContent = statusText(
+      snapshot.setup.claudeCommand,
+      snapshot.claude.connected,
+      snapshot.claude.ageMs,
+      "Claude Code를 설치하고 로그인해야 합니다.",
+      "Claude를 사용하면 statusLine 이벤트가 갱신하며, 지금 수집은 /usage를 한 번 실행합니다.",
+      errors.claude,
+    );
+    hookDetail.textContent = snapshot.claude.hookInstalled
+      ? "연결됨: Claude가 statusLine을 그릴 때 받은 사용량을 로컬에 기록합니다. 추가 CLI 폴러는 실행하지 않습니다."
+      : "권장: 이벤트 연결을 누르면 Claude 사용 중에만 값이 갱신됩니다. 기존 statusLine 명령은 동의 없이 덮어쓰지 않습니다.";
+    runtimeDetail.textContent = snapshot.setup.runtimeBundled
+      ? "정상: 설치 파일에 포함된 Python 런타임은 전체 대시보드를 열 때만 실행됩니다."
+      : snapshot.setup.uvicornCommand
+      ? "정상: 시스템 Python 런타임으로 전체 대시보드를 열 수 있습니다."
+      : "필요: 전체 대시보드에는 fastapi/uvicorn이 필요합니다. 컴팩트 모니터는 그대로 사용할 수 있습니다.";
+    startupDetail.textContent = snapshot.launchAtLogin
+      ? "켜짐: 앱만 시작하며, 사용량 CLI를 상주시켜 두지 않습니다."
+      : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
+    launchAtLogin.checked = snapshot.launchAtLogin;
+  } finally {
+    refreshButton.disabled = false;
+  }
 }
 
 document.getElementById("codex-login").addEventListener("click", () => window.usageApp.openCodexLogin());
@@ -81,6 +95,6 @@ launchAtLogin.addEventListener("change", async () => {
   await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
   await refresh();
 });
-document.getElementById("refresh").addEventListener("click", () => refresh(true));
+refreshButton.addEventListener("click", () => refresh(true));
 
 refresh();

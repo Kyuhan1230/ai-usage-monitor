@@ -6,12 +6,8 @@ const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const {
-  captureOnceAsync: captureClaudeUsageOnce,
-  parseArgs: parseClaudePollerArgs,
-  startPoller: startClaudePoller,
-} = require("../node/claude-usage-poller");
-const { parseArgs: parsePollerArgs, startPoller } = require("../node/codex-status-poller");
+const { captureOnce: captureCodexAccountOnce } = require("../node/codex-account-reader");
+const { captureOnceAsync: captureClaudeUsageOnce } = require("../node/claude-usage-poller");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { writeJsonAtomic } = require("../node/status-capture");
 const { getLaunchAtLoginPreference, setLaunchAtLoginPreference } = require("./app-preferences");
@@ -30,39 +26,23 @@ const PREFERENCES_PATH = path.join(STATUS_DIR, "preferences.json");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
 const CLAUDE_STATUS_PATH = path.join(STATUS_DIR, "claude-status.json");
 const HISTORY_DIR = path.join(STATUS_DIR, "history");
-const POLLER_PID_PATH = path.join(STATUS_DIR, "poller.pid");
-const CLAUDE_POLLER_PID_PATH = path.join(STATUS_DIR, "claude-poller.pid");
-const DEFAULT_FAST_POLL_INTERVAL_MS = 60 * 1000;
-const CODEX_POLL_INTERVAL_MS = parsePositiveInt(process.env.CODEX_USAGE_CODEX_POLL_INTERVAL_MS)
-  || parsePositiveInt(process.env.CODEX_USAGE_POLL_INTERVAL_MS)
-  || DEFAULT_FAST_POLL_INTERVAL_MS;
-const CLAUDE_POLL_INTERVAL_MS = parsePositiveInt(process.env.CODEX_USAGE_CLAUDE_POLL_INTERVAL_MS)
-  || parsePositiveInt(process.env.CODEX_USAGE_POLL_INTERVAL_MS)
-  || DEFAULT_FAST_POLL_INTERVAL_MS;
+const ON_DEMAND_FRESHNESS_MS = 10 * 60 * 1000;
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_HOOK_PATH = path.join(ROOT, "src", "node", "claude-status-hook.js");
 
 let dashboardProcess = null;
-let statusPollerProcess = null;
-let claudePollerProcess = null;
-let statusPollerRestartTimer = null;
-let claudePollerRestartTimer = null;
 let tray = null;
 let compactWindow = null;
 let dashboardWindow = null;
 let setupWindow = null;
-let isQuitting = false;
+let refreshPromise = null;
+let lastRefresh = { state: "idle", completedAt: null, errors: {} };
 const updaterController = createUpdaterController({
   app,
   autoUpdater,
   dialog,
   getWindow: () => compactWindow || setupWindow || dashboardWindow,
 });
-
-function parsePositiveInt(value) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -79,34 +59,9 @@ function runClaudeStatusHookMode() {
   process.stdout.write(`${summaryFromStatus(status)}\n`);
 }
 
-function argsAfter(name) {
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv.slice(index + 1) : [];
-}
-
-function runCodexStatusPollerMode() {
-  const options = parsePollerArgs(argsAfter("--codex-status-poller"));
-  startPoller(options);
-}
-
-function runClaudeUsagePollerMode() {
-  const options = parseClaudePollerArgs(argsAfter("--claude-usage-poller"));
-  startClaudePoller(options);
-}
-
 if (process.argv.includes("--claude-status-hook")) {
   runClaudeStatusHookMode();
   process.exit(0);
-}
-
-if (process.argv.includes("--codex-status-poller")) {
-  runCodexStatusPollerMode();
-  return;
-}
-
-if (process.argv.includes("--claude-usage-poller")) {
-  runClaudeUsagePollerMode();
-  return;
 }
 
 app.setName(APP_NAME);
@@ -175,75 +130,6 @@ function stopDashboardServer() {
   dashboardProcess = null;
 }
 
-function readPollerPid(pidPath) {
-  try {
-    const pid = Number(fs.readFileSync(pidPath, "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
-  } catch (error) {
-    return null;
-  }
-}
-
-function isPidRunning(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-function processCommandLine(pid) {
-  if (process.platform !== "win32") {
-    return "";
-  }
-  const result = spawnSync("powershell.exe", [
-    "-NoProfile",
-    "-Command",
-    `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
-  ], {
-    windowsHide: true,
-    encoding: "utf8",
-    timeout: 3000,
-  });
-  return result.status === 0 ? result.stdout : "";
-}
-
-function isKnownStatusPollerPid(pid) {
-  const commandLine = processCommandLine(pid).toLowerCase();
-  return commandLine.includes("--codex-status-poller")
-    || commandLine.includes("codex-status-poller.js")
-    || commandLine.includes("--claude-usage-poller")
-    || commandLine.includes("claude-usage-poller.js");
-}
-
-function parseStatusTime(value) {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isPollerStatusFresh(statusPath, pollIntervalMs, expectedCaptureMethod) {
-  const status = readJsonSafe(statusPath);
-  if (!status || typeof status !== "object") {
-    return false;
-  }
-  if (expectedCaptureMethod && status.capture_method !== expectedCaptureMethod) {
-    return false;
-  }
-
-  const poller = status.poller && typeof status.poller === "object" ? status.poller : null;
-  const timestamp = parseStatusTime(poller && poller.heartbeat_at) || parseStatusTime(status.captured_at);
-  if (timestamp === null) {
-    return false;
-  }
-
-  const maxAgeMs = Math.max(pollIntervalMs * 2 + 60 * 1000, 10 * 60 * 1000);
-  return Date.now() - timestamp <= maxAgeMs;
-}
-
 function childRuntime() {
   if (app.isPackaged) {
     return { command: process.execPath, entryArgs: [] };
@@ -252,190 +138,6 @@ function childRuntime() {
     return { command: process.env.npm_node_execpath, entryArgs: [path.join(__dirname, "main.js")] };
   }
   return { command: process.execPath, entryArgs: [ROOT] };
-}
-
-function pollerArgs(startupDelayMs = null) {
-  const args = [
-    "--codex-status-poller",
-    "--status-path",
-    CODEX_STATUS_PATH,
-    "--history-dir",
-    HISTORY_DIR,
-    "--poll-interval-ms",
-    String(CODEX_POLL_INTERVAL_MS),
-    "--codex-command",
-    process.platform === "win32" ? "codex.exe" : "codex",
-  ];
-  if (startupDelayMs !== null) {
-    args.push("--startup-delay-ms", String(startupDelayMs));
-  }
-  return args;
-}
-
-function claudePollerArgs(startupDelayMs = null) {
-  const args = [
-    "--claude-usage-poller",
-    "--status-path",
-    CLAUDE_STATUS_PATH,
-    "--poll-interval-ms",
-    String(CLAUDE_POLL_INTERVAL_MS),
-    "--claude-command",
-    process.platform === "win32" ? "claude.exe" : "claude",
-  ];
-  if (startupDelayMs !== null) {
-    args.push("--startup-delay-ms", String(startupDelayMs));
-  }
-  return args;
-}
-
-function startStatusPoller({ force = false, startupDelayMs = null } = {}) {
-  if (statusPollerProcess && statusPollerProcess.exitCode === null) {
-    if (force) {
-      stopStatusPoller();
-    } else {
-      return;
-    }
-  }
-
-  const existingPid = readPollerPid(POLLER_PID_PATH);
-  if (
-    !force
-    && existingPid !== null
-    && isPidRunning(existingPid)
-    && isKnownStatusPollerPid(existingPid)
-    && isPollerStatusFresh(CODEX_STATUS_PATH, CODEX_POLL_INTERVAL_MS, "codex_status_poller")
-  ) {
-    return;
-  }
-  if (existingPid !== null && isPidRunning(existingPid) && isKnownStatusPollerPid(existingPid)) {
-    try {
-      process.kill(existingPid);
-    } catch (error) {
-      // Ignore stale poller cleanup failures; the new child can still take over the pid file.
-    }
-  }
-
-  fs.mkdirSync(STATUS_DIR, { recursive: true });
-  const runtime = childRuntime();
-  const child = spawn(runtime.command, [...runtime.entryArgs, ...pollerArgs(startupDelayMs)], {
-    cwd: PROCESS_CWD,
-    env: process.env,
-    windowsHide: true,
-    stdio: "ignore",
-  });
-  statusPollerProcess = child;
-  fs.writeFileSync(POLLER_PID_PATH, String(child.pid), "utf8");
-
-  child.on("error", () => {
-    if (statusPollerProcess !== child) {
-      return;
-    }
-    statusPollerProcess = null;
-    scheduleStatusPollerRestart();
-  });
-  child.on("exit", () => {
-    if (statusPollerProcess !== child) {
-      return;
-    }
-    statusPollerProcess = null;
-    scheduleStatusPollerRestart();
-  });
-}
-
-function startClaudeUsagePoller({ force = false, startupDelayMs = null } = {}) {
-  if (claudePollerProcess && claudePollerProcess.exitCode === null) {
-    if (force) {
-      stopClaudeUsagePoller();
-    } else {
-      return;
-    }
-  }
-
-  const existingPid = readPollerPid(CLAUDE_POLLER_PID_PATH);
-  if (
-    !force
-    && existingPid !== null
-    && isPidRunning(existingPid)
-    && isKnownStatusPollerPid(existingPid)
-    && isPollerStatusFresh(CLAUDE_STATUS_PATH, CLAUDE_POLL_INTERVAL_MS, "claude_usage_command")
-  ) {
-    return;
-  }
-  if (existingPid !== null && isPidRunning(existingPid) && isKnownStatusPollerPid(existingPid)) {
-    try {
-      process.kill(existingPid);
-    } catch (error) {
-      // Ignore stale poller cleanup failures; the new child can still take over the pid file.
-    }
-  }
-
-  fs.mkdirSync(STATUS_DIR, { recursive: true });
-  const runtime = childRuntime();
-  const child = spawn(runtime.command, [...runtime.entryArgs, ...claudePollerArgs(startupDelayMs)], {
-    cwd: PROCESS_CWD,
-    env: process.env,
-    windowsHide: true,
-    stdio: "ignore",
-  });
-  claudePollerProcess = child;
-  fs.writeFileSync(CLAUDE_POLLER_PID_PATH, String(child.pid), "utf8");
-
-  child.on("error", () => {
-    if (claudePollerProcess !== child) {
-      return;
-    }
-    claudePollerProcess = null;
-    scheduleClaudePollerRestart();
-  });
-  child.on("exit", () => {
-    if (claudePollerProcess !== child) {
-      return;
-    }
-    claudePollerProcess = null;
-    scheduleClaudePollerRestart();
-  });
-}
-
-function scheduleStatusPollerRestart() {
-  if (isQuitting || statusPollerRestartTimer) {
-    return;
-  }
-  statusPollerRestartTimer = setTimeout(() => {
-    statusPollerRestartTimer = null;
-    startStatusPoller();
-  }, 30 * 1000);
-}
-
-function scheduleClaudePollerRestart() {
-  if (isQuitting || claudePollerRestartTimer) {
-    return;
-  }
-  claudePollerRestartTimer = setTimeout(() => {
-    claudePollerRestartTimer = null;
-    startClaudeUsagePoller();
-  }, 30 * 1000);
-}
-
-function stopStatusPoller() {
-  clearTimeout(statusPollerRestartTimer);
-  statusPollerRestartTimer = null;
-  if (!statusPollerProcess || statusPollerProcess.exitCode !== null) {
-    return;
-  }
-  const child = statusPollerProcess;
-  statusPollerProcess = null;
-  child.kill();
-}
-
-function stopClaudeUsagePoller() {
-  clearTimeout(claudePollerRestartTimer);
-  claudePollerRestartTimer = null;
-  if (!claudePollerProcess || claudePollerProcess.exitCode !== null) {
-    return;
-  }
-  const child = claudePollerProcess;
-  claudePollerProcess = null;
-  child.kill();
 }
 
 function showCompactWindow() {
@@ -639,13 +341,13 @@ function buildSnapshot() {
       url: DASHBOARD_URL,
     },
     poller: {
-      codexRunning: Boolean(statusPollerProcess && statusPollerProcess.exitCode === null)
-        || isPollerStatusFresh(CODEX_STATUS_PATH, CODEX_POLL_INTERVAL_MS, "codex_status_poller"),
-      claudeRunning: Boolean(claudePollerProcess && claudePollerProcess.exitCode === null)
-        || isPollerStatusFresh(CLAUDE_STATUS_PATH, CLAUDE_POLL_INTERVAL_MS, "claude_usage_command"),
-      codexIntervalMs: CODEX_POLL_INTERVAL_MS,
-      claudeIntervalMs: CLAUDE_POLL_INTERVAL_MS,
+      mode: "on_demand",
+      codexRunning: false,
+      claudeRunning: false,
+      codexIntervalMs: ON_DEMAND_FRESHNESS_MS,
+      claudeIntervalMs: ON_DEMAND_FRESHNESS_MS,
     },
+    refresh: lastRefresh,
     codex: {
       connected: Boolean(codex && codex.parse_status === "ok"),
       ageMs: statusAgeMs(codex),
@@ -682,10 +384,46 @@ function buildSetupSnapshot() {
 }
 
 async function refreshUsageSnapshot() {
-  startStatusPoller({ force: true, startupDelayMs: 0 });
-  startClaudeUsagePoller({ force: true, startupDelayMs: CLAUDE_POLL_INTERVAL_MS });
-  await captureClaudeUsageOnce(parseClaudePollerArgs(claudePollerArgs()));
-  return buildSnapshot();
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  lastRefresh = { state: "running", completedAt: null, errors: {} };
+  refreshPromise = Promise.allSettled([
+    captureCodexAccountOnce({
+      codexCommand: process.platform === "win32" ? "codex.exe" : "codex",
+      statusPath: CODEX_STATUS_PATH,
+      historyDir: HISTORY_DIR,
+      clientVersion: app.getVersion(),
+    }),
+    captureClaudeUsageOnce({
+      claudeCommand: process.platform === "win32" ? "claude.exe" : "claude",
+      statusPath: CLAUDE_STATUS_PATH,
+      pollIntervalMs: 0,
+    }),
+  ]).then((results) => {
+    const errors = {};
+    if (results[0].status === "rejected") {
+      errors.codex = results[0].reason instanceof Error
+        ? results[0].reason.message
+        : String(results[0].reason);
+    }
+    if (results[1].status === "rejected") {
+      errors.claude = results[1].reason instanceof Error
+        ? results[1].reason.message
+        : String(results[1].reason);
+    }
+    lastRefresh = {
+      state: Object.keys(errors).length === 0 ? "ok" : "partial",
+      completedAt: new Date().toISOString(),
+      errors,
+    };
+    return buildSnapshot();
+  }).finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
 }
 
 function showSetupWindow() {
@@ -741,7 +479,10 @@ function createTray() {
 ipcMain.handle("status:snapshot", () => buildSnapshot());
 ipcMain.handle("status:refresh", () => refreshUsageSnapshot());
 ipcMain.handle("setup:snapshot", () => buildSetupSnapshot());
-ipcMain.handle("setup:refresh", () => buildSetupSnapshot());
+ipcMain.handle("setup:refresh", async () => {
+  await refreshUsageSnapshot();
+  return buildSetupSnapshot();
+});
 ipcMain.handle("window:setAlwaysOnTop", (_event, enabled) => {
   if (compactWindow) {
     compactWindow.setAlwaysOnTop(Boolean(enabled), "floating");
@@ -797,18 +538,14 @@ ipcMain.handle("app:quit", () => {
 
 app.whenReady().then(() => {
   applyLaunchAtLoginPreference();
-  startStatusPoller();
-  startClaudeUsagePoller();
   createTray();
   showCompactWindow();
+  refreshUsageSnapshot().catch(() => {});
   updaterController.start();
 });
 
 app.on("window-all-closed", () => {});
 
 app.on("before-quit", () => {
-  isQuitting = true;
-  stopStatusPoller();
-  stopClaudeUsagePoller();
   stopDashboardServer();
 });
