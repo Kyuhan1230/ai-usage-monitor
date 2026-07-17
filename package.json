@@ -1,6 +1,6 @@
 {
   "name": "codex-usage-wrapper",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "productName": "Codex Claude Usage",
   "author": "CodexUsage",
@@ -26,8 +26,8 @@
     "dist:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-exe.ps1",
     "wrapper": "node src/node/codex-wrapper.js",
     "status-poller": "node src/node/codex-status-poller.js",
-    "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 0.0.0.0 --port 8767",
-    "dashboard:dev": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --reload --host 0.0.0.0 --port 8767",
+    "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 127.0.0.1 --port 8767",
+    "dashboard:dev": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --reload --host 127.0.0.1 --port 8767",
     "dashboard:legacy": "python src/python/codex_status_dashboard.py --serve",
     "docs:screenshots": "electron scripts/capture-readme-screenshots.js",
     "refresh:release-metadata": "node scripts/refresh-release-metadata.js",

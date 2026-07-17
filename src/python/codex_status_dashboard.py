@@ -24,7 +24,7 @@ from dashboard_common import FileCache
 
 SCHEMA_VERSION = 1
 DEFAULT_REFRESH_SECONDS = 3
-DEFAULT_HOST = "0.0.0.0"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8767
 DEFAULT_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "status.json"
 DEFAULT_CLAUDE_STATUS_PATH = Path.home() / ".codex-usage-wrapper" / "claude-status.json"
@@ -1306,7 +1306,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--host",
         default=DEFAULT_HOST,
-        help="Host for --serve. Default: 0.0.0.0",
+        help="Host for --serve. Default: 127.0.0.1",
     )
     parser.add_argument(
         "--port",

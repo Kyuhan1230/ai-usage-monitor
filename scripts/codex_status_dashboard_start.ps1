@@ -26,7 +26,7 @@ try {
 }
 
 Start-Process -FilePath "python" `
-    -ArgumentList @("src\python\codex_status_dashboard.py", "--serve", "--host", "0.0.0.0", "--port", "$port") `
+    -ArgumentList @("src\python\codex_status_dashboard.py", "--serve", "--host", "127.0.0.1", "--port", "$port") `
     -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
     -RedirectStandardOutput $stdoutLog `

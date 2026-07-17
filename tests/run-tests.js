@@ -876,6 +876,8 @@ function testElectronReleaseConfiguration() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
   const publish = packageJson.build.publish[0];
   const releaseWorkflow = fs.readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  const legacyStartScript = fs.readFileSync(path.join(ROOT, "scripts", "codex_status_dashboard_start.ps1"), "utf8");
+  const legacyDashboard = fs.readFileSync(path.join(PYTHON_DIR, "codex_status_dashboard.py"), "utf8");
 
   assert.ok(packageJson.dependencies["electron-updater"]);
   assert.strictEqual(packageJson.repository.url, "https://github.com/Kyuhan1230/ai-usage-monitor.git");
@@ -894,6 +896,13 @@ function testElectronReleaseConfiguration() {
   assert.match(packageJson.scripts["docs:screenshots"], /capture-readme-screenshots\.js/);
   assert.match(packageJson.scripts["refresh:release-metadata"], /refresh-release-metadata\.js/);
   assert.match(packageJson.scripts.dist, /prepare:runtime/);
+  assert.match(packageJson.scripts.dashboard, /--host 127\.0\.0\.1/);
+  assert.match(packageJson.scripts["dashboard:dev"], /--host 127\.0\.0\.1/);
+  assert.doesNotMatch(packageJson.scripts.dashboard, /0\.0\.0\.0/);
+  assert.doesNotMatch(packageJson.scripts["dashboard:dev"], /0\.0\.0\.0/);
+  assert.match(legacyStartScript, /--host", "127\.0\.0\.1"/);
+  assert.doesNotMatch(legacyStartScript, /0\.0\.0\.0/);
+  assert.match(legacyDashboard, /DEFAULT_HOST = "127\.0\.0\.1"/);
   assert.ok(fs.existsSync(path.join(ROOT, "scripts", "prepare-python-runtime.ps1")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")));
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "release.yml")));
