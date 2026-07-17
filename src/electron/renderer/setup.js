@@ -3,7 +3,7 @@
 const codexDetail = document.getElementById("codex-detail");
 const claudeDetail = document.getElementById("claude-detail");
 const hookDetail = document.getElementById("hook-detail");
-const runtimeDetail = document.getElementById("runtime-detail");
+const detailsDetail = document.getElementById("details-detail");
 const startupDetail = document.getElementById("startup-detail");
 const launchAtLogin = document.getElementById("launch-at-login");
 const refreshButton = document.getElementById("refresh");
@@ -70,11 +70,7 @@ async function refresh(force = false) {
     hookDetail.textContent = snapshot.claude.hookInstalled
       ? "연결됨: Claude가 statusLine을 그릴 때 받은 사용량을 로컬에 기록합니다. 추가 CLI 폴러는 실행하지 않습니다."
       : "권장: 이벤트 연결을 누르면 Claude 사용 중에만 값이 갱신됩니다. 기존 statusLine 명령은 동의 없이 덮어쓰지 않습니다.";
-    runtimeDetail.textContent = snapshot.setup.runtimeBundled
-      ? "정상: 설치 파일에 포함된 Python 런타임은 전체 대시보드를 열 때만 실행됩니다."
-      : snapshot.setup.uvicornCommand
-      ? "정상: 시스템 Python 런타임으로 전체 대시보드를 열 수 있습니다."
-      : "필요: 전체 대시보드에는 fastapi/uvicorn이 필요합니다. 컴팩트 모니터는 그대로 사용할 수 있습니다.";
+    detailsDetail.textContent = "정상: 별도 서버나 Python 없이 앱 내부 화면에서 모델·날짜별 토큰을 표시합니다.";
     startupDetail.textContent = snapshot.launchAtLogin
       ? "켜짐: 앱만 시작하며, 사용량 CLI를 상주시켜 두지 않습니다."
       : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
@@ -90,7 +86,7 @@ document.getElementById("install-hook").addEventListener("click", async () => {
   await window.usageApp.installClaudeHook();
   await refresh();
 });
-document.getElementById("open-dashboard").addEventListener("click", () => window.usageApp.openDashboard());
+document.getElementById("open-details").addEventListener("click", () => window.usageApp.openDetails());
 launchAtLogin.addEventListener("change", async () => {
   await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
   await refresh();

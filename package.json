@@ -1,11 +1,11 @@
 {
   "name": "codex-usage-wrapper",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "productName": "Codex Claude Usage",
   "author": "CodexUsage",
   "license": "MIT",
-  "description": "Local Codex CLI usage wrapper and dashboard.",
+  "description": "Local-first Codex and Claude usage forecasts, alerts, costs, and actions.",
   "repository": {
     "type": "git",
     "url": "https://github.com/Kyuhan1230/ai-usage-monitor.git"
@@ -14,29 +14,15 @@
   "scripts": {
     "app": "electron .",
     "app:electron": "electron .",
-    "app:legacy-tray": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
-    "app:lite": "powershell -NoProfile -ExecutionPolicy Bypass -STA -File scripts/native-usage-tray.ps1",
-    "prepare:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-python-runtime.ps1",
-    "pack": "npm run prepare:runtime && electron-builder --dir",
-    "dist": "npm run prepare:runtime && electron-builder --win nsis",
-    "dist:electron": "npm run prepare:runtime && electron-builder --win nsis",
-    "dist:installer": "npm run prepare:runtime && electron-builder --win nsis",
-    "dist:legacy-native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-installer.ps1",
-    "dist:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-installer.ps1",
-    "dist:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-exe.ps1",
-    "wrapper": "node src/node/codex-wrapper.js",
-    "status-poller": "node src/node/codex-status-poller.js",
-    "dashboard": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --host 127.0.0.1 --port 8767",
-    "dashboard:dev": "uvicorn --app-dir src/python codex_dashboard_fastapi:app --reload --host 127.0.0.1 --port 8767",
-    "dashboard:legacy": "python src/python/codex_status_dashboard.py --serve",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
     "docs:screenshots": "electron scripts/capture-readme-screenshots.js",
     "refresh:release-metadata": "node scripts/refresh-release-metadata.js",
     "verify:release-tag": "node scripts/verify-release-tag.js",
     "test": "node tests/run-tests.js"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9",
-    "node-pty": "^1.0.0"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^43.1.0",
@@ -47,10 +33,6 @@
     "productName": "Codex Claude Usage",
     "artifactName": "Codex-Claude-Usage-Setup-${version}.${ext}",
     "asar": true,
-    "asarUnpack": [
-      "runtime/**/*",
-      "src/python/**/*"
-    ],
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -62,7 +44,6 @@
       "assets/**/*",
       "docs/CODE_SIGNING_POLICY.md",
       "docs/PRIVACY.md",
-      "runtime/**/*",
       "src/**/*",
       "node_modules/**/*"
     ],

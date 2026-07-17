@@ -21,7 +21,7 @@
 
 ### Description
 
-> Codex Claude Usage is an MIT-licensed Windows desktop application that monitors local Codex CLI and Claude Code usage. It displays current limits and local history in a tray interface and dashboard, processes usage data on the user's PC, and distributes verified Windows releases through GitHub Actions and GitHub Releases.
+> Codex Claude Usage is an MIT-licensed Windows desktop application that monitors local Codex CLI and Claude Code usage. It displays current limits, exhaustion forecasts, local history, costs, and actions in a tray interface and embedded application windows. Usage data is processed on the user's PC, and verified Windows releases are distributed through GitHub Actions and GitHub Releases.
 
 ### Reputation
 

@@ -7,22 +7,18 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { captureOnce: captureCodexAccountOnce } = require("../node/codex-account-reader");
-const { captureOnceAsync: captureClaudeUsageOnce } = require("../node/claude-usage-poller");
+const { captureOnceAsync: captureClaudeUsageOnce } = require("../node/claude-account-reader");
 const { buildStatus, shouldPreserveUsageCommandStatus, summaryFromStatus } = require("../node/claude-status-hook");
 const { appendHistoryIfChanged, writeJsonAtomic } = require("../node/status-capture");
 const { scanTokenUsage } = require("../node/token-usage-reader");
 const { buildAnalytics, readHistoryRecords } = require("../node/usage-analytics");
 const { getLaunchAtLoginPreference, setLaunchAtLoginPreference } = require("./app-preferences");
 const { installClaudeHookSettings } = require("./claude-hook-settings");
-const { resolveDashboardRuntime } = require("./dashboard-runtime");
 const { createUpdaterController } = require("./updater");
 
 const APP_NAME = "Codex Claude Usage";
 const ROOT = path.resolve(__dirname, "..", "..");
-const EXTERNAL_ROOT = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : ROOT;
-const PROCESS_CWD = app.isPackaged ? process.resourcesPath : ROOT;
 const APP_ICON_PATH = path.join(ROOT, "assets", "codex-claude-usage.ico");
-const DASHBOARD_URL = "http://127.0.0.1:8767";
 const STATUS_DIR = path.join(os.homedir(), ".codex-usage-wrapper");
 const PREFERENCES_PATH = path.join(STATUS_DIR, "preferences.json");
 const CODEX_STATUS_PATH = path.join(STATUS_DIR, "status.json");
@@ -33,11 +29,10 @@ const ON_DEMAND_FRESHNESS_MS = 10 * 60 * 1000;
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_HOOK_PATH = path.join(ROOT, "src", "node", "claude-status-hook.js");
 
-let dashboardProcess = null;
 let tray = null;
 let compactWindow = null;
 let insightsWindow = null;
-let dashboardWindow = null;
+let detailsWindow = null;
 let setupWindow = null;
 let refreshPromise = null;
 let lastRefresh = { state: "idle", completedAt: null, errors: {} };
@@ -47,7 +42,7 @@ const updaterController = createUpdaterController({
   app,
   autoUpdater,
   dialog,
-  getWindow: () => compactWindow || insightsWindow || setupWindow || dashboardWindow,
+  getWindow: () => compactWindow || insightsWindow || setupWindow || detailsWindow,
 });
 
 function argValue(name) {
@@ -101,43 +96,6 @@ function createTrayImage() {
   return image;
 }
 
-function startDashboardServer() {
-  if (dashboardProcess && dashboardProcess.exitCode === null) {
-    return;
-  }
-
-  const runtime = dashboardRuntime();
-  if (!runtime) {
-    return;
-  }
-
-  dashboardProcess = spawn(
-    runtime.command,
-    [...runtime.entryArgs, "--app-dir", path.join(EXTERNAL_ROOT, "src", "python"), "codex_dashboard_fastapi:app", "--host", "127.0.0.1", "--port", "8767"],
-    {
-      cwd: PROCESS_CWD,
-      env: { ...process.env, PYTHONPATH: path.join(EXTERNAL_ROOT, "src", "python") },
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-
-  dashboardProcess.on("error", () => {
-    dashboardProcess = null;
-  });
-  dashboardProcess.on("exit", () => {
-    dashboardProcess = null;
-  });
-}
-
-function stopDashboardServer() {
-  if (!dashboardProcess || dashboardProcess.exitCode !== null) {
-    return;
-  }
-  dashboardProcess.kill();
-  dashboardProcess = null;
-}
-
 function childRuntime() {
   if (app.isPackaged) {
     return { command: process.execPath, entryArgs: [] };
@@ -179,15 +137,14 @@ function showCompactWindow() {
   });
 }
 
-function showDashboardWindow() {
-  startDashboardServer();
-  if (dashboardWindow) {
-    dashboardWindow.show();
-    dashboardWindow.focus();
+function showDetailsWindow() {
+  if (detailsWindow) {
+    detailsWindow.show();
+    detailsWindow.focus();
     return;
   }
 
-  dashboardWindow = new BrowserWindow({
+  detailsWindow = new BrowserWindow({
     width: 1280,
     height: 900,
     minWidth: 900,
@@ -195,22 +152,14 @@ function showDashboardWindow() {
     backgroundColor: "#11141b",
     icon: APP_ICON_PATH,
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  dashboardWindow.loadURL(DASHBOARD_URL);
-  dashboardWindow.webContents.on("did-fail-load", (_event, _code, _description, url) => {
-    if (url === DASHBOARD_URL && dashboardWindow) {
-      setTimeout(() => {
-        if (dashboardWindow) {
-          dashboardWindow.loadURL(DASHBOARD_URL);
-        }
-      }, 1200);
-    }
-  });
-  dashboardWindow.on("closed", () => {
-    dashboardWindow = null;
+  detailsWindow.loadFile(path.join(__dirname, "renderer", "details.html"));
+  detailsWindow.on("closed", () => {
+    detailsWindow = null;
   });
 }
 
@@ -261,16 +210,6 @@ function commandExists(command) {
 
 function commandExistsAny(...commands) {
   return commands.some((command) => commandExists(command));
-}
-
-function dashboardRuntime() {
-  return resolveDashboardRuntime({
-    root: EXTERNAL_ROOT,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    commandExists,
-    fileExists: fs.existsSync,
-  });
 }
 
 function claudeHookCommand() {
@@ -412,16 +351,14 @@ function buildSnapshot() {
   const claude = readJsonSafe(CLAUDE_STATUS_PATH);
   return {
     capturedAt: new Date().toISOString(),
-    dashboard: {
-      running: Boolean(dashboardProcess && dashboardProcess.exitCode === null),
-      url: DASHBOARD_URL,
+    details: {
+      running: Boolean(detailsWindow),
+      mode: "embedded",
     },
-    poller: {
+    capture: {
       mode: "on_demand",
-      codexRunning: false,
-      claudeRunning: false,
-      codexIntervalMs: ON_DEMAND_FRESHNESS_MS,
-      claudeIntervalMs: ON_DEMAND_FRESHNESS_MS,
+      codexFreshnessMs: ON_DEMAND_FRESHNESS_MS,
+      claudeFreshnessMs: ON_DEMAND_FRESHNESS_MS,
     },
     refresh: lastRefresh,
     analytics: analyticsSnapshot,
@@ -447,14 +384,11 @@ function buildSnapshot() {
 }
 
 function buildSetupSnapshot() {
-  const runtime = dashboardRuntime();
   return {
     ...buildSnapshot(),
     setup: {
       codexCommand: commandExistsAny("codex.exe", "codex"),
       claudeCommand: commandExistsAny("claude.exe", "claude"),
-      uvicornCommand: Boolean(runtime),
-      runtimeBundled: Boolean(runtime && runtime.bundled),
       hookCommand: claudeHookCommand(),
     }
   };
@@ -554,7 +488,7 @@ function createTray() {
     Menu.buildFromTemplate([
       { label: "Compact window", click: showCompactWindow },
       { label: "Usage insights", click: showInsightsWindow },
-      { label: "Full dashboard", click: showDashboardWindow },
+      { label: "Token details", click: showDetailsWindow },
       { label: "Setup", click: showSetupWindow },
       { label: "Check for updates...", click: () => updaterController.check(true) },
       { type: "separator" },
@@ -591,8 +525,8 @@ ipcMain.handle("window:minimize", () => {
   }
   return true;
 });
-ipcMain.handle("dashboard:open", () => {
-  showDashboardWindow();
+ipcMain.handle("details:open", () => {
+  showDetailsWindow();
   return buildSnapshot();
 });
 ipcMain.handle("setup:open", () => {
@@ -635,9 +569,6 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {});
 
-app.on("before-quit", () => {
-  stopDashboardServer();
-});
 ipcMain.handle("insights:open", () => {
   showInsightsWindow();
   return true;

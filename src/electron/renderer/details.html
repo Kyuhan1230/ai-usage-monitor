@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Token Details</title>
+  <link rel="stylesheet" href="details.css">
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Local token details</p>
+        <h1>모델·날짜별 토큰</h1>
+        <p id="summary" class="muted">로컬 집계를 불러오는 중</p>
+      </div>
+      <button id="refresh" type="button">지금 다시 계산</button>
+    </header>
+
+    <section class="toolbar" aria-label="제공자 필터">
+      <button class="filter is-active" data-provider="all" type="button">전체</button>
+      <button class="filter" data-provider="codex" type="button">Codex</button>
+      <button class="filter" data-provider="claude" type="button">Claude</button>
+    </section>
+
+    <section class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>날짜</th>
+            <th>도구</th>
+            <th>모델</th>
+            <th class="number">Input</th>
+            <th class="number">Cached</th>
+            <th class="number">Cache write</th>
+            <th class="number">Output</th>
+            <th class="number">Total</th>
+            <th class="number">비용 환산</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="empty" class="empty" hidden>표시할 로컬 토큰 기록이 없습니다.</p>
+    </section>
+    <p class="fine-print">원본 프롬프트와 응답은 표시하거나 복사하지 않습니다. 비용은 구독 청구액이 아닌 공식 API 표준 정가 등가 추정입니다.</p>
+  </main>
+  <script src="details.js"></script>
+</body>
+</html>

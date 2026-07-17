@@ -206,8 +206,12 @@ function shouldPreserveUsageCommandStatus(statusPath) {
   if (!current || current.capture_method !== "claude_usage_command") {
     return false;
   }
-  const poller = current.poller && typeof current.poller === "object" ? current.poller : null;
-  const timestamp = parseStatusTime(poller && poller.heartbeat_at) || parseStatusTime(current.captured_at);
+  const capture = current.capture && typeof current.capture === "object"
+    ? current.capture
+    : current.poller && typeof current.poller === "object"
+      ? current.poller
+      : null;
+  const timestamp = parseStatusTime(capture && capture.heartbeat_at) || parseStatusTime(current.captured_at);
   return timestamp !== null && Date.now() - timestamp <= USAGE_COMMAND_FRESH_MS;
 }
 

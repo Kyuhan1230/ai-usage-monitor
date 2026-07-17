@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld("usageApp", {
   setAlwaysOnTop: (enabled) => ipcRenderer.invoke("window:setAlwaysOnTop", enabled),
   setOpacity: (value) => ipcRenderer.invoke("window:setOpacity", value),
   minimize: () => ipcRenderer.invoke("window:minimize"),
-  openDashboard: () => ipcRenderer.invoke("dashboard:open"),
+  openDetails: () => ipcRenderer.invoke("details:open"),
   openInsights: () => ipcRenderer.invoke("insights:open"),
   openSetup: () => ipcRenderer.invoke("setup:open"),
   installClaudeHook: () => ipcRenderer.invoke("setup:installClaudeHook"),

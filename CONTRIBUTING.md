@@ -14,13 +14,11 @@ Codex Claude Usage에 관심을 가져주셔서 감사합니다. 버그 수정, 
 
 - Windows 10 이상
 - Node.js 22.12 이상
-- Python 3.13
 
 ```powershell
 git clone https://github.com/Kyuhan1230/ai-usage-monitor.git
 cd ai-usage-monitor
 npm ci
-python -m pip install -r requirements.txt
 npm run app
 ```
 

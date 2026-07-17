@@ -88,11 +88,11 @@ function buildStatus(rateLimitResult, usageResult = null) {
     spend_control_reached: typeof payload.spendControlReached === "boolean"
       ? payload.spendControlReached
       : null,
-    poller: {
+    capture: {
       state: limits.length > 0 ? "on_demand_ok" : "on_demand_failed",
       detail: "official Codex app-server account snapshot",
       heartbeat_at: capturedAt,
-      poll_interval_ms: 0,
+      mode: "on_demand",
     },
   };
 }

@@ -2,6 +2,20 @@
 
 이 프로젝트의 주요 변경 사항을 버전별로 기록합니다.
 
+## 0.4.0 - 2026-07-18
+
+### Changed
+
+- 날짜별·모델별 토큰 상세를 Electron 내부 화면으로 통합했습니다.
+- Setup과 README를 단일 앱, 무서버 실행 경로에 맞게 정리했습니다.
+- 현재 단발 수집·로컬 분석 경로만 검증하도록 테스트를 간결하게 재구성했습니다.
+
+### Removed
+
+- Python, FastAPI, Uvicorn과 번들 CPython 런타임을 제거했습니다.
+- localhost 대시보드와 모든 HTTP listening port를 제거했습니다.
+- node-pty, legacy PowerShell tray/wrapper, Codex·Claude 지속 폴러를 제거했습니다.
+
 ## 0.3.0 - 2026-07-18
 
 ### Added

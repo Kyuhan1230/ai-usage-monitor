@@ -462,6 +462,24 @@ function buildAnalytics(options = {}) {
     codex: detectUsageAnomaly(usageRows, "codex", nowMs),
     claude: detectUsageAnomaly(usageRows, "claude", nowMs),
   };
+  const usageDetails = usageRows
+    .map((row) => {
+      const estimatedUsd = estimateRowCost(row, findPrice(row.provider, row.model));
+      return {
+        provider: row.provider,
+        date: row.date,
+        model: row.model,
+        inputTokens: Number(row.inputTokens || 0),
+        cachedInputTokens: Number(row.cachedInputTokens || 0),
+        cacheCreationInputTokens: Number(row.cacheCreationInputTokens || 0),
+        outputTokens: Number(row.outputTokens || 0),
+        reasoningOutputTokens: Number(row.reasoningOutputTokens || 0),
+        totalTokens: Number(row.totalTokens || 0),
+        estimatedUsd: round(estimatedUsd, 4),
+      };
+    })
+    .sort((left, right) => right.date.localeCompare(left.date) || right.totalTokens - left.totalTokens)
+    .slice(0, 500);
   return {
     schemaVersion: 1,
     generatedAt: new Date(nowMs).toISOString(),
@@ -473,6 +491,7 @@ function buildAnalytics(options = {}) {
     anomalies,
     comparison: usageComparison(usageRows, null, nowMs),
     costs,
+    usage: { rows: usageDetails },
     recommendations: makeRecommendations(providers, costs, anomalies, nowMs),
   };
 }

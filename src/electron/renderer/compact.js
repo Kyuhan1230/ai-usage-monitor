@@ -24,7 +24,7 @@ const ids = [
   "refresh",
   "open-setup",
   "open-insights",
-  "open-dashboard",
+  "open-details",
 ];
 
 const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -113,10 +113,10 @@ function render(snapshot) {
     connected: snapshot.codex.connected,
     ageMs: snapshot.codex.ageMs,
     staleText: "지연",
-    pollerState: snapshot.codex.status && snapshot.codex.status.poller
-      ? snapshot.codex.status.poller.state
+    captureState: snapshot.codex.status && snapshot.codex.status.capture
+      ? snapshot.codex.status.capture.state
       : null,
-    pollIntervalMs: snapshot.poller.codexIntervalMs,
+    freshnessMs: snapshot.capture.codexFreshnessMs,
   });
   el["codex-five-hour"].textContent = percentText(codexFiveHour);
   el["codex-weekly"].textContent = percentText(codexWeekly);
@@ -128,10 +128,10 @@ function render(snapshot) {
     connected: snapshot.claude.connected,
     ageMs: snapshot.claude.ageMs,
     staleText: "오래됨",
-    pollerState: snapshot.claude.status && snapshot.claude.status.poller
-      ? snapshot.claude.status.poller.state
+    captureState: snapshot.claude.status && snapshot.claude.status.capture
+      ? snapshot.claude.status.capture.state
       : null,
-    pollIntervalMs: snapshot.poller.claudeIntervalMs,
+    freshnessMs: snapshot.capture.claudeFreshnessMs,
   });
   el["claude-five-hour"].textContent = percentText(claudeFiveHour);
   el["claude-seven-day"].textContent = percentText(claudeSevenDay);
@@ -187,7 +187,7 @@ el.quit.addEventListener("click", () => window.usageApp.quit());
 el.refresh.addEventListener("click", () => refresh(true));
 el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
 el["open-insights"].addEventListener("click", () => window.usageApp.openInsights());
-el["open-dashboard"].addEventListener("click", () => window.usageApp.openDashboard());
+el["open-details"].addEventListener("click", () => window.usageApp.openDetails());
 
 refresh();
 setInterval(refresh, 10000);

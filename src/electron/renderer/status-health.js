@@ -30,11 +30,11 @@
     return Number.isFinite(ageMs) && ageMs <= freshnessLimitMs(pollIntervalMs);
   }
 
-  function stateText({ connected, ageMs, staleText, pollerState, pollIntervalMs }) {
-    if (RETRYING_STATES.has(pollerState)) {
+  function stateText({ connected, ageMs, staleText, captureState, freshnessMs }) {
+    if (RETRYING_STATES.has(captureState)) {
       return "재시도";
     }
-    if (UPDATING_STATES.has(pollerState) && !isFresh(ageMs, pollIntervalMs)) {
+    if (UPDATING_STATES.has(captureState) && !isFresh(ageMs, freshnessMs)) {
       return "갱신 중";
     }
     if (!connected) {
