@@ -2,6 +2,14 @@
 
 이 프로젝트의 주요 변경 사항을 버전별로 기록합니다.
 
+## 1.0.1 - 2026-07-18
+
+### Fixed
+
+- Windows에서 Setup·Usage Insights·Token Details 보조 창이 흰 화면으로 멈출 수 있던 문제를 수정했습니다.
+- WebView 창 생성을 동기 Tauri command 및 tray event handler 밖에서 실행해 WebView2 교착을 방지합니다.
+- 같은 문제가 다시 들어오지 않도록 보조 창 생성 방식에 회귀 검사를 추가했습니다.
+
 ## 1.0.0 - 2026-07-18
 
 ### Changed

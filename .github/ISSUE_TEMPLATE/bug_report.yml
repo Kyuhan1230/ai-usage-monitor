@@ -13,7 +13,7 @@ body:
     attributes:
       label: App version
       description: Setup 또는 GitHub Release에서 확인한 버전입니다.
-      placeholder: 1.0.0
+      placeholder: 1.0.1
     validations:
       required: true
   - type: input

@@ -24,7 +24,7 @@ for (const name of ["compact", "insights", "details", "setup"]) {
 const packageJson = require("../package.json");
 const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
-assert.strictEqual(packageJson.version, "1.0.0");
+assert.strictEqual(packageJson.version, "1.0.1");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.build.frontendDist, "../src/ui");
 assert.deepStrictEqual(tauriConfig.app.windows, [], "백그라운드 시작 시 WebView를 만들면 안 됩니다.");
@@ -49,6 +49,18 @@ assert(!setupBlock.includes("refresh_all"), "앱 시작 시 CLI 수집을 자동
 assert(setupBlock.includes('--background'), "로그인 시작은 WebView 없는 트레이 모드를 사용해야 합니다.");
 assert(rustEntry.includes('" --background"'), "로그인 시작 명령에 백그라운드 플래그가 필요합니다.");
 assert(rustEntry.includes("api.prevent_exit()"), "마지막 창을 닫아도 트레이 프로세스는 유지되어야 합니다.");
+assert(
+  rustEntry.includes("async fn show_window"),
+  "Windows에서 보조 WebView 창을 동기 command handler 안에서 만들면 안 됩니다.",
+);
+assert(
+  rustEntry.includes("spawn_blocking(move || show_window_by_label"),
+  "보조 WebView 창 생성은 WebView 이벤트 스레드 밖에서 실행해야 합니다.",
+);
+assert(
+  rustEntry.includes("show_window_on_worker(app.clone(), label.to_string())"),
+  "트레이 메뉴의 보조 창 생성도 이벤트 handler 밖에서 실행해야 합니다.",
+);
 assert(!fs.existsSync(path.join(root, "src", "electron")));
 assert(!fs.existsSync(path.join(root, "src", "node")));
 

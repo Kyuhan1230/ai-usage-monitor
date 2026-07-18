@@ -164,7 +164,7 @@ pub fn capture_codex(
         &json!({
             "method": "initialize",
             "id": 1,
-            "params": {"clientInfo": {"name": "ai_usage_monitor", "title": "AI Usage Monitor", "version": "1.0.0"}}
+            "params": {"clientInfo": {"name": "ai_usage_monitor", "title": "AI Usage Monitor", "version": "1.0.1"}}
         }),
     )?;
 

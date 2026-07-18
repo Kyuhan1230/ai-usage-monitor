@@ -393,9 +393,19 @@ fn show_window_by_label(app: &AppHandle, label: &str) -> Result<(), String> {
     window.set_focus().map_err(|error| error.to_string())
 }
 
+fn show_window_on_worker(app: AppHandle, label: String) {
+    // Windows WebView2 can deadlock when a WebviewWindow is built directly
+    // inside a synchronous Tauri command or tray event handler.
+    let _ = std::thread::spawn(move || {
+        let _ = show_window_by_label(&app, &label);
+    });
+}
+
 #[tauri::command]
-fn show_window(app: AppHandle, label: String) -> Result<(), String> {
-    show_window_by_label(&app, &label)
+async fn show_window(app: AppHandle, label: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || show_window_by_label(&app, &label))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -447,7 +457,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" => app.exit(0),
             label => {
-                let _ = show_window_by_label(app, label);
+                show_window_on_worker(app.clone(), label.to_string());
             }
         })
         .on_tray_icon_event(|tray, event| {
@@ -459,7 +469,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                     ..
                 }
             ) {
-                let _ = show_window_by_label(tray.app_handle(), "compact");
+                show_window_on_worker(tray.app_handle().clone(), "compact".to_string());
             }
         });
     if let Some(icon) = app.default_window_icon() {
