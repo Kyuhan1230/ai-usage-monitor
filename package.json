@@ -1,6 +1,6 @@
 {
   "name": "codex-usage-wrapper",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "private": true,
   "productName": "Codex Claude Usage",
   "author": "CodexUsage",
@@ -10,65 +10,18 @@
     "type": "git",
     "url": "https://github.com/Kyuhan1230/ai-usage-monitor.git"
   },
-  "main": "src/electron/main.js",
   "scripts": {
-    "app": "electron .",
-    "app:electron": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis",
-    "docs:screenshots": "electron scripts/capture-readme-screenshots.js",
-    "refresh:release-metadata": "node scripts/refresh-release-metadata.js",
+    "app": "tauri dev",
+    "app:tauri": "tauri dev",
+    "pack": "tauri build --no-bundle",
+    "dist": "tauri build --bundles nsis",
     "verify:release-tag": "node scripts/verify-release-tag.js",
-    "test": "node tests/run-tests.js"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.9"
+    "test:ui": "node tests/ui-tests.js",
+    "lint:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --locked --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings",
+    "test:rust": "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "test": "npm run lint:rust && npm run test:rust && npm run test:ui"
   },
   "devDependencies": {
-    "electron": "^43.1.0",
-    "electron-builder": "^26.15.3"
-  },
-  "build": {
-    "appId": "local.codex-claude-usage",
-    "productName": "Codex Claude Usage",
-    "artifactName": "Codex-Claude-Usage-Setup-${version}.${ext}",
-    "asar": true,
-    "npmRebuild": false,
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "package.json",
-      "LICENSE",
-      "THIRD_PARTY_NOTICES.md",
-      "assets/**/*",
-      "docs/CODE_SIGNING_POLICY.md",
-      "docs/PRIVACY.md",
-      "src/**/*",
-      "node_modules/**/*"
-    ],
-    "win": {
-      "icon": "assets/codex-claude-usage.ico",
-      "target": [
-        "nsis"
-      ]
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Kyuhan1230",
-        "repo": "ai-usage-monitor",
-        "releaseType": "draft"
-      }
-    ],
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "installerIcon": "assets/codex-claude-usage.ico",
-      "uninstallerIcon": "assets/codex-claude-usage.ico"
-    }
+    "@tauri-apps/cli": "^2.11.0"
   }
 }

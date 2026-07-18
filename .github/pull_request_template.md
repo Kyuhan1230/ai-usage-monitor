@@ -13,7 +13,7 @@
 
 ## Impact
 
-- [ ] Installer or updater behavior changed
+- [ ] Installer or release behavior changed
 - [ ] Local data or privacy behavior changed
 - [ ] User-facing documentation updated
 

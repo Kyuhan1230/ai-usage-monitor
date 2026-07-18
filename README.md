@@ -25,7 +25,7 @@
 
 ---
 
-단순히 “몇 % 남았나”를 다시 그리지 않습니다. 한도 히스토리와 로컬 토큰 합계를 이용해 **언제 고갈되는지, 평소보다 얼마나 빨리 쓰는지, 지금 무엇을 바꿔야 하는지** 보여줍니다. Python, FastAPI, localhost 웹 서버, 상시 CLI 폴러 없이 하나의 데스크톱 앱 안에서 동작합니다.
+단순히 “몇 % 남았나”를 다시 그리지 않습니다. 한도 히스토리와 로컬 토큰 합계를 이용해 **언제 고갈되는지, 평소보다 얼마나 빨리 쓰는지, 지금 무엇을 바꿔야 하는지** 보여줍니다. Tauri/Rust 단일 앱으로 동작하며 Chromium 런타임, Python, localhost 웹 서버와 상시 CLI 폴러를 설치본에 포함하지 않습니다.
 
 > [!IMPORTANT]
 > 이 프로젝트는 OpenAI 또는 Anthropic의 공식 제품이 아닙니다. OpenAI, Codex, Anthropic, Claude의 이름과 표장은 각 권리자의 자산입니다.
@@ -75,6 +75,31 @@
 | 그래서 지금 뭘 해야 하는가? | 필요한 감속 비율, 반복 작업 점검, 모델 변경 추천 |
 | 내 데이터는 어디로 가는가? | 로컬 파일과 앱 내부 화면만 사용, 텔레메트리·수집 서버 없음 |
 
+대표 오픈소스와는 경쟁 축이 다릅니다.
+
+| 프로젝트 유형 | 가장 잘하는 것 | Codex Claude Usage의 선택 |
+| --- | --- | --- |
+| [ccusage](https://github.com/ryoppippi/ccusage) | 많은 AI CLI의 토큰·비용을 CLI/JSON으로 집계 | 지원 대상을 Codex·Claude로 좁히고 한도 고갈 예측과 행동 추천을 Windows UI로 제공 |
+| [Claude Usage Dashboard](https://github.com/phuryn/claude-usage) | Claude 세션·프로젝트 히스토리와 브라우저 차트 | Python·localhost 서버 없이 앱 내부에서 두 공급자를 함께 표시 |
+| [Usage Monitor for Claude](https://github.com/jens-duttke/usage-monitor-for-claude) 등 네이티브 트레이 | 매우 가벼운 실시간 Claude 한도 표시 | 인증 파일을 직접 읽는 대신 기존 CLI의 원샷/statusLine 경로를 사용하고 예측·비교·비용까지 연결 |
+
+따라서 **많은 도구 지원이나 터미널 자동화가 우선이면 ccusage가 더 적합**합니다. 이 앱은 “오늘 이 속도로 쓰면 리셋 전에 막히는가, 그렇다면 지금 무엇을 바꿀까”가 필요한 Windows 사용자에게 맞습니다.
+
+### 측정된 경량성
+
+2026-07-18 Windows 릴리스 빌드의 참고 측정값입니다. 시스템과 WebView2 버전에 따라 달라질 수 있으며, 창을 연 상태의 비용도 함께 공개합니다.
+
+| 상태 | 결과 |
+| --- | --- |
+| 애플리케이션 EXE | 4.41MB |
+| NSIS 설치 파일 | 1.47MB |
+| 로그인 시작/콜드 트레이 대기 | 11.43MB, 앱 프로세스 1개, WebView 0개 |
+| UI를 닫은 뒤 트레이 대기 | 25.28MB, 앱 프로세스 1개, CPU 측정값 0%, WebView 0개 |
+| Compact UI 표시 중 | 427.05MB, 앱+시스템 WebView2 7개 프로세스 |
+| 모든 대기 상태 | Codex/Claude CLI 0개, listening port 0개 |
+
+UI가 열린 동안에는 WebView2 메모리 비용이 큽니다. 그래서 로그인 시작은 창을 만들지 않고, 트레이 클릭 때만 WebView를 로드하며, `X`를 누르면 창과 WebView 프로세스를 파기합니다.
+
 ## Features
 
 | 영역 | 제공 기능 |
@@ -85,10 +110,10 @@
 | 비교·비용 | 오늘/전일, 최근 7일/이전 7일 비교와 API 정가 기준 비용 등가 추정 |
 | 실행 가능한 추천 | 감속 비율, 반복 작업 점검, 저비용 모델 전환 가능성을 규칙 기반으로 제안 |
 | 상세 집계 | 날짜별·모델별 input, cached input, cache write, output, reasoning token |
-| 가벼운 수집 | 앱 시작과 수동 새로고침 때만 CLI를 짧게 실행; 상시 자식 프로세스 없음 |
+| 가벼운 수집 | 사용자가 새로고침을 누를 때만 CLI를 짧게 실행; 앱 시작·대기 중 자식 프로세스 없음 |
 | 로컬 전용 화면 | 별도 Python·HTTP 서버·열린 포트 없이 앱 내부에서 모든 결과 표시 |
 | 데스크톱 앱 | Windows 트레이, always-on-top, 투명도, 로그인 시 자동 실행 |
-| 자동 업데이트 | GitHub Releases에서 확인하고 사용자 동의 후 다운로드·설치 |
+| 명시적 업데이트 | 앱이 자동 네트워크 확인을 하지 않으며 사용자가 GitHub Release에서 직접 설치 |
 
 ## Quick start
 
@@ -101,9 +126,9 @@ claude auth
 ```
 
 3. **Codex Claude Usage**를 실행하고 Setup에서 Claude statusLine hook을 선택적으로 설치합니다.
-4. 앱을 열거나 **지금 다시 계산**을 누르면 원샷으로 최신 상태를 읽습니다. 완전히 종료하려면 트레이 메뉴의 **Quit**을 선택합니다.
+4. **지금 다시 계산**을 누르면 원샷으로 최신 상태를 읽습니다. `X`는 창과 WebView를 닫고 트레이만 남기며, 완전히 종료하려면 트레이 메뉴의 **Quit**을 선택합니다.
 
-설치본에 별도 Node.js나 Python은 필요하지 않습니다.
+설치본에 별도 Node.js나 Python은 필요하지 않습니다. 앱과 설치 프로그램은 네트워크로 WebView2를 자동 다운로드하지 않으므로, WebView2가 제거된 Windows 환경에서는 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)을 사용자가 먼저 설치해야 합니다.
 
 > [!WARNING]
 > SignPath Foundation 코드 서명은 심사 대기 중입니다. 승인 전 설치 파일에서는 Windows SmartScreen의 `알 수 없는 게시자` 안내가 표시될 수 있습니다.
@@ -112,7 +137,7 @@ claude auth
 
 ```mermaid
 flowchart LR
-    A["App open / manual refresh"] --> B["Codex app-server one-shot"]
+    A["Manual refresh"] --> B["Codex app-server one-shot"]
     A --> C["Claude /usage one-shot fallback"]
     D["Claude statusLine event"] --> E["Local status JSON"]
     B --> E
@@ -123,10 +148,10 @@ flowchart LR
     H --> I["Embedded app windows"]
 ```
 
-- Codex는 앱을 열거나 새로고침할 때 공식 app-server의 계정 메서드를 호출한 뒤 즉시 프로세스를 종료합니다.
-- Claude는 statusLine 이벤트를 기본 경로로 사용합니다. 앱 시작·수동 새로고침의 `/usage`는 초기값을 위한 단발 대체 경로입니다.
+- Codex는 사용자가 새로고침할 때 공식 app-server의 `account/rateLimits/read`만 호출한 뒤 즉시 프로세스를 종료합니다. 사용하지 않는 account usage 응답은 요청하거나 저장하지 않습니다.
+- Claude는 statusLine 이벤트를 기본 경로로 사용합니다. 수동 새로고침의 `/usage`는 초기값을 위한 단발 대체 경로입니다.
 - 1분 폴링, PID 감시, 수집 프로세스 자동 재시작, localhost 서버가 없습니다.
-- `~/.codex/sessions`와 `~/.claude/projects`에서 토큰 숫자만 증분 집계합니다. 프롬프트와 응답 본문은 분석 결과에 복사하지 않습니다.
+- Rust 수집기가 `~/.codex/sessions`와 `~/.claude/projects`에서 토큰 숫자만 증분 집계합니다. 프롬프트와 응답 본문은 분석 결과에 복사하지 않습니다.
 
 ### Local data
 
@@ -143,7 +168,8 @@ flowchart LR
 - 자체 서버, 광고, 원격 텔레메트리가 없습니다.
 - 인증 토큰, 브라우저 쿠키, 프롬프트와 응답 본문을 수집하지 않습니다.
 - 사용량·분석 결과는 `~/.codex-usage-wrapper`에만 저장됩니다.
-- 업데이트 확인 외에 앱이 직접 만드는 외부 네트워크 요청은 없습니다. 원샷 CLI의 공급자 통신은 각 CLI가 관리합니다.
+- 앱 자체의 텔레메트리·업데이트·분석 네트워크 요청은 없습니다. 원샷 CLI의 공급자 통신과 인증은 각 CLI가 관리합니다.
+- NSIS 설치 프로그램도 WebView2를 자동 다운로드하지 않고 Windows에 이미 설치된 런타임만 사용합니다.
 - 로컬 HTTP 서버나 listening port를 열지 않습니다.
 
 자세한 내용은 [Privacy policy](docs/PRIVACY.md), [Security policy](SECURITY.md), [Code signing policy](docs/CODE_SIGNING_POLICY.md)를 확인하세요.
@@ -154,6 +180,8 @@ flowchart LR
 
 - Windows 10 이상
 - Node.js 22.12 이상
+- Rust stable MSVC toolchain
+- Microsoft C++ Build Tools와 WebView2
 - Codex CLI 및 Claude Code(실데이터 확인 시)
 
 ### Run, test, build
@@ -167,7 +195,7 @@ npm run app
 npm run dist
 ```
 
-설치 파일은 `dist/Codex-Claude-Usage-Setup-<version>.exe`에 만들어집니다. README 이미지는 `npm run docs:screenshots`로 네 화면을 다시 생성할 수 있습니다.
+Tauri NSIS 설치 파일은 `src-tauri/target/release/bundle/nsis/`에 만들어집니다. CI와 Release는 20MB를 넘는 설치 파일을 실패 처리합니다.
 
 ### Project layout
 
@@ -175,10 +203,10 @@ npm run dist
 .github/workflows/        CI와 Release workflow
 assets/                   Windows 앱 아이콘
 docs/images/              재현 가능한 UI 스크린샷
-scripts/                  패키징·검증·문서 캡처 도구
-src/electron/             main, preload, 내장 앱 화면
-src/node/                 원샷 수집, statusLine hook, 로컬 분석
-tests/                    JavaScript 회귀·통합 테스트
+scripts/                  릴리스 태그 검증 도구
+src/ui/                   프레임워크 없는 내장 HTML/CSS/JS 화면
+src-tauri/                Rust 수집·분석·트레이·패키징 백엔드
+tests/                    UI 계약과 로컬 전용 경계 테스트
 ```
 
 ## Troubleshooting
@@ -204,13 +232,15 @@ Codex 또는 Claude Code로 작업한 뒤 다시 계산합니다. 앱은 `~/.cod
 
 - Codex 수집은 설치된 CLI의 app-server 계정 메서드 지원 여부에 의존합니다.
 - Claude 단발 대체 경로는 `/usage` 출력 형식에 의존합니다.
-- 비용은 실제 구독 청구액이 아니라 [OpenAI](https://platform.openai.com/docs/pricing)와 [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing)의 2026-07-18 API 정가로 환산한 참고치입니다. 가격을 알 수 없는 모델은 제외합니다.
+- 비용은 실제 구독 청구액이 아니라 [OpenAI](https://openai.com/api/pricing/)와 [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing)의 2026-07-18 API 표준 정가로 환산한 참고치입니다. GPT-5.6 캐시 쓰기는 공식 1.25배 규칙을 적용하며, 가격을 알 수 없는 모델은 제외합니다.
 - 요금제 이름과 실제 구독 크레딧은 자동 판별하지 않습니다.
 - 현재 공개 설치 파일은 SignPath Foundation 승인 전까지 Authenticode 미서명 상태입니다.
 
 ## Contributing
 
 [기여 가이드](CONTRIBUTING.md) · [버그 신고](https://github.com/Kyuhan1230/ai-usage-monitor/issues/new?template=bug_report.yml) · [기능 제안](https://github.com/Kyuhan1230/ai-usage-monitor/issues/new?template=feature_request.yml)
+
+제품 포지셔닝과 v1 공개 체크리스트는 [Launch plan](docs/LAUNCH_PLAN.md)에 기록했습니다.
 
 ## License
 

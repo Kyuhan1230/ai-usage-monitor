@@ -15,7 +15,7 @@ Codex Claude Usage의 공식 Windows 설치 파일은 이 저장소의 GitHub Ac
 
 ## 릴리스 통제
 
-- 앱, 설치 프로그램, 업데이트 메타데이터는 같은 GitHub Actions 실행에서 만든다.
+- 앱과 설치 프로그램은 같은 GitHub Actions 실행에서 만든다. 이 프로젝트는 자동 업데이트 메타데이터를 배포하지 않는다.
 - 서명 요청은 GitHub가 검증한 워크플로 산출물만 대상으로 한다.
 - 서명 승인은 릴리스마다 수동으로 확인한다.
 - 인증서나 API 토큰은 저장소에 커밋하지 않고 GitHub Actions secret으로만 관리한다.

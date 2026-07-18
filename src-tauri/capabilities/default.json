@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Local application windows and notifications",
+  "windows": ["compact", "insights", "details", "setup"],
+  "permissions": [
+    "core:default",
+    "notification:default"
+  ]
+}

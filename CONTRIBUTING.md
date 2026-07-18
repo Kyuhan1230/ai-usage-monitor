@@ -14,6 +14,8 @@ Codex Claude Usage에 관심을 가져주셔서 감사합니다. 버그 수정, 
 
 - Windows 10 이상
 - Node.js 22.12 이상
+- Rust stable MSVC toolchain
+- Microsoft C++ Build Tools와 WebView2
 
 ```powershell
 git clone https://github.com/Kyuhan1230/ai-usage-monitor.git
@@ -34,12 +36,6 @@ npm test
 npm run dist
 ```
 
-UI 문서를 변경했다면 실제 renderer 기반 스크린샷도 확인합니다.
-
-```powershell
-npm run docs:screenshots
-```
-
 ## Pull requests
 
 PR 설명에는 다음 내용을 포함해 주세요.
@@ -47,6 +43,6 @@ PR 설명에는 다음 내용을 포함해 주세요.
 - 무엇을 왜 변경했는지
 - 사용자에게 미치는 영향
 - 실행한 테스트와 수동 검증
-- 자동 업데이트, 설치 또는 개인정보 처리에 미치는 영향
+- 설치, 로컬 데이터 처리 또는 개인정보 보호 경계에 미치는 영향
 
 리뷰 가능한 크기로 유지하고, 관련 없는 포맷 변경이나 생성 파일을 함께 넣지 않는 것을 권장합니다.

@@ -12,10 +12,10 @@
 4. SignPath 신청서에는 저장소, 릴리스 URL, MIT 라이선스, 담당자 `Kyuhan1230`을 적는다.
 5. 승인 후 SignPath GitHub App을 이 저장소에 연결하고 프로젝트·artifact configuration·signing policy를 만든다.
 6. GitHub Actions secret `SIGNPATH_API_TOKEN`을 등록한다. 조직 ID와 각 slug는 승인된 SignPath 프로젝트 값으로 설정한다.
-7. unsigned artifact를 `actions/upload-artifact`로 먼저 올린 뒤 `signpath/github-action-submit-signing-request@v2`에 그 artifact ID를 전달한다.
-8. 서명된 설치 파일로 `.blockmap`과 `latest.yml`을 다시 만든 뒤에만 GitHub Release를 공개한다.
+7. unsigned artifact를 `actions/upload-artifact`로 먼저 올린 뒤, 승인 시점에 SignPath가 안내하는 현재 GitHub Action과 artifact configuration으로 서명 요청을 연결한다.
+8. 애플리케이션 EXE와 최종 NSIS 설치 파일의 서명을 모두 검증한 뒤에만 GitHub Release를 공개한다. 이 앱은 자동 업데이트 메타데이터를 만들지 않는다.
 
-SignPath 설정값은 계정 승인 뒤 발급되므로 저장소에 가짜 ID나 토큰을 넣지 않는다. Release workflow는 설정값이 모두 있을 때만 SignPath 단계를 실행하고, 일부 값만 있으면 잘못된 설정으로 판단해 실패한다.
+SignPath 설정값은 계정 승인 뒤 발급되므로 저장소에 가짜 ID나 토큰을 넣지 않는다. 현재 Release workflow는 서명 단계를 구현하지 않았고 미서명 NSIS만 만든다. 승인 뒤에는 아래 식별자를 실제 값으로 등록하고, 서명 검증이 실패하면 Release도 실패하도록 workflow를 별도 변경한다.
 
 승인 후 GitHub 저장소의 Actions secret에 다음 값을 등록한다.
 
@@ -53,13 +53,13 @@ Actions variable에는 다음 값을 등록한다.
 </artifact-configuration>
 ```
 
-첫 서명 릴리스를 수동 확인한 뒤 Actions variable `REQUIRE_CODE_SIGNING=true`를 추가한다. 이후에는 SignPath 설정이나 토큰이 빠지면 Release가 중단된다. workflow는 앱 실행 파일과 최종 NSIS 설치 파일을 각각 서명하고, 최종 설치 파일의 바이트를 기준으로 `.blockmap`과 `latest.yml`을 다시 생성한다.
+첫 서명 릴리스를 수동 확인한 뒤 Actions variable `REQUIRE_CODE_SIGNING=true`를 추가한다. 이후에는 SignPath 설정이나 토큰이 빠지면 Release가 중단되어야 한다. workflow는 앱 실행 파일과 최종 NSIS 설치 파일을 각각 서명하고 `Get-AuthenticodeSignature`로 두 결과를 검증해야 한다.
 
 ## 대안: OV/EV 인증서
 
-상용 Authenticode 인증서를 사용하는 경우 GitHub Actions secret에 다음 값을 저장한다.
+상용 Authenticode 인증서를 사용하는 경우 GitHub Actions secret에 인증서와 암호를 저장하고, Tauri의 Windows 서명 명령 또는 `signtool` 단계에서 사용한다.
 
 - `WIN_CSC_LINK`: `.pfx`의 안전한 URL, 경로 또는 base64 값
 - `WIN_CSC_KEY_PASSWORD`: `.pfx` 암호
 
-electron-builder가 빌드 중 앱과 NSIS 설치 파일을 서명하므로, 저장소나 workflow 파일에 인증서와 암호를 직접 기록하지 않는다. 서명 적용 후에는 `build.forceCodeSigning: true`를 켜서 unsigned Release가 만들어지지 않게 한다.
+저장소나 workflow 파일에 인증서와 암호를 직접 기록하지 않는다. 서명 적용 뒤에는 애플리케이션 EXE와 NSIS 설치 파일 양쪽의 Authenticode 상태를 Release 필수 게이트로 두며, 어느 한쪽이라도 미서명이면 게시하지 않는다.

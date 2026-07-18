@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Claude Usage Setup</title>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <main class="setup">
+    <header>
+      <p class="eyebrow">Setup</p>
+      <h1>Codex Claude Usage</h1>
+      <p class="summary">토큰이나 쿠키를 저장하지 않습니다. Codex는 새로고침 때 공식 app-server를 잠깐 실행하고, Claude는 statusLine 이벤트를 로컬 파일에 기록합니다.</p>
+    </header>
+
+    <section class="checks">
+      <article class="check">
+        <div>
+          <h2>Codex CLI</h2>
+          <p id="codex-detail">확인 중</p>
+        </div>
+        <button id="codex-login" type="button">codex login</button>
+      </article>
+
+      <article class="check">
+        <div>
+          <h2>Claude Code</h2>
+          <p id="claude-detail">확인 중</p>
+        </div>
+        <button id="claude-auth" type="button">claude auth</button>
+      </article>
+
+      <article class="check">
+        <div>
+          <h2>Claude statusLine 이벤트</h2>
+          <p id="hook-detail">확인 중</p>
+        </div>
+        <button id="install-hook" type="button">이벤트 연결</button>
+      </article>
+
+      <article class="check">
+        <div>
+          <h2>로컬 토큰 상세</h2>
+          <p id="details-detail">확인 중</p>
+        </div>
+        <button id="open-details" type="button">상세 열기</button>
+      </article>
+
+      <article class="check">
+        <div>
+          <h2>Windows 시작 시 실행</h2>
+          <p id="startup-detail">확인 중</p>
+        </div>
+        <label class="toggle">
+          <input id="launch-at-login" type="checkbox">
+          <span>자동 실행</span>
+        </label>
+      </article>
+    </section>
+
+    <footer>
+      <button id="refresh" type="button">지금 수집</button>
+    </footer>
+  </main>
+  <script src="bridge.js"></script>
+  <script src="setup.js"></script>
+</body>
+</html>

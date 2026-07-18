@@ -9,7 +9,7 @@
 | Project Name | `Codex Claude Usage` |
 | Repository URL | `https://github.com/Kyuhan1230/ai-usage-monitor` |
 | Homepage URL | `https://github.com/Kyuhan1230/ai-usage-monitor` |
-| Download URL | `https://github.com/Kyuhan1230/ai-usage-monitor#download-and-code-signing` |
+| Download URL | `https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest` |
 | Privacy Policy URL | `https://github.com/Kyuhan1230/ai-usage-monitor/blob/main/docs/PRIVACY.md` |
 | Wikipedia URL | 비워 둔다. |
 | Maintainer Type | `Individual maintainer(s)` |

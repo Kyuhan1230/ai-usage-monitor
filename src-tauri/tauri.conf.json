@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Codex Claude Usage",
+  "version": "1.0.0",
+  "identifier": "local.codex-claude-usage",
+  "build": {
+    "frontendDist": "../src/ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "CodexUsage",
+    "copyright": "Copyright (c) 2026 kyuhan1230",
+    "category": "Utility",
+    "shortDescription": "Know whether your AI coding limits will run out before reset.",
+    "longDescription": "Local Codex and Claude usage forecasts, alerts, costs, comparisons, and actionable recommendations.",
+    "icon": [
+      "../assets/codex-claude-usage.ico",
+      "../assets/codex-claude-usage.png"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

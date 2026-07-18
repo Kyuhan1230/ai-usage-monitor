@@ -2,6 +2,33 @@
 
 이 프로젝트의 주요 변경 사항을 버전별로 기록합니다.
 
+## 1.0.0 - 2026-07-18
+
+### Changed
+
+- Electron/Node 백엔드를 Tauri 2와 Rust로 교체했습니다.
+- Codex app-server 원샷, Claude `/usage` 원샷과 statusLine hook, JSONL 증분 집계, 예측·비용·추천 계산을 Rust로 이식했습니다.
+- 네 화면은 프레임워크 없는 HTML/CSS/JS를 유지하고 Tauri command bridge만 사용합니다.
+- Windows 자동 실행은 HKCU 사용자 레지스트리로 옮겼습니다. 로그인 시작은 트레이만 띄우고, Compact·상세·인사이트·Setup은 필요할 때만 WebView 창을 만듭니다.
+- 창의 `X`는 WebView를 파기하고 25MB 안팎의 단일 트레이 프로세스로 돌아가며, 명시적 트레이 Quit만 앱을 종료합니다.
+- 모든 CLI 수집을 사용자 새로고침 동작으로 제한했습니다. 앱 시작과 트레이 대기 중에는 Codex/Claude CLI를 실행하지 않습니다.
+
+### Removed
+
+- Electron, electron-updater, electron-builder와 모든 Node.js 런타임 의존성을 제거했습니다.
+- 앱 내부 자동 업데이트 네트워크 확인을 제거했습니다. 새 버전 설치는 사용자가 GitHub Release에서 직접 시작합니다.
+
+### Performance
+
+- CI에서 NSIS 설치 파일 20MB 상한을 강제합니다.
+- 실측 애플리케이션 EXE는 4.41MB, NSIS 설치 파일은 1.47MB입니다.
+- 콜드 백그라운드 트레이는 11.43MB·단일 프로세스·WebView 0개였고, UI를 닫은 뒤에는 25.28MB·CPU 측정값 0%로 돌아왔습니다.
+- UI 표시 중 시스템 WebView2를 포함한 working set은 427.05MB였으며, README에 이 비용을 함께 공개합니다.
+
+### Fixed
+
+- GPT-5.6 비용 추정에 공식 캐시 쓰기 1.25배 규칙을 적용하고 절약 비교 모델을 GPT-5.6 Luna로 갱신했습니다.
+
 ## 0.4.0 - 2026-07-18
 
 ### Changed

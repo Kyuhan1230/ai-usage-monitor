@@ -6,7 +6,6 @@ on:
       - "v*.*.*"
 
 permissions:
-  actions: read
   contents: write
 
 concurrency:
@@ -28,196 +27,57 @@ jobs:
           node-version: 22.12.0
           cache: npm
 
-      - name: Install Node.js dependencies
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend build tooling
         run: npm ci
 
       - name: Verify tag matches package version
         run: npm run verify:release-tag -- "${{ github.ref_name }}"
 
-      - name: Run tests
+      - name: Run Rust and UI tests
         run: npm test
 
-      - name: Resolve code-signing mode
-        id: signing-mode
-        shell: pwsh
-        env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          SIGNPATH_APP_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_APP_ARTIFACT_CONFIGURATION_SLUG }}
-          SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG }}
-          REQUIRE_CODE_SIGNING: ${{ vars.REQUIRE_CODE_SIGNING }}
-        run: |
-          $values = @(
-            $env:SIGNPATH_API_TOKEN,
-            $env:SIGNPATH_ORGANIZATION_ID,
-            $env:SIGNPATH_PROJECT_SLUG,
-            $env:SIGNPATH_SIGNING_POLICY_SLUG,
-            $env:SIGNPATH_APP_ARTIFACT_CONFIGURATION_SLUG,
-            $env:SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG
-          )
-          $configured = @($values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-          if ($configured -ne 0 -and $configured -ne $values.Count) {
-            throw "SignPath configuration is incomplete"
-          }
-          $enabled = $configured -eq $values.Count
-          if ($env:REQUIRE_CODE_SIGNING -eq "true" -and -not $enabled) {
-            throw "REQUIRE_CODE_SIGNING is true, but SignPath is not fully configured"
-          }
-          "enabled=$($enabled.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+      - name: Build Tauri NSIS installer
+        run: npm run dist
 
-      - name: Build unpacked Windows app
-        run: npx electron-builder --win --dir --publish never
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Upload unsigned app executable
-        if: steps.signing-mode.outputs.enabled == 'true'
-        id: upload-unsigned-app
-        uses: actions/upload-artifact@v7
-        with:
-          name: unsigned-app-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/win-unpacked/Codex Claude Usage.exe
-          retention-days: 1
-          overwrite: true
-
-      - name: Sign app executable with SignPath
-        if: steps.signing-mode.outputs.enabled == 'true'
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_APP_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.upload-unsigned-app.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: dist/signpath-app
-
-      - name: Replace app executable with signed artifact
-        if: steps.signing-mode.outputs.enabled == 'true'
-        shell: pwsh
-        run: |
-          $matches = @(Get-ChildItem dist/signpath-app -Recurse -File -Filter "Codex Claude Usage.exe")
-          if ($matches.Count -ne 1) {
-            throw "Expected exactly one signed app executable, found $($matches.Count)"
-          }
-          Copy-Item -LiteralPath $matches[0].FullName -Destination "dist/win-unpacked/Codex Claude Usage.exe" -Force
-
-      - name: Build Windows installer from final app
-        run: npx electron-builder --win nsis --prepackaged dist/win-unpacked --publish never
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Upload unsigned installer
-        if: steps.signing-mode.outputs.enabled == 'true'
-        id: upload-unsigned-installer
-        uses: actions/upload-artifact@v7
-        with:
-          name: unsigned-installer-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/Codex-Claude-Usage-Setup-*.exe
-          retention-days: 1
-          overwrite: true
-
-      - name: Sign installer with SignPath
-        if: steps.signing-mode.outputs.enabled == 'true'
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: dist/signpath-installer
-
-      - name: Replace installer with signed artifact
-        if: steps.signing-mode.outputs.enabled == 'true'
+      - name: Normalize and verify installer
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $name = "Codex-Claude-Usage-Setup-$version.exe"
-          $matches = @(Get-ChildItem dist/signpath-installer -Recurse -File -Filter $name)
-          if ($matches.Count -ne 1) {
-            throw "Expected exactly one signed installer, found $($matches.Count)"
-          }
-          Copy-Item -LiteralPath $matches[0].FullName -Destination "dist/$name" -Force
-
-      - name: Verify SignPath signatures
-        if: steps.signing-mode.outputs.enabled == 'true'
-        shell: pwsh
-        run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $files = @(
-            "dist/win-unpacked/Codex Claude Usage.exe",
-            "dist/Codex-Claude-Usage-Setup-$version.exe"
-          )
-          foreach ($file in $files) {
-            $signature = Get-AuthenticodeSignature -FilePath $file
-            if ($signature.Status -ne "Valid") {
-              throw "Invalid Authenticode signature for $file`: $($signature.Status)"
-            }
-          }
-
-      - name: Refresh updater metadata from final installer
-        run: npm run refresh:release-metadata
+          $matches = @(Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter "*-setup.exe")
+          if ($matches.Count -ne 1) { throw "Expected one NSIS installer, found $($matches.Count)" }
+          if ($matches[0].Length -gt 20MB) { throw "Installer exceeds 20 MB: $([math]::Round($matches[0].Length / 1MB, 2)) MB" }
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup-$version.exe"
 
       - name: Create or update draft GitHub Release
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $installer = (Resolve-Path "dist/Codex-Claude-Usage-Setup-$version.exe").Path
-          $blockmap = (Resolve-Path "dist/Codex-Claude-Usage-Setup-$version.exe.blockmap").Path
-          $metadata = (Resolve-Path "dist/latest.yml").Path
-
+          $installer = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe").Path
           gh release view "${{ github.ref_name }}" --json isDraft 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             $release = gh release view "${{ github.ref_name }}" --json isDraft | ConvertFrom-Json
-            if (-not $release.isDraft) {
-              throw "Refusing to replace an already published release"
-            }
-            gh release upload "${{ github.ref_name }}" $installer $blockmap $metadata --clobber
+            if (-not $release.isDraft) { throw "Refusing to replace an already published release" }
+            gh release upload "${{ github.ref_name }}" $installer --clobber
           } else {
-            gh release create "${{ github.ref_name }}" $installer $blockmap $metadata --draft --title "Codex Claude Usage $version" --generate-notes
+            gh release create "${{ github.ref_name }}" $installer --draft --title "Codex Claude Usage $version" --generate-notes
           }
-          if ($LASTEXITCODE -ne 0) {
-            throw "Uploading release assets failed with exit code $LASTEXITCODE"
-          }
+          if ($LASTEXITCODE -ne 0) { throw "Uploading release asset failed" }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify draft GitHub Release assets
+      - name: Verify draft release asset
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $expectedNames = @(
-            "Codex-Claude-Usage-Setup-$version.exe",
-            "Codex-Claude-Usage-Setup-$version.exe.blockmap",
-            "latest.yml"
-          )
+          $name = "Codex-Claude-Usage-Setup-$version.exe"
           $release = gh release view "${{ github.ref_name }}" --json isDraft,assets | ConvertFrom-Json
-          if (-not $release.isDraft) {
-            throw "Release must remain draft until asset verification succeeds"
-          }
-          $actualNames = @($release.assets.name)
-          if (Compare-Object $expectedNames $actualNames) {
-            throw "Unexpected release assets: $($actualNames -join ', ')"
-          }
-          foreach ($name in $expectedNames) {
-            $localSize = (Get-Item (Join-Path dist $name)).Length
-            $remoteSize = ($release.assets | Where-Object name -eq $name).size
-            if ($localSize -ne $remoteSize) {
-              throw "Release asset size mismatch for $name"
-            }
-          }
-          $metadata = Get-Content dist/latest.yml -Raw
-          if ($metadata -notmatch [regex]::Escape($expectedNames[0])) {
-            throw "latest.yml does not reference the published installer"
-          }
+          if (-not $release.isDraft) { throw "Release must remain draft until verification succeeds" }
+          if (@($release.assets).Count -ne 1 -or $release.assets[0].name -ne $name) { throw "Unexpected release assets" }
+          if ((Get-Item "release-assets/$name").Length -ne $release.assets[0].size) { throw "Release asset size mismatch" }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
