@@ -24,7 +24,7 @@ for (const name of ["compact", "insights", "details", "setup"]) {
 const packageJson = require("../package.json");
 const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
-assert.strictEqual(packageJson.version, "1.0.5");
+assert.strictEqual(packageJson.version, "1.1.0");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.build.frontendDist, "../src/ui");
 assert.deepStrictEqual(tauriConfig.app.windows, [], "백그라운드 시작 시 WebView를 만들면 안 됩니다.");
@@ -98,11 +98,45 @@ assert(!fs.existsSync(path.join(root, "src", "node")));
 
 const setupHtml = fs.readFileSync(path.join(ui, "setup.html"), "utf8");
 const setupScript = fs.readFileSync(path.join(ui, "setup.js"), "utf8");
+const insightsHtml = fs.readFileSync(path.join(ui, "insights.html"), "utf8");
+const insightsScript = fs.readFileSync(path.join(ui, "insights.js"), "utf8");
+assert(
+  insightsHtml.indexOf('id="decision"') < insightsHtml.indexOf('class="analysis-details"'),
+  "핵심 고갈 판정은 상세 분석보다 먼저 보여야 합니다.",
+);
+assert(insightsHtml.includes("실제 구독 청구액 아님"), "API 정가 환산은 실제 청구액과 구분해야 합니다.");
+assert(insightsScript.includes("function renderDecision"), "Insights는 최우선 판정과 행동을 별도로 렌더링해야 합니다.");
+assert(insightsScript.includes("function formatForecastRange"), "예상 고갈은 단일 시각보다 범위를 우선 표시해야 합니다.");
+assert(insightsScript.includes("rateVariabilityPercent"), "예측 신뢰도에는 속도 변동 근거가 필요합니다.");
+assert(insightsScript.includes('limit.forecastStatus === "safe"'), "예측 불가 상태를 안전으로 표시하면 안 됩니다.");
+const compactHtml = fs.readFileSync(path.join(ui, "compact.html"), "utf8");
+const compactScript = fs.readFileSync(path.join(ui, "compact.js"), "utf8");
+assert(compactHtml.includes('id="decision"'), "첫 Compact 창에서 고갈 판정을 바로 보여줘야 합니다.");
+assert(compactScript.includes("function renderDecision"), "Compact 창은 분석 결과의 최우선 판정을 렌더링해야 합니다.");
+assert(compactScript.includes("고갈 판단에 기록 더 필요"), "Compact 창은 예측 불가 상태를 명시해야 합니다.");
+assert(compactScript.includes("오래된 데이터 · 판정 보류"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
+assert(insightsScript.includes("일부 사용량 데이터가 오래돼"), "Insights는 오래된 데이터의 판정을 보류해야 합니다.");
+assert(compactScript.includes("el.decision.addEventListener"), "Compact 판정에서 상세 근거로 이동할 수 있어야 합니다.");
 for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
   assert(setupHtml.includes(`id="${id}"`), `Setup 온보딩 컨트롤 누락: ${id}`);
 }
 assert(setupScript.trimEnd().endsWith("refresh(false);"), "Setup 첫 진입은 사용량 수집 없이 설치·인증 상태만 확인해야 합니다.");
 assert(setupScript.includes('codexAuth.state === "authenticated"'), "설정 완료는 Codex 직접 인증 상태를 사용해야 합니다.");
 assert(setupScript.includes('claudeAuth.state === "authenticated"'), "설정 완료는 Claude 직접 인증 상태를 사용해야 합니다.");
+assert(setupScript.includes("function hasAuthenticatedProvider"), "한 공급자만 인증해도 온보딩을 완료할 수 있어야 합니다.");
+assert(setupScript.includes('|| setup.claudeAuth.state === "authenticated"'), "Codex와 Claude 인증은 선택 조건이어야 합니다.");
+assert(rustEntry.includes("let codex_ready = codex_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
+assert(rustEntry.includes("let claude_ready = claude_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
+assert(setupHtml.includes('id="activity-monitoring"'), "활동 기반 자동 확인은 사용자가 켜고 끌 수 있어야 합니다.");
+assert(setupScript.includes("setActivityMonitoring"), "자동 확인 설정은 백엔드에 명시적으로 저장해야 합니다.");
+assert(rustEntry.includes("AUTO_REFRESH_COOLDOWN_MS"), "활동 기반 수집에는 최소 실행 간격이 필요합니다.");
+assert(rustEntry.includes("AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000"), "활동 중 CLI 수집 간격은 최소 5분이어야 합니다.");
+assert(rustEntry.includes("if !activity_monitoring_enabled()"), "자동 확인을 끄면 활동 파일을 반복 스캔하지 않아야 합니다.");
+assert(rustEntry.includes("start_activity_monitor(app.handle().clone())"), "트레이 런타임에서 활동 감시를 시작해야 합니다.");
+assert(rustEntry.includes("fn notification_payload"), "Windows 알림 조건과 본문은 단위 테스트 가능한 계약이어야 합니다.");
+assert(rustEntry.includes("tauri_plugin_single_instance::init"), "앱 중복 실행은 기존 인스턴스를 재사용해야 합니다.");
+assert(rustEntry.indexOf("tauri_plugin_single_instance::init") < rustEntry.indexOf("tauri_plugin_notification::init"), "single-instance 플러그인은 가장 먼저 등록해야 합니다.");
+assert(rustEntry.includes("오늘 토큰 {multiplier:.1}배 급증"), "토큰 이상 급증도 Windows 알림에 포함해야 합니다.");
+assert(rustEntry.includes('Some("low")'), "저신뢰 예측만으로 Windows 고갈 알림을 보내면 안 됩니다.");
 
 process.stdout.write(`PASS ${scripts.length}개 UI 스크립트와 Tauri 로컬 전용 구성을 검증했습니다.\n`);

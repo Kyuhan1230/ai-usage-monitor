@@ -19,6 +19,9 @@ const ids = [
   "claude-seven-day",
   "claude-reset",
   "claude-stamp",
+  "decision",
+  "decision-status",
+  "decision-action",
   "always-on-top",
   "opacity",
   "minimize",
@@ -100,6 +103,64 @@ function renderDial(prefix, limit) {
   el[`${prefix}-value`].textContent = percent === null ? "--" : `${percent}%`;
   el[`${prefix}-dial`].style.setProperty("--pct", percent === null ? 0 : percent);
   el[`${prefix}-dial`].style.setProperty("--tone", tone(percent));
+  if (percent === null) {
+    el[`${prefix}-dial`].removeAttribute("aria-valuenow");
+    el[`${prefix}-dial`].setAttribute("aria-valuetext", "수집 중");
+  } else {
+    el[`${prefix}-dial`].setAttribute("aria-valuenow", String(percent));
+    el[`${prefix}-dial`].setAttribute("aria-valuetext", `${percent}% 남음`);
+  }
+}
+
+function staleProviders(snapshot) {
+  return new Set(["codex", "claude"].filter((provider) => {
+    const state = snapshot[provider];
+    const freshness = snapshot.capture[`${provider}FreshnessMs`];
+    return state.connected && Number.isFinite(state.ageMs) && state.ageMs > freshness;
+  }));
+}
+
+function renderDecision(analytics, snapshot) {
+  if (!analytics) {
+    el.decision.dataset.tone = "neutral";
+    el["decision-status"].textContent = "분석 기록 없음";
+    el["decision-action"].textContent = "새로고침하면 고갈 위험을 계산합니다.";
+    return;
+  }
+  const critical = analytics.alerts.find((alert) => alert.severity === "critical");
+  const warning = analytics.alerts.find((alert) => alert.severity === "warning");
+  const action = analytics.recommendations && analytics.recommendations[0];
+  const limits = ["codex", "claude"].flatMap((provider) =>
+    Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {}).filter(Boolean));
+  const hasKnownForecast = limits.some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk");
+  const stale = staleProviders(snapshot);
+  const priority = critical || warning;
+  if ((priority && stale.has(priority.provider)) || (!priority && stale.size)) {
+    el.decision.dataset.tone = "neutral";
+    el["decision-status"].textContent = "오래된 데이터 · 판정 보류";
+    el["decision-action"].textContent = "현재 잔여량과 다를 수 있습니다. 지금 새로고침하세요.";
+    return;
+  }
+  if (critical) {
+    el.decision.dataset.tone = "critical";
+    el["decision-status"].textContent = `${critical.provider === "codex" ? "Codex" : "Claude"} 한도 위험 · ${critical.remainingPercent}% 남음`;
+  } else if (warning) {
+    el.decision.dataset.tone = "warning";
+    el["decision-status"].textContent = warning.reason === "forecast_before_reset"
+      ? `${warning.provider === "codex" ? "Codex" : "Claude"} ${warning.confidence === "low" ? "예비 추세 · " : ""}리셋 전 고갈 가능`
+      : `${warning.provider === "codex" ? "Codex" : "Claude"} 한도 주의 · ${warning.remainingPercent}% 남음`;
+  } else if (!hasKnownForecast) {
+    el.decision.dataset.tone = "neutral";
+    el["decision-status"].textContent = "고갈 판단에 기록 더 필요";
+    el["decision-action"].textContent = "같은 한도를 두 번 이상 수집하면 리셋 전 고갈 여부를 계산합니다.";
+    return;
+  } else {
+    el.decision.dataset.tone = "ok";
+    el["decision-status"].textContent = "현재 기록에서 고갈 위험 없음";
+  }
+  el["decision-action"].textContent = action
+    ? action.action
+    : "작업 흐름이 달라진 뒤 다시 확인하세요.";
 }
 
 function render(snapshot) {
@@ -139,6 +200,7 @@ function render(snapshot) {
   el["claude-seven-day"].textContent = percentText(claudeSevenDay);
   el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
   el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
+  renderDecision(snapshot.analytics, snapshot);
 
   el["always-on-top"].checked = Boolean(snapshot.window.alwaysOnTop);
   el.opacity.value = Math.round((snapshot.window.opacity || 0.96) * 100);
@@ -190,6 +252,7 @@ el.refresh.addEventListener("click", () => refresh(true));
 el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
 el["open-insights"].addEventListener("click", () => window.usageApp.openInsights());
 el["open-details"].addEventListener("click", () => window.usageApp.openDetails());
+el.decision.addEventListener("click", () => window.usageApp.openInsights());
 
 refresh();
 setInterval(refresh, 10000);

@@ -7,7 +7,9 @@ const claudeDetail = document.getElementById("claude-detail");
 const hookDetail = document.getElementById("hook-detail");
 const detailsDetail = document.getElementById("details-detail");
 const startupDetail = document.getElementById("startup-detail");
+const monitoringDetail = document.getElementById("monitoring-detail");
 const launchAtLogin = document.getElementById("launch-at-login");
+const activityMonitoring = document.getElementById("activity-monitoring");
 const refreshButton = document.getElementById("refresh");
 const collectButton = document.getElementById("collect");
 const completeButton = document.getElementById("setup-complete");
@@ -18,6 +20,11 @@ const hookButton = document.getElementById("install-hook");
 const actionMessage = document.getElementById("action-message");
 
 let latestSnapshot = null;
+
+function hasAuthenticatedProvider(setup) {
+  return setup.codexAuth.state === "authenticated"
+    || setup.claudeAuth.state === "authenticated";
+}
 
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
@@ -151,10 +158,14 @@ function render(snapshot) {
     ? "켜짐: 앱만 시작하며 사용량 CLI는 상주시켜 두지 않습니다."
     : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
   launchAtLogin.checked = snapshot.launchAtLogin;
+  monitoringDetail.textContent = snapshot.monitoring.enabled
+    ? "켜짐: 로컬 세션 활동이 있을 때만, 최소 5분 간격으로 사용량을 확인합니다."
+    : "꺼짐: 새로고침 버튼을 눌렀을 때만 사용량을 확인합니다.";
+  activityMonitoring.checked = snapshot.monitoring.enabled;
 
-  const ready = codexAuth.state === "authenticated" && claudeAuth.state === "authenticated";
+  const ready = hasAuthenticatedProvider(snapshot.setup);
   completeButton.disabled = !ready;
-  completeButton.title = ready ? "첫 설정을 마치고 사용량 화면을 엽니다." : "Codex와 Claude 로그인을 모두 완료해야 합니다.";
+  completeButton.title = ready ? "첫 설정을 마치고 사용량 화면을 엽니다." : "Codex 또는 Claude 중 사용하는 도구 하나에 로그인하세요.";
   completeButton.hidden = snapshot.setup.onboardingComplete;
   laterButton.hidden = snapshot.setup.onboardingComplete;
 }
@@ -164,7 +175,7 @@ async function refresh(collectUsage = false) {
   collectButton.disabled = true;
   actionMessage.dataset.kind = "progress";
   actionMessage.textContent = collectUsage
-    ? "Codex와 Claude 사용량을 한 번씩 확인하는 중입니다."
+    ? "연결된 도구의 사용량을 한 번씩 확인하는 중입니다."
     : "설치 및 로그인 상태를 확인하는 중입니다.";
   try {
     const snapshot = collectUsage
@@ -185,9 +196,7 @@ async function refresh(collectUsage = false) {
 async function finishOnboarding(skipped) {
   if (!skipped) {
     const setup = latestSnapshot && latestSnapshot.setup;
-    const ready = setup
-      && setup.codexAuth.state === "authenticated"
-      && setup.claudeAuth.state === "authenticated";
+    const ready = setup && hasAuthenticatedProvider(setup);
     if (!ready) {
       return;
     }
@@ -212,6 +221,15 @@ document.getElementById("open-details").addEventListener("click", () => window.u
 launchAtLogin.addEventListener("change", async () => {
   await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
   await refresh(false);
+});
+activityMonitoring.addEventListener("change", async () => {
+  activityMonitoring.disabled = true;
+  try {
+    await window.usageApp.setActivityMonitoring(activityMonitoring.checked);
+    await refresh(false);
+  } finally {
+    activityMonitoring.disabled = false;
+  }
 });
 refreshButton.addEventListener("click", () => refresh(false));
 collectButton.addEventListener("click", () => refresh(true));

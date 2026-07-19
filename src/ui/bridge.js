@@ -29,5 +29,6 @@ window.usageApp = {
   installProvider: (provider) => invoke("open_install_terminal", { provider }),
   openOfficialGuide: (provider) => invoke("open_official_guide", { provider }),
   completeOnboarding: (skipped) => invoke("complete_onboarding", { skipped }),
+  setActivityMonitoring: (enabled) => invoke("set_activity_monitoring", { enabled }),
   setLaunchAtLogin: (enabled) => invoke("set_launch_at_login", { enabled }),
 };

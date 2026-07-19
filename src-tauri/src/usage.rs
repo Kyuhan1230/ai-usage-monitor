@@ -249,6 +249,22 @@ fn signature(path: &Path) -> Option<(u64, u64)> {
     Some((modified, metadata.len()))
 }
 
+fn latest_modified_ms(roots: &[&Path]) -> Option<u64> {
+    roots
+        .iter()
+        .flat_map(|root| list_jsonl_files(root))
+        .filter_map(|path| signature(&path).map(|value| value.0))
+        .max()
+}
+
+pub fn latest_session_activity_ms() -> Option<u64> {
+    let base = home_dir();
+    latest_modified_ms(&[
+        &base.join(".codex").join("sessions"),
+        &base.join(".claude").join("projects"),
+    ])
+}
+
 fn scan_provider(
     provider: &str,
     root: &Path,
@@ -365,6 +381,16 @@ mod tests {
             1100
         );
         assert_eq!(scan_token_usage_at(&codex, &claude, &cache), rows);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn latest_activity_uses_local_session_files() {
+        let root = std::env::temp_dir().join(format!("usage-activity-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let first = root.join("codex").join("session.jsonl");
+        write_lines(&first, &[serde_json::json!({"type":"event"})]);
+        assert!(latest_modified_ms(&[&root]).is_some());
         let _ = fs::remove_dir_all(root);
     }
 }
