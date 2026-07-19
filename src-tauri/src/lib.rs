@@ -249,26 +249,40 @@ fn refresh_all(app: &AppHandle) -> Value {
     let history_dir = directory.join("history");
     let codex_status = directory.join("status.json");
     let claude_status = directory.join("claude-status.json");
+    let codex_ready = codex_cli_state() == CliState::Ready;
+    let claude_ready = claude_cli_state() == CliState::Ready;
     let (codex_result, claude_result) = std::thread::scope(|scope| {
-        let codex =
-            scope.spawn(|| capture_codex(&codex_status, &history_dir, Duration::from_secs(20)));
-        let claude =
-            scope.spawn(|| capture_claude(&claude_status, &history_dir, Duration::from_secs(60)));
+        let codex = codex_ready.then(|| {
+            scope.spawn(|| capture_codex(&codex_status, &history_dir, Duration::from_secs(20)))
+        });
+        let claude = claude_ready.then(|| {
+            scope.spawn(|| capture_claude(&claude_status, &history_dir, Duration::from_secs(60)))
+        });
         (
-            codex
-                .join()
-                .unwrap_or_else(|_| Err("Codex 수집 작업이 중단됐습니다.".into())),
-            claude
-                .join()
-                .unwrap_or_else(|_| Err("Claude 수집 작업이 중단됐습니다.".into())),
+            codex.map(|thread| {
+                thread
+                    .join()
+                    .unwrap_or_else(|_| Err("Codex 수집 작업이 중단됐습니다.".into()))
+            }),
+            claude.map(|thread| {
+                thread
+                    .join()
+                    .unwrap_or_else(|_| Err("Claude 수집 작업이 중단됐습니다.".into()))
+            }),
         )
     });
     let mut errors = Map::new();
-    if let Err(error) = codex_result {
+    if let Some(Err(error)) = codex_result {
         errors.insert("codex".into(), Value::String(error));
     }
-    if let Err(error) = claude_result {
+    if let Some(Err(error)) = claude_result {
         errors.insert("claude".into(), Value::String(error));
+    }
+    if !codex_ready && !claude_ready {
+        errors.insert(
+            "providers".into(),
+            Value::String("사용량을 확인할 Codex 또는 Claude CLI가 필요합니다.".into()),
+        );
     }
     let rows = usage::scan_token_usage();
     let history = read_history(&history_dir, 30);

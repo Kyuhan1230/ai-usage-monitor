@@ -112,5 +112,9 @@ for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
 assert(setupScript.trimEnd().endsWith("refresh(false);"), "Setup 첫 진입은 사용량 수집 없이 설치·인증 상태만 확인해야 합니다.");
 assert(setupScript.includes('codexAuth.state === "authenticated"'), "설정 완료는 Codex 직접 인증 상태를 사용해야 합니다.");
 assert(setupScript.includes('claudeAuth.state === "authenticated"'), "설정 완료는 Claude 직접 인증 상태를 사용해야 합니다.");
+assert(setupScript.includes("function hasAuthenticatedProvider"), "한 공급자만 인증해도 온보딩을 완료할 수 있어야 합니다.");
+assert(setupScript.includes('|| setup.claudeAuth.state === "authenticated"'), "Codex와 Claude 인증은 선택 조건이어야 합니다.");
+assert(rustEntry.includes("let codex_ready = codex_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
+assert(rustEntry.includes("let claude_ready = claude_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
 
 process.stdout.write(`PASS ${scripts.length}개 UI 스크립트와 Tauri 로컬 전용 구성을 검증했습니다.\n`);

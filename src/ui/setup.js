@@ -19,6 +19,11 @@ const actionMessage = document.getElementById("action-message");
 
 let latestSnapshot = null;
 
+function hasAuthenticatedProvider(setup) {
+  return setup.codexAuth.state === "authenticated"
+    || setup.claudeAuth.state === "authenticated";
+}
+
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
 }
@@ -152,9 +157,9 @@ function render(snapshot) {
     : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
   launchAtLogin.checked = snapshot.launchAtLogin;
 
-  const ready = codexAuth.state === "authenticated" && claudeAuth.state === "authenticated";
+  const ready = hasAuthenticatedProvider(snapshot.setup);
   completeButton.disabled = !ready;
-  completeButton.title = ready ? "첫 설정을 마치고 사용량 화면을 엽니다." : "Codex와 Claude 로그인을 모두 완료해야 합니다.";
+  completeButton.title = ready ? "첫 설정을 마치고 사용량 화면을 엽니다." : "Codex 또는 Claude 중 사용하는 도구 하나에 로그인하세요.";
   completeButton.hidden = snapshot.setup.onboardingComplete;
   laterButton.hidden = snapshot.setup.onboardingComplete;
 }
@@ -164,7 +169,7 @@ async function refresh(collectUsage = false) {
   collectButton.disabled = true;
   actionMessage.dataset.kind = "progress";
   actionMessage.textContent = collectUsage
-    ? "Codex와 Claude 사용량을 한 번씩 확인하는 중입니다."
+    ? "연결된 도구의 사용량을 한 번씩 확인하는 중입니다."
     : "설치 및 로그인 상태를 확인하는 중입니다.";
   try {
     const snapshot = collectUsage
@@ -185,9 +190,7 @@ async function refresh(collectUsage = false) {
 async function finishOnboarding(skipped) {
   if (!skipped) {
     const setup = latestSnapshot && latestSnapshot.setup;
-    const ready = setup
-      && setup.codexAuth.state === "authenticated"
-      && setup.claudeAuth.state === "authenticated";
+    const ready = setup && hasAuthenticatedProvider(setup);
     if (!ready) {
       return;
     }
