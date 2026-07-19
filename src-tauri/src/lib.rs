@@ -13,6 +13,7 @@ use crate::storage::{data_dir, read_history, read_json, write_json};
 use serde_json::{Map, Value, json};
 use std::process::Command;
 use std::sync::Mutex;
+use std::thread;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -24,6 +25,7 @@ struct RuntimeState {
     refresh: Mutex<Value>,
     window: Mutex<WindowState>,
     last_alert_signature: Mutex<String>,
+    last_collection_ms: Mutex<i64>,
 }
 
 #[derive(Clone)]
@@ -42,8 +44,39 @@ impl Default for RuntimeState {
                 opacity: 0.96,
             }),
             last_alert_signature: Mutex::new(String::new()),
+            last_collection_ms: Mutex::new(0),
         }
     }
+}
+
+const ACTIVITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const AUTO_REFRESH_COOLDOWN_MS: i64 = 15 * 60 * 1000;
+
+fn activity_monitoring_enabled() -> bool {
+    read_json(&data_dir().join("monitoring.json"))
+        .and_then(|value| value.get("enabled").and_then(Value::as_bool))
+        .unwrap_or(false)
+}
+
+fn monitoring_snapshot() -> Value {
+    json!({
+        "enabled": activity_monitoring_enabled(),
+        "mode": "local_session_activity",
+        "checkIntervalMs": ACTIVITY_CHECK_INTERVAL.as_millis() as u64,
+        "minimumRefreshIntervalMs": AUTO_REFRESH_COOLDOWN_MS,
+    })
+}
+
+fn has_new_activity(previous: Option<u64>, current: Option<u64>) -> bool {
+    match (previous, current) {
+        (Some(before), Some(after)) => after > before,
+        (None, Some(_)) => true,
+        _ => false,
+    }
+}
+
+fn auto_refresh_cooldown_elapsed(last_collection_ms: i64, now_ms: i64) -> bool {
+    now_ms - last_collection_ms >= AUTO_REFRESH_COOLDOWN_MS
 }
 
 fn status_age_ms(status: Option<&Value>) -> Value {
@@ -129,6 +162,7 @@ fn snapshot_value(app: &AppHandle) -> Value {
         "capturedAt": chrono::Utc::now().to_rfc3339(),
         "details": {"running": app.get_webview_window("details").is_some(), "mode": "embedded"},
         "capture": {"mode":"on_demand", "codexFreshnessMs":600000, "claudeFreshnessMs":600000},
+        "monitoring": monitoring_snapshot(),
         "refresh": refresh,
         "analytics": analytics,
         "codex": {
@@ -294,7 +328,39 @@ fn refresh_all(app: &AppHandle) -> Value {
         "completedAt": chrono::Utc::now().to_rfc3339(),
         "errors": errors
     });
+    *state
+        .last_collection_ms
+        .lock()
+        .expect("collection state lock") = chrono::Utc::now().timestamp_millis();
     snapshot_value(app)
+}
+
+fn start_activity_monitor(app: AppHandle) {
+    thread::spawn(move || {
+        let mut last_activity = usage::latest_session_activity_ms();
+        loop {
+            thread::sleep(ACTIVITY_CHECK_INTERVAL);
+            if !activity_monitoring_enabled() {
+                continue;
+            }
+            let current_activity = usage::latest_session_activity_ms();
+            let changed = has_new_activity(last_activity, current_activity);
+            last_activity = current_activity.or(last_activity);
+            if !changed {
+                continue;
+            }
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let last_collection = *app
+                .state::<RuntimeState>()
+                .last_collection_ms
+                .lock()
+                .expect("collection state lock");
+            if !auto_refresh_cooldown_elapsed(last_collection, now_ms) {
+                continue;
+            }
+            refresh_all(&app);
+        }
+    });
 }
 
 #[tauri::command]
@@ -336,6 +402,18 @@ fn complete_onboarding(skipped: bool) -> Result<Value, String> {
     });
     write_json(&data_dir().join("onboarding.json"), &value)?;
     Ok(value)
+}
+
+#[tauri::command]
+fn set_activity_monitoring(enabled: bool) -> Result<Value, String> {
+    let value = json!({
+        "schemaVersion": 1,
+        "enabled": enabled,
+        "mode": "local_session_activity",
+        "updatedAt": chrono::Utc::now().to_rfc3339(),
+    });
+    write_json(&data_dir().join("monitoring.json"), &value)?;
+    Ok(monitoring_snapshot())
 }
 
 #[tauri::command]
@@ -622,6 +700,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             build_tray(app)?;
+            start_activity_monitor(app.handle().clone());
             if !std::env::args().any(|argument| argument == "--background") {
                 let first_window = if onboarding_complete() {
                     "compact"
@@ -644,6 +723,7 @@ pub fn run() {
             setup_snapshot,
             refresh_setup_snapshot,
             complete_onboarding,
+            set_activity_monitoring,
             set_always_on_top,
             set_opacity,
             minimize_window,
@@ -665,4 +745,29 @@ pub fn run() {
                 api.prevent_exit();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_monitor_requires_a_new_or_changed_session_file() {
+        assert!(!has_new_activity(None, None));
+        assert!(has_new_activity(None, Some(10)));
+        assert!(!has_new_activity(Some(10), Some(10)));
+        assert!(has_new_activity(Some(10), Some(11)));
+    }
+
+    #[test]
+    fn automatic_collection_respects_the_cooldown() {
+        assert!(!auto_refresh_cooldown_elapsed(
+            1_000,
+            1_000 + AUTO_REFRESH_COOLDOWN_MS - 1
+        ));
+        assert!(auto_refresh_cooldown_elapsed(
+            1_000,
+            1_000 + AUTO_REFRESH_COOLDOWN_MS
+        ));
+    }
 }

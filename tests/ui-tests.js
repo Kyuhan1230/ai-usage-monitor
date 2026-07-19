@@ -118,5 +118,10 @@ assert(setupScript.includes("function hasAuthenticatedProvider"), "한 공급자
 assert(setupScript.includes('|| setup.claudeAuth.state === "authenticated"'), "Codex와 Claude 인증은 선택 조건이어야 합니다.");
 assert(rustEntry.includes("let codex_ready = codex_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
 assert(rustEntry.includes("let claude_ready = claude_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
+assert(setupHtml.includes('id="activity-monitoring"'), "활동 기반 자동 확인은 사용자가 켜고 끌 수 있어야 합니다.");
+assert(setupScript.includes("setActivityMonitoring"), "자동 확인 설정은 백엔드에 명시적으로 저장해야 합니다.");
+assert(rustEntry.includes("AUTO_REFRESH_COOLDOWN_MS"), "활동 기반 수집에는 최소 실행 간격이 필요합니다.");
+assert(rustEntry.includes("if !activity_monitoring_enabled()"), "자동 확인을 끄면 활동 파일을 반복 스캔하지 않아야 합니다.");
+assert(rustEntry.includes("start_activity_monitor(app.handle().clone())"), "트레이 런타임에서 활동 감시를 시작해야 합니다.");
 
 process.stdout.write(`PASS ${scripts.length}개 UI 스크립트와 Tauri 로컬 전용 구성을 검증했습니다.\n`);

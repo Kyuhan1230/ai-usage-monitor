@@ -7,7 +7,9 @@ const claudeDetail = document.getElementById("claude-detail");
 const hookDetail = document.getElementById("hook-detail");
 const detailsDetail = document.getElementById("details-detail");
 const startupDetail = document.getElementById("startup-detail");
+const monitoringDetail = document.getElementById("monitoring-detail");
 const launchAtLogin = document.getElementById("launch-at-login");
+const activityMonitoring = document.getElementById("activity-monitoring");
 const refreshButton = document.getElementById("refresh");
 const collectButton = document.getElementById("collect");
 const completeButton = document.getElementById("setup-complete");
@@ -156,6 +158,10 @@ function render(snapshot) {
     ? "켜짐: 앱만 시작하며 사용량 CLI는 상주시켜 두지 않습니다."
     : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
   launchAtLogin.checked = snapshot.launchAtLogin;
+  monitoringDetail.textContent = snapshot.monitoring.enabled
+    ? "켜짐: 로컬 세션 활동이 있을 때만, 최소 15분 간격으로 사용량을 확인합니다."
+    : "꺼짐: 새로고침 버튼을 눌렀을 때만 사용량을 확인합니다.";
+  activityMonitoring.checked = snapshot.monitoring.enabled;
 
   const ready = hasAuthenticatedProvider(snapshot.setup);
   completeButton.disabled = !ready;
@@ -215,6 +221,15 @@ document.getElementById("open-details").addEventListener("click", () => window.u
 launchAtLogin.addEventListener("change", async () => {
   await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
   await refresh(false);
+});
+activityMonitoring.addEventListener("change", async () => {
+  activityMonitoring.disabled = true;
+  try {
+    await window.usageApp.setActivityMonitoring(activityMonitoring.checked);
+    await refresh(false);
+  } finally {
+    activityMonitoring.disabled = false;
+  }
 });
 refreshButton.addEventListener("click", () => refresh(false));
 collectButton.addEventListener("click", () => refresh(true));
