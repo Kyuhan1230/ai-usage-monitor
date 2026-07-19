@@ -159,7 +159,7 @@ function render(snapshot) {
     : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
   launchAtLogin.checked = snapshot.launchAtLogin;
   monitoringDetail.textContent = snapshot.monitoring.enabled
-    ? "켜짐: 로컬 세션 활동이 있을 때만, 최소 15분 간격으로 사용량을 확인합니다."
+    ? "켜짐: 로컬 세션 활동이 있을 때만, 최소 5분 간격으로 사용량을 확인합니다."
     : "꺼짐: 새로고침 버튼을 눌렀을 때만 사용량을 확인합니다.";
   activityMonitoring.checked = snapshot.monitoring.enabled;
 

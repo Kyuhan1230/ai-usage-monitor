@@ -126,6 +126,7 @@ assert(rustEntry.includes("let claude_ready = claude_cli_state() == CliState::Re
 assert(setupHtml.includes('id="activity-monitoring"'), "활동 기반 자동 확인은 사용자가 켜고 끌 수 있어야 합니다.");
 assert(setupScript.includes("setActivityMonitoring"), "자동 확인 설정은 백엔드에 명시적으로 저장해야 합니다.");
 assert(rustEntry.includes("AUTO_REFRESH_COOLDOWN_MS"), "활동 기반 수집에는 최소 실행 간격이 필요합니다.");
+assert(rustEntry.includes("AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000"), "활동 중 CLI 수집 간격은 최소 5분이어야 합니다.");
 assert(rustEntry.includes("if !activity_monitoring_enabled()"), "자동 확인을 끄면 활동 파일을 반복 스캔하지 않아야 합니다.");
 assert(rustEntry.includes("start_activity_monitor(app.handle().clone())"), "트레이 런타임에서 활동 감시를 시작해야 합니다.");
 

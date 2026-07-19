@@ -50,7 +50,7 @@ impl Default for RuntimeState {
 }
 
 const ACTIVITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
-const AUTO_REFRESH_COOLDOWN_MS: i64 = 15 * 60 * 1000;
+const AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000;
 
 fn activity_monitoring_enabled() -> bool {
     read_json(&data_dir().join("monitoring.json"))

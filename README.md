@@ -127,7 +127,7 @@ claude auth login
 ```
 
 4. 사용할 도구의 로그인을 마친 뒤 **상태 다시 확인 → 설정 완료**를 누릅니다. 나머지 도구와 Claude statusLine 이벤트 연결은 선택 사항입니다.
-5. **사용량 확인**을 누르면 원샷으로 최신 상태를 읽습니다. Setup에서 **활동 중 자동 확인**을 켜면 로컬 세션 파일이 바뀐 경우에만 최소 15분 간격으로 원샷 수집합니다. `X`는 창과 WebView를 닫고 트레이만 남기며, 완전히 종료하려면 트레이 메뉴의 **Quit**을 선택합니다.
+5. **사용량 확인**을 누르면 원샷으로 최신 상태를 읽습니다. Setup에서 **활동 중 자동 확인**을 켜면 로컬 세션 파일이 바뀐 경우에만 최소 5분 간격으로 원샷 수집합니다. `X`는 창과 WebView를 닫고 트레이만 남기며, 완전히 종료하려면 트레이 메뉴의 **Quit**을 선택합니다.
 
 설치본에 Codex CLI나 Claude Code를 포함하지 않아 설치 파일 크기를 키우지 않으며, 별도 Node.js나 Python도 필요하지 않습니다. 대화형 설치 또는 Setup에서 사용자가 특정 CLI 설치에 동의한 경우에만 해당 공급자의 공식 설치 스크립트로 네트워크 요청을 보냅니다. 앱과 설치 프로그램은 WebView2를 자동 다운로드하지 않으므로, WebView2가 제거된 Windows 환경에서는 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)을 사용자가 먼저 설치해야 합니다.
 
@@ -140,7 +140,7 @@ claude auth login
 flowchart LR
     A["Manual refresh"] --> B["Codex app-server one-shot"]
     A --> C["Claude /usage one-shot fallback"]
-    J["Optional local session activity"] --> K["15-minute cooldown"]
+    J["Optional local session activity"] --> K["5-minute cooldown"]
     K --> B
     K --> C
     D["Claude statusLine event"] --> E["Local status JSON"]
@@ -154,7 +154,7 @@ flowchart LR
 
 - Codex는 사용자가 새로고침할 때 공식 app-server의 `account/rateLimits/read`만 호출한 뒤 즉시 프로세스를 종료합니다. 사용하지 않는 account usage 응답은 요청하거나 저장하지 않습니다.
 - Claude는 statusLine 이벤트를 기본 경로로 사용합니다. 수동 새로고침의 `/usage`는 초기값을 위한 단발 대체 경로입니다.
-- 자동 확인을 켜면 Rust 트레이 프로세스가 1분마다 로컬 세션 파일의 변경 시각만 확인합니다. 활동이 감지돼도 CLI는 최소 15분 간격으로 한 번 실행하며, 자동 확인을 끄면 파일 확인도 수행하지 않습니다.
+- 자동 확인을 켜면 Rust 트레이 프로세스가 1분마다 로컬 세션 파일의 변경 시각만 확인합니다. 활동이 감지돼도 CLI는 최소 5분 간격으로 한 번 실행하며, 자동 확인을 끄면 파일 확인도 수행하지 않습니다.
 - 상시 CLI 폴링, PID 감시, 수집 프로세스 자동 재시작, localhost 서버가 없습니다.
 - Rust 수집기가 `~/.codex/sessions`와 `~/.claude/projects`에서 토큰 숫자만 증분 집계합니다. 프롬프트와 응답 본문은 분석 결과에 복사하지 않습니다.
 
