@@ -227,45 +227,90 @@ fn onboarding_complete() -> bool {
         .unwrap_or(false)
 }
 
-fn notify_alerts(app: &AppHandle, report: &Value) {
+fn notification_payload(report: &Value) -> Option<(String, String)> {
     let alerts = report
         .get("alerts")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if alerts.is_empty() {
-        return;
-    }
-    let signature = serde_json::to_string(&alerts).unwrap_or_default();
-    let state = app.state::<RuntimeState>();
-    let mut previous = state.last_alert_signature.lock().expect("alert state lock");
-    if *previous == signature {
-        return;
-    }
-    *previous = signature;
-    let body = alerts
+    let anomalies = ["codex", "claude"]
         .iter()
-        .take(3)
+        .filter_map(|provider| {
+            report
+                .get("anomalies")?
+                .get(*provider)?
+                .get("detected")?
+                .as_bool()?
+                .then(|| {
+                    json!({
+                        "provider": provider,
+                        "multiplier": report["anomalies"][*provider]["multiplier"]
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    if alerts.is_empty() && anomalies.is_empty() {
+        return None;
+    }
+    let signature = serde_json::to_string(&json!({
+        "alerts": &alerts,
+        "anomalies": &anomalies,
+    }))
+    .unwrap_or_default();
+    let mut messages = alerts
+        .iter()
         .map(|alert| {
+            let provider = if alert.get("provider").and_then(Value::as_str) == Some("codex") {
+                "Codex"
+            } else {
+                "Claude"
+            };
+            let limit = match alert.get("limitType").and_then(Value::as_str) {
+                Some("five_hour") => "5시간",
+                Some("weekly") | Some("seven_day") => "주간",
+                Some("monthly") => "월간",
+                _ => "한도",
+            };
+            let reason = match alert.get("reason").and_then(Value::as_str) {
+                Some("forecast_before_reset") => "리셋 전 고갈 예상",
+                Some("threshold_critical") => "위험 임계치",
+                _ => "주의 임계치",
+            };
             format!(
-                "{} {}: {}% 남음",
-                if alert.get("provider").and_then(Value::as_str) == Some("codex") {
-                    "Codex"
-                } else {
-                    "Claude"
-                },
-                alert
-                    .get("limitType")
-                    .and_then(Value::as_str)
-                    .unwrap_or("limit"),
+                "{provider} {limit}: {:.0}% 남음 · {reason}",
                 alert
                     .get("remainingPercent")
                     .and_then(Value::as_f64)
                     .unwrap_or(0.0)
             )
         })
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .collect::<Vec<_>>();
+    messages.extend(anomalies.iter().map(|anomaly| {
+        let provider = if anomaly.get("provider").and_then(Value::as_str) == Some("codex") {
+            "Codex"
+        } else {
+            "Claude"
+        };
+        let multiplier = anomaly
+            .get("multiplier")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        format!("{provider} 오늘 토큰 {multiplier:.1}배 급증")
+    }));
+    messages.truncate(3);
+    Some((signature, messages.join(" · ")))
+}
+
+fn notify_alerts(app: &AppHandle, report: &Value) {
+    let Some((signature, body)) = notification_payload(report) else {
+        return;
+    };
+    let state = app.state::<RuntimeState>();
+    let mut previous = state.last_alert_signature.lock().expect("alert state lock");
+    if *previous == signature {
+        return;
+    }
+    *previous = signature;
     let _ = app
         .notification()
         .builder()
@@ -769,5 +814,53 @@ mod tests {
             1_000,
             1_000 + AUTO_REFRESH_COOLDOWN_MS
         ));
+    }
+
+    #[test]
+    fn notification_payload_includes_limit_reason_and_token_spike() {
+        let report = json!({
+            "alerts": [{
+                "provider": "codex",
+                "limitType": "five_hour",
+                "remainingPercent": 22,
+                "reason": "forecast_before_reset"
+            }],
+            "anomalies": {
+                "codex": {"detected": true, "multiplier": 2.4},
+                "claude": {"detected": false}
+            }
+        });
+        let (signature, body) = notification_payload(&report).expect("notification payload");
+        assert!(signature.contains("forecast_before_reset"));
+        assert!(signature.contains("multiplier"));
+        assert!(body.contains("Codex 5시간: 22% 남음 · 리셋 전 고갈 예상"));
+        assert!(body.contains("Codex 오늘 토큰 2.4배 급증"));
+    }
+
+    #[test]
+    fn notification_payload_supports_anomaly_only_and_healthy_reports() {
+        let anomaly = json!({
+            "alerts": [],
+            "anomalies": {
+                "codex": {"detected": false},
+                "claude": {"detected": true, "multiplier": 1.9}
+            }
+        });
+        assert!(
+            notification_payload(&anomaly)
+                .expect("anomaly notification")
+                .1
+                .contains("Claude 오늘 토큰 1.9배 급증")
+        );
+        assert!(
+            notification_payload(&json!({
+                "alerts": [],
+                "anomalies": {
+                    "codex": {"detected": false},
+                    "claude": {"detected": false}
+                }
+            }))
+            .is_none()
+        );
     }
 }
