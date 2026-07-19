@@ -143,6 +143,41 @@ function renderCosts(analytics) {
   }
 }
 
+function renderDecision(analytics) {
+  const panel = document.getElementById("decision");
+  const badge = document.getElementById("decision-badge");
+  const title = document.getElementById("decision-title");
+  const detail = document.getElementById("decision-detail");
+  const primaryAction = document.getElementById("primary-action");
+  const critical = analytics.alerts.find((alert) => alert.severity === "critical");
+  const warning = analytics.alerts.find((alert) => alert.severity === "warning");
+  const priority = critical || warning;
+  const recommendation = analytics.recommendations[0];
+
+  panel.className = "decision-panel";
+  if (critical) {
+    panel.classList.add("critical");
+    badge.textContent = "위험";
+    title.textContent = `${PROVIDER_LABELS[critical.provider]} ${LIMIT_LABELS[critical.limitType] || critical.limitType} 한도가 거의 소진됐습니다`;
+  } else if (warning) {
+    panel.classList.add("warning");
+    badge.textContent = "주의";
+    title.textContent = warning.reason === "forecast_before_reset"
+      ? `${PROVIDER_LABELS[warning.provider]} 한도가 리셋 전에 바닥날 수 있습니다`
+      : `${PROVIDER_LABELS[warning.provider]} ${LIMIT_LABELS[warning.limitType] || warning.limitType} 한도를 확인하세요`;
+  } else {
+    badge.textContent = "현재 양호";
+    title.textContent = "현재 기록에서는 리셋 전 고갈 위험이 보이지 않습니다";
+  }
+
+  detail.textContent = priority
+    ? `${PROVIDER_LABELS[priority.provider]} ${LIMIT_LABELS[priority.limitType] || priority.limitType} 한도 ${priority.remainingPercent}% 남음 · ${ALERT_REASON_LABELS[priority.reason] || priority.reason}`
+    : "표본이 적거나 사용 패턴이 달라지면 판정도 바뀔 수 있습니다. 작업 흐름이 바뀐 뒤에는 다시 계산하세요.";
+  primaryAction.textContent = recommendation
+    ? recommendation.action
+    : "현재 즉시 바꿀 설정이 없습니다.";
+}
+
 function render(analytics) {
   const empty = document.getElementById("empty");
   const content = document.getElementById("content");
@@ -161,6 +196,7 @@ function render(analytics) {
   document.getElementById("day-tokens").textContent = `${formatNumber(analytics.comparison.todayTokens)} vs ${formatNumber(analytics.comparison.yesterdayTokens)} tokens`;
   document.getElementById("week-change").textContent = formatPercent(analytics.comparison.weekOverWeekPercent, true);
   document.getElementById("week-tokens").textContent = `${formatNumber(analytics.comparison.currentSevenDaysTokens)} vs ${formatNumber(analytics.comparison.previousSevenDaysTokens)} tokens`;
+  renderDecision(analytics);
   renderForecasts(analytics);
   renderDetections(analytics);
   renderCosts(analytics);

@@ -22,12 +22,21 @@
     </div>
 
     <section id="content" hidden>
-      <div class="summary-grid">
-        <article class="summary-card"><span>위험 알림</span><strong id="alert-count">0</strong><small id="alert-detail">정상</small></article>
-        <article class="summary-card"><span>오늘 비용 환산</span><strong id="total-cost">$0.00</strong><small>API 정가 등가 추정</small></article>
-        <article class="summary-card"><span>전일 대비</span><strong id="day-change">--</strong><small id="day-tokens">기록 부족</small></article>
-        <article class="summary-card"><span>전주 대비</span><strong id="week-change">--</strong><small id="week-tokens">기록 부족</small></article>
-      </div>
+      <section id="decision" class="decision-panel">
+        <div class="decision-head">
+          <div>
+            <p class="eyebrow">Decision</p>
+            <p id="decision-label" class="decision-label">현재 상태</p>
+            <h2 id="decision-title">고갈 위험을 계산하는 중입니다</h2>
+          </div>
+          <span id="decision-badge" class="decision-badge">확인 중</span>
+        </div>
+        <p id="decision-detail" class="decision-detail">한도 기록과 리셋 시각을 확인하고 있습니다.</p>
+        <div class="primary-action">
+          <span>지금 할 일</span>
+          <strong id="primary-action">새로고침해 최신 상태를 확인하세요.</strong>
+        </div>
+      </section>
 
       <section class="panel">
         <div class="panel-head">
@@ -37,22 +46,37 @@
         <div id="forecasts" class="forecast-grid"></div>
       </section>
 
-      <section class="two-column">
-        <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">Detection</p><h2>임계치·이상 급증</h2></div></div>
-          <ul id="detections" class="list"></ul>
-        </article>
-        <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">Cost</p><h2>비용·모델 절약 가능성</h2></div></div>
-          <div id="costs" class="cost-list"></div>
-          <p class="fine-print">구독 청구액이 아니라 로컬 토큰을 API 표준 정가로 환산한 참고치입니다. 가격을 모르는 모델은 합계에서 제외합니다.</p>
-        </article>
-      </section>
+      <details class="analysis-details">
+        <summary>
+          <span><strong>상세 분석</strong><small>비교, 이상 급증, API 정가 환산과 모든 제안</small></span>
+          <span class="summary-hint">펼쳐보기</span>
+        </summary>
+        <div class="analysis-body">
+          <div class="summary-grid secondary-grid">
+            <article class="summary-card"><span>알림 수</span><strong id="alert-count">0</strong><small id="alert-detail">정상 범위</small></article>
+            <article class="summary-card"><span>API 정가 환산</span><strong id="total-cost">$0.00</strong><small>실제 구독 청구액 아님</small></article>
+            <article class="summary-card"><span>전일 대비</span><strong id="day-change">--</strong><small id="day-tokens">기록 부족</small></article>
+            <article class="summary-card"><span>전주 대비</span><strong id="week-change">--</strong><small id="week-tokens">기록 부족</small></article>
+          </div>
 
-      <section class="panel action-panel">
-        <div class="panel-head"><div><p class="eyebrow">Next action</p><h2>지금 할 일</h2></div></div>
-        <ol id="recommendations" class="recommendations"></ol>
-      </section>
+          <section class="two-column">
+            <article class="panel">
+              <div class="panel-head"><div><p class="eyebrow">Detection</p><h2>임계치·이상 급증</h2></div></div>
+              <ul id="detections" class="list"></ul>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><p class="eyebrow">Reference cost</p><h2>API 정가 환산·모델 시뮬레이션</h2></div></div>
+              <div id="costs" class="cost-list"></div>
+              <p class="fine-print">실제 구독 청구액이나 현금 절약액이 아닙니다. 로컬 토큰을 API 표준 정가로 환산한 참고치이며, 가격을 모르는 모델은 합계에서 제외합니다.</p>
+            </article>
+          </section>
+
+          <section class="panel action-panel">
+            <div class="panel-head"><div><p class="eyebrow">All suggestions</p><h2>모든 제안</h2></div></div>
+            <ol id="recommendations" class="recommendations"></ol>
+          </section>
+        </div>
+      </details>
     </section>
   </main>
   <script src="bridge.js"></script>

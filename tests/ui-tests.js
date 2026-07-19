@@ -98,6 +98,14 @@ assert(!fs.existsSync(path.join(root, "src", "node")));
 
 const setupHtml = fs.readFileSync(path.join(ui, "setup.html"), "utf8");
 const setupScript = fs.readFileSync(path.join(ui, "setup.js"), "utf8");
+const insightsHtml = fs.readFileSync(path.join(ui, "insights.html"), "utf8");
+const insightsScript = fs.readFileSync(path.join(ui, "insights.js"), "utf8");
+assert(
+  insightsHtml.indexOf('id="decision"') < insightsHtml.indexOf('class="analysis-details"'),
+  "핵심 고갈 판정은 상세 분석보다 먼저 보여야 합니다.",
+);
+assert(insightsHtml.includes("실제 구독 청구액 아님"), "API 정가 환산은 실제 청구액과 구분해야 합니다.");
+assert(insightsScript.includes("function renderDecision"), "Insights는 최우선 판정과 행동을 별도로 렌더링해야 합니다.");
 for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
   assert(setupHtml.includes(`id="${id}"`), `Setup 온보딩 컨트롤 누락: ${id}`);
 }
