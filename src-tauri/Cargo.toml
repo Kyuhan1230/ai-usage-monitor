@@ -1,6 +1,6 @@
 [package]
 name = "codex-claude-usage"
-version = "1.0.1"
+version = "1.0.5"
 description = "Local-first Codex and Claude usage forecasts, alerts, costs, and actions"
 authors = ["CodexUsage"]
 license = "MIT"

@@ -1,6 +1,6 @@
 "use strict";
 
-// 설정 변경은 모두 명시적인 사용자 동작으로만 실행한다.
+// 설치, 로그인, 설정 변경은 모두 명시적인 사용자 동작으로만 실행한다.
 
 const codexDetail = document.getElementById("codex-detail");
 const claudeDetail = document.getElementById("claude-detail");
@@ -9,6 +9,15 @@ const detailsDetail = document.getElementById("details-detail");
 const startupDetail = document.getElementById("startup-detail");
 const launchAtLogin = document.getElementById("launch-at-login");
 const refreshButton = document.getElementById("refresh");
+const collectButton = document.getElementById("collect");
+const completeButton = document.getElementById("setup-complete");
+const laterButton = document.getElementById("setup-later");
+const codexButton = document.getElementById("codex-login");
+const claudeButton = document.getElementById("claude-auth");
+const hookButton = document.getElementById("install-hook");
+const actionMessage = document.getElementById("action-message");
+
+let latestSnapshot = null;
 
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
@@ -16,83 +25,197 @@ function isFresh(ageMs) {
 
 function ageText(ageMs) {
   if (!Number.isFinite(ageMs)) {
-    return "수집 기록 없음";
+    return "사용량 미수집";
   }
   const minutes = Math.floor(ageMs / 60000);
   if (minutes < 1) {
-    return "방금 수집";
+    return "사용량 방금 확인";
   }
   if (minutes < 60) {
-    return `${minutes}분 전 수집`;
+    return `사용량 ${minutes}분 전 확인`;
   }
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest ? `${hours}시간 ${rest}분 전 수집` : `${hours}시간 전 수집`;
+  return rest ? `사용량 ${hours}시간 ${rest}분 전 확인` : `사용량 ${hours}시간 전 확인`;
 }
 
-function statusText(commandOk, connected, ageMs, missingCommand, staleHelp, refreshError) {
-  if (!commandOk) {
-    return `필요: ${missingCommand}`;
-  }
-  if (refreshError) {
-    return `수집 실패: ${refreshError}`;
-  }
-  if (!connected) {
-    return "지금 수집을 눌러 계정 사용량을 확인하세요.";
-  }
-  if (!isFresh(ageMs)) {
-    return `오래된 값: ${ageText(ageMs)}. ${staleHelp}`;
-  }
-  return `정상: ${ageText(ageMs)}`;
+function setStatus(element, text, kind) {
+  element.textContent = text;
+  element.dataset.kind = kind;
 }
 
-async function refresh(force = false) {
-  refreshButton.disabled = true;
+function providerStatus(provider, commandState, auth, connected, ageMs) {
+  const name = provider === "codex" ? "Codex CLI" : "Claude Code";
+  if (commandState === "desktop_bundle_only") {
+    return {
+      kind: "warning",
+      text: "Codex 데스크톱 앱만 있습니다. 사용량 확인에는 독립 실행 Codex CLI가 필요합니다.",
+    };
+  }
+  if (commandState !== "ready") {
+    return { kind: "warning", text: `${name}가 설치되어 있지 않습니다.` };
+  }
+  const authState = auth && auth.state ? auth.state : "error";
+  if (authState === "authenticated") {
+    const usage = connected
+      ? `${ageText(ageMs)}${isFresh(ageMs) ? "" : " · 다시 확인 권장"}`
+      : "사용량 미수집";
+    return { kind: "ok", text: `설치됨 · 로그인 완료 · ${usage}` };
+  }
+  if (authState === "unauthenticated") {
+    return { kind: "warning", text: "설치됨 · 로그인이 필요합니다." };
+  }
+  return {
+    kind: "error",
+    text: "설치됨 · 로그인 상태를 확인하지 못했습니다. 상태를 다시 확인하세요.",
+  };
+}
+
+function configureProviderButton(button, provider, commandReady, authState) {
+  button.dataset.provider = provider;
+  if (!commandReady) {
+    button.dataset.action = "install";
+    button.textContent = provider === "codex" ? "Codex 설치" : "Claude 설치";
+    button.disabled = false;
+    return;
+  }
+  if (authState === "authenticated") {
+    button.dataset.action = "complete";
+    button.textContent = "로그인 완료";
+    button.disabled = true;
+    return;
+  }
+  button.dataset.action = "login";
+  button.textContent = provider === "codex" ? "Codex 로그인" : "Claude 로그인";
+  button.disabled = false;
+}
+
+async function runProviderAction(button) {
+  const provider = button.dataset.provider;
+  const action = button.dataset.action;
+  if (action === "complete") {
+    return;
+  }
+  button.disabled = true;
+  actionMessage.dataset.kind = "progress";
   try {
-    const snapshot = force
+    if (action === "install") {
+      const name = provider === "codex" ? "OpenAI Codex CLI" : "Anthropic Claude Code";
+      const approved = window.confirm(`${name} 공식 설치 프로그램을 실행할까요?\n\n인터넷에서 CLI를 내려받으며, 설치 진행 상황은 새 PowerShell 창에 표시됩니다.`);
+      if (!approved) {
+        actionMessage.textContent = "CLI 설치를 취소했습니다.";
+        actionMessage.dataset.kind = "warning";
+        return;
+      }
+      await window.usageApp.installProvider(provider);
+      actionMessage.textContent = `${name} 설치 창을 열었습니다. 설치가 끝나면 '상태 다시 확인'을 누르세요.`;
+    } else {
+      if (provider === "codex") {
+        await window.usageApp.openCodexLogin();
+      } else {
+        await window.usageApp.openClaudeAuth();
+      }
+      actionMessage.textContent = `새 터미널에서 ${provider === "codex" ? "Codex" : "Claude"} 로그인을 시작했습니다. 완료한 뒤 '상태 다시 확인'을 누르세요.`;
+    }
+    actionMessage.dataset.kind = "ok";
+  } catch (error) {
+    actionMessage.dataset.kind = "error";
+    actionMessage.textContent = `실행 실패: ${String(error)}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function render(snapshot) {
+  latestSnapshot = snapshot;
+  const codexState = snapshot.setup.codexCommandState || (snapshot.setup.codexCommand ? "ready" : "missing");
+  const claudeState = snapshot.setup.claudeCommandState || (snapshot.setup.claudeCommand ? "ready" : "missing");
+  const codexAuth = snapshot.setup.codexAuth || { state: "error" };
+  const claudeAuth = snapshot.setup.claudeAuth || { state: "error" };
+  const codexStatus = providerStatus("codex", codexState, codexAuth, snapshot.codex.connected, snapshot.codex.ageMs);
+  const claudeStatus = providerStatus("claude", claudeState, claudeAuth, snapshot.claude.connected, snapshot.claude.ageMs);
+
+  setStatus(codexDetail, codexStatus.text, codexStatus.kind);
+  setStatus(claudeDetail, claudeStatus.text, claudeStatus.kind);
+  configureProviderButton(codexButton, "codex", snapshot.setup.codexCommand, codexAuth.state);
+  configureProviderButton(claudeButton, "claude", snapshot.setup.claudeCommand, claudeAuth.state);
+
+  hookDetail.textContent = snapshot.claude.hookInstalled
+    ? "연결됨: Claude 사용 중 statusLine 이벤트로 최신 값이 로컬에 기록됩니다."
+    : snapshot.setup.claudeCommand
+      ? "권장: Claude를 사용할 때만 최신 사용량을 받는 로컬 이벤트 연결입니다."
+      : "Claude Code 설치 후 연결할 수 있습니다.";
+  hookButton.disabled = !snapshot.setup.claudeCommand;
+  detailsDetail.textContent = "정상: 별도 서버 없이 로컬 세션 파일에서 모델·날짜별 토큰을 표시합니다.";
+  startupDetail.textContent = snapshot.launchAtLogin
+    ? "켜짐: 앱만 시작하며 사용량 CLI는 상주시켜 두지 않습니다."
+    : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
+  launchAtLogin.checked = snapshot.launchAtLogin;
+
+  const ready = codexAuth.state === "authenticated" && claudeAuth.state === "authenticated";
+  completeButton.disabled = !ready;
+  completeButton.title = ready ? "첫 설정을 마치고 사용량 화면을 엽니다." : "Codex와 Claude 로그인을 모두 완료해야 합니다.";
+  completeButton.hidden = snapshot.setup.onboardingComplete;
+  laterButton.hidden = snapshot.setup.onboardingComplete;
+}
+
+async function refresh(collectUsage = false) {
+  refreshButton.disabled = true;
+  collectButton.disabled = true;
+  actionMessage.dataset.kind = "progress";
+  actionMessage.textContent = collectUsage
+    ? "Codex와 Claude 사용량을 한 번씩 확인하는 중입니다."
+    : "설치 및 로그인 상태를 확인하는 중입니다.";
+  try {
+    const snapshot = collectUsage
       ? await window.usageApp.refreshSetupSnapshot()
       : await window.usageApp.setupSnapshot();
-    const errors = snapshot.refresh && snapshot.refresh.errors ? snapshot.refresh.errors : {};
-    codexDetail.textContent = statusText(
-      snapshot.setup.codexCommand,
-      snapshot.codex.connected,
-      snapshot.codex.ageMs,
-      "Codex CLI를 설치하고 로그인해야 합니다.",
-      "지금 수집을 눌러 공식 app-server 스냅샷을 갱신하세요.",
-      errors.codex,
-    );
-    claudeDetail.textContent = statusText(
-      snapshot.setup.claudeCommand,
-      snapshot.claude.connected,
-      snapshot.claude.ageMs,
-      "Claude Code를 설치하고 로그인해야 합니다.",
-      "Claude를 사용하면 statusLine 이벤트가 갱신하며, 지금 수집은 /usage를 한 번 실행합니다.",
-      errors.claude,
-    );
-    hookDetail.textContent = snapshot.claude.hookInstalled
-      ? "연결됨: Claude가 statusLine을 그릴 때 받은 사용량을 로컬에 기록합니다. 추가 CLI 폴러는 실행하지 않습니다."
-      : "권장: 이벤트 연결을 누르면 Claude 사용 중에만 값이 갱신됩니다. 기존 statusLine 명령은 동의 없이 덮어쓰지 않습니다.";
-    detailsDetail.textContent = "정상: 별도 서버나 런타임 없이 Tauri 앱 내부에서 모델·날짜별 토큰을 표시합니다.";
-    startupDetail.textContent = snapshot.launchAtLogin
-      ? "켜짐: 앱만 시작하며, 사용량 CLI를 상주시켜 두지 않습니다."
-      : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
-    launchAtLogin.checked = snapshot.launchAtLogin;
+    render(snapshot);
+    actionMessage.dataset.kind = "ok";
+    actionMessage.textContent = collectUsage ? "사용량 확인을 마쳤습니다." : "설치 및 로그인 상태를 확인했습니다.";
+  } catch (error) {
+    actionMessage.dataset.kind = "error";
+    actionMessage.textContent = `상태 확인 실패: ${String(error)}`;
   } finally {
     refreshButton.disabled = false;
+    collectButton.disabled = false;
   }
 }
 
-document.getElementById("codex-login").addEventListener("click", () => window.usageApp.openCodexLogin());
-document.getElementById("claude-auth").addEventListener("click", () => window.usageApp.openClaudeAuth());
-document.getElementById("install-hook").addEventListener("click", async () => {
-  await window.usageApp.installClaudeHook();
-  await refresh();
+async function finishOnboarding(skipped) {
+  if (!skipped) {
+    const setup = latestSnapshot && latestSnapshot.setup;
+    const ready = setup
+      && setup.codexAuth.state === "authenticated"
+      && setup.claudeAuth.state === "authenticated";
+    if (!ready) {
+      return;
+    }
+  }
+  await window.usageApp.completeOnboarding(skipped);
+  await window.usageApp.openCompact();
+  await window.usageApp.close();
+}
+
+codexButton.addEventListener("click", () => runProviderAction(codexButton));
+claudeButton.addEventListener("click", () => runProviderAction(claudeButton));
+hookButton.addEventListener("click", async () => {
+  try {
+    await window.usageApp.installClaudeHook();
+    await refresh(false);
+  } catch (error) {
+    actionMessage.dataset.kind = "error";
+    actionMessage.textContent = `이벤트 연결 실패: ${String(error)}`;
+  }
 });
 document.getElementById("open-details").addEventListener("click", () => window.usageApp.openDetails());
 launchAtLogin.addEventListener("change", async () => {
   await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
-  await refresh();
+  await refresh(false);
 });
-refreshButton.addEventListener("click", () => refresh(true));
+refreshButton.addEventListener("click", () => refresh(false));
+collectButton.addEventListener("click", () => refresh(true));
+completeButton.addEventListener("click", () => finishOnboarding(false));
+laterButton.addEventListener("click", () => finishOnboarding(true));
 
-refresh();
+refresh(false);

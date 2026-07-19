@@ -24,13 +24,28 @@ for (const name of ["compact", "insights", "details", "setup"]) {
 const packageJson = require("../package.json");
 const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
-assert.strictEqual(packageJson.version, "1.0.1");
+assert.strictEqual(packageJson.version, "1.0.5");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.build.frontendDist, "../src/ui");
 assert.deepStrictEqual(tauriConfig.app.windows, [], "백그라운드 시작 시 WebView를 만들면 안 됩니다.");
 assert.strictEqual(tauriConfig.bundle.windows.webviewInstallMode.type, "skip");
+assert.strictEqual(tauriConfig.bundle.windows.nsis.installerHooks, "./windows/hooks.nsh");
 assert(!JSON.stringify(packageJson).match(/electron|python|fastapi|node-pty/i));
 assert(!cargoToml.match(/reqwest|ureq|hyper|tauri-plugin-(?:http|updater)/i));
+
+const nsisHooks = fs.readFileSync(path.join(root, "src-tauri", "windows", "hooks.nsh"), "utf8");
+assert(nsisHooks.includes("IfSilent cli_offer_done"), "무인 설치에서는 CLI 설치 질문을 건너뛰어야 합니다.");
+assert.strictEqual((nsisHooks.match(/MB_YESNO\|MB_DEFBUTTON2/g) || []).length, 2, "두 CLI 모두 기본값이 아니요인 명시적 동의를 받아야 합니다.");
+assert(nsisHooks.includes("https://chatgpt.com/codex/install.ps1"), "OpenAI 공식 Windows 설치 스크립트만 사용해야 합니다.");
+assert(nsisHooks.includes("https://claude.ai/install.ps1"), "Anthropic 공식 Windows 설치 스크립트만 사용해야 합니다.");
+assert(nsisHooks.includes("$LOCALAPPDATA\\Programs\\OpenAI\\Codex\\bin\\codex.exe"));
+assert(nsisHooks.includes("$APPDATA\\npm\\codex.cmd"));
+assert(nsisHooks.includes("$PROFILE\\.local\\bin\\claude.exe"));
+assert(nsisHooks.includes("$LOCALAPPDATA\\Microsoft\\WinGet\\Links\\claude.exe"));
+assert(nsisHooks.includes("$APPDATA\\npm\\claude.cmd"));
+assert(!/\bcodex(?:\.exe)?\s+login\b/i.test(nsisHooks), "설치 프로그램이 계정 로그인을 자동 실행하면 안 됩니다.");
+assert(!/\bclaude(?:\.exe)?\s+auth\s+login\b/i.test(nsisHooks), "설치 프로그램이 Claude 로그인을 자동 실행하면 안 됩니다.");
+assert(nsisHooks.indexOf("Push $0") < nsisHooks.indexOf("Pop $0"), "NSIS 훅은 본문이 쓰는 레지스터 값을 복원해야 합니다.");
 
 const trackedSource = [
   ...fs.readdirSync(path.join(root, "src-tauri", "src")).map((name) => path.join(root, "src-tauri", "src", name)),
@@ -40,7 +55,14 @@ assert(!/0\.0\.0\.0|127\.0\.0\.1|localhost:\d+|http\.createServer|\.listen\s*\(/
 assert(!/setInterval\([^,]+,\s*60000\)/.test(trackedSource));
 assert.deepStrictEqual(
   [...new Set(trackedSource.match(/https?:\/\/[^"\s]+/g) || [])].sort(),
-  ["https://openai.com/api/pricing/", "https://platform.claude.com/docs/en/about-claude/pricing"],
+  [
+    "https://chatgpt.com/codex/install.ps1",
+    "https://claude.ai/install.ps1",
+    "https://code.claude.com/docs/en/setup",
+    "https://learn.chatgpt.com/docs/codex/cli",
+    "https://openai.com/api/pricing/",
+    "https://platform.claude.com/docs/en/about-claude/pricing",
+  ],
   "런타임 소스에는 표시용 공식 가격 출처 외의 URL이 없어야 합니다.",
 );
 const rustEntry = fs.readFileSync(path.join(root, "src-tauri", "src", "lib.rs"), "utf8");
@@ -61,7 +83,26 @@ assert(
   rustEntry.includes("show_window_on_worker(app.clone(), label.to_string())"),
   "트레이 메뉴의 보조 창 생성도 이벤트 handler 밖에서 실행해야 합니다.",
 );
+assert(rustEntry.includes('"claude auth login"'), "Claude 로그인 버튼은 실제 로그인 하위 명령을 실행해야 합니다.");
+assert(trackedSource.includes('&["login", "status"]'), "Setup은 Codex 로그인 상태를 직접 확인해야 합니다.");
+assert(trackedSource.includes('&["auth", "status"]'), "Setup은 Claude 로그인 상태를 직접 확인해야 합니다.");
+assert(rustEntry.includes("first_window = if onboarding_complete()"), "첫 실행은 Setup 온보딩을 열어야 합니다.");
+assert(rustEntry.includes('"compact"') && rustEntry.includes('"setup"'), "온보딩 완료 여부에 따른 첫 창이 필요합니다.");
+assert(rustEntry.includes("complete_onboarding"), "사용자가 첫 설정 완료 또는 나중에를 선택할 수 있어야 합니다.");
+assert(trackedSource.includes("desktop_bundle_only"), "보호된 Codex 데스크톱 번들을 독립 CLI로 오인하면 안 됩니다.");
+assert(trackedSource.includes("current_path_values"), "실행 중 설치된 CLI를 감지하려면 최신 사용자 PATH를 다시 읽어야 합니다.");
+assert(trackedSource.includes("Programs/OpenAI/Codex/bin/codex.exe"), "Codex 공식 설치 경로를 PATH와 별도로 확인해야 합니다.");
+assert(trackedSource.includes(".local/bin/claude.exe"), "Claude 공식 설치 경로를 PATH와 별도로 확인해야 합니다.");
 assert(!fs.existsSync(path.join(root, "src", "electron")));
 assert(!fs.existsSync(path.join(root, "src", "node")));
+
+const setupHtml = fs.readFileSync(path.join(ui, "setup.html"), "utf8");
+const setupScript = fs.readFileSync(path.join(ui, "setup.js"), "utf8");
+for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
+  assert(setupHtml.includes(`id="${id}"`), `Setup 온보딩 컨트롤 누락: ${id}`);
+}
+assert(setupScript.trimEnd().endsWith("refresh(false);"), "Setup 첫 진입은 사용량 수집 없이 설치·인증 상태만 확인해야 합니다.");
+assert(setupScript.includes('codexAuth.state === "authenticated"'), "설정 완료는 Codex 직접 인증 상태를 사용해야 합니다.");
+assert(setupScript.includes('claudeAuth.state === "authenticated"'), "설정 완료는 Claude 직접 인증 상태를 사용해야 합니다.");
 
 process.stdout.write(`PASS ${scripts.length}개 UI 스크립트와 Tauri 로컬 전용 구성을 검증했습니다.\n`);

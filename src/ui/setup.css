@@ -63,6 +63,24 @@ h1 {
   padding: 14px;
 }
 
+.check > div {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status-message {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+.check > button,
+.check > .toggle {
+  position: relative;
+  z-index: 1;
+}
+
 h2 {
   margin: 0 0 5px;
   font-size: 15px;
@@ -72,6 +90,19 @@ p {
   margin: 0;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.status-message[data-kind="ok"] {
+  color: var(--ok);
+}
+
+.status-message[data-kind="warning"] {
+  color: var(--warn);
+}
+
+.status-message[data-kind="error"],
+.action-message[data-kind="error"] {
+  color: #ef8f8f;
 }
 
 button,
@@ -92,6 +123,11 @@ button {
 
 button:hover {
   border-color: #4a566b;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 button:focus-visible {
@@ -118,6 +154,51 @@ button:focus-visible {
 
 footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 16px;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 12px 0 4px;
+}
+
+.onboarding-actions,
+.status-actions {
+  display: flex;
+  gap: 8px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 620px) {
+  footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .onboarding-actions,
+  .status-actions {
+    justify-content: flex-end;
+  }
+}
+
+.action-message {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #171c25;
+  padding: 10px 12px;
+}
+
+.action-message:empty {
+  display: none;
+}
+
+.action-message[data-kind="ok"] {
+  color: var(--ok);
 }

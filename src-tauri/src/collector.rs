@@ -1,7 +1,9 @@
-use crate::storage::{append_history_if_changed, now_kst_iso, read_json, write_json};
+use crate::storage::{append_history_if_changed, home_dir, now_kst_iso, read_json, write_json};
 use chrono::{FixedOffset, TimeZone};
 use regex::Regex;
 use serde_json::{Value, json};
+use std::collections::HashSet;
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -10,6 +12,48 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CliState {
+    Ready,
+    DesktopBundleOnly,
+    Missing,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthState {
+    Authenticated,
+    Unauthenticated,
+    Unavailable,
+    Error,
+}
+
+impl AuthState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Authenticated => "authenticated",
+            Self::Unauthenticated => "unauthenticated",
+            Self::Unavailable => "unavailable",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthProbe {
+    pub state: AuthState,
+    pub error: Option<String>,
+}
+
+impl CliState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::DesktopBundleOnly => "desktop_bundle_only",
+            Self::Missing => "missing",
+        }
+    }
+}
 
 #[cfg(windows)]
 fn hide_window(command: &mut Command) {
@@ -20,24 +64,220 @@ fn hide_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_window(_command: &mut Command) {}
 
-pub fn resolve_command(name: &str) -> Option<PathBuf> {
+#[cfg(windows)]
+fn current_path_values() -> Vec<OsString> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    let mut values = std::env::var_os("PATH").into_iter().collect::<Vec<_>>();
+    let user = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(environment) = user.open_subkey("Environment")
+        && let Ok(path) = environment.get_value::<String, _>("Path")
+    {
+        values.push(path.into());
+    }
+    let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
+    if let Ok(environment) =
+        machine.open_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+        && let Ok(path) = environment.get_value::<String, _>("Path")
+    {
+        values.push(path.into());
+    }
+    values
+}
+
+#[cfg(not(windows))]
+fn current_path_values() -> Vec<OsString> {
+    std::env::var_os("PATH").into_iter().collect()
+}
+
+fn path_candidate_names(name: &str) -> Vec<String> {
+    if Path::new(name).extension().is_some() {
+        vec![name.to_string()]
+    } else {
+        [
+            name.to_string(),
+            format!("{name}.exe"),
+            format!("{name}.cmd"),
+            format!("{name}.bat"),
+        ]
+        .into_iter()
+        .collect()
+    }
+}
+
+fn fresh_path_candidates(name: &str) -> Vec<PathBuf> {
+    let names = path_candidate_names(name);
+    current_path_values()
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .map(|path| PathBuf::from(path.to_string_lossy().trim().trim_matches('"')))
+        .filter(|path| !path.as_os_str().is_empty())
+        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .filter(|path| path.exists())
+        .collect()
+}
+
+fn command_candidates(name: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
     let mut command = Command::new("where.exe");
     command.arg(name);
     hide_window(&mut command);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
+    if let Ok(output) = command.output()
+        && output.status.success()
+    {
+        candidates.extend(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(PathBuf::from),
+        );
     }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(PathBuf::from)
-        .find(|path| path.exists())
+    candidates.extend(fresh_path_candidates(name));
+    let mut seen = HashSet::new();
+    candidates.retain(|path| seen.insert(path.to_string_lossy().to_ascii_lowercase()));
+    candidates
 }
 
-pub fn command_exists(name: &str) -> bool {
-    resolve_command(name).is_some()
+fn is_protected_codex_desktop_resource(path: &Path) -> bool {
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    normalized.contains("\\windowsapps\\openai.codex_")
+        && normalized.contains("\\app\\resources\\codex")
+}
+
+pub fn resolve_command(name: &str) -> Option<PathBuf> {
+    command_candidates(name)
+        .into_iter()
+        .find(|path| path.exists() && !is_protected_codex_desktop_resource(path))
+}
+
+pub fn resolve_codex_command() -> Option<PathBuf> {
+    resolve_command("codex.exe")
+        .or_else(|| resolve_command("codex"))
+        .or_else(|| {
+            std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .map(|path| path.join("Programs/OpenAI/Codex/bin/codex.exe"))
+                .filter(|path| path.exists())
+        })
+        .or_else(|| {
+            std::env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .map(|path| path.join("npm/codex.cmd"))
+                .filter(|path| path.exists())
+        })
+        .or_else(|| {
+            let path = home_dir().join(".local/bin/codex.exe");
+            path.exists().then_some(path)
+        })
+}
+
+pub fn resolve_claude_command() -> Option<PathBuf> {
+    resolve_command("claude.exe")
+        .or_else(|| resolve_command("claude"))
+        .or_else(|| {
+            let path = home_dir().join(".local/bin/claude.exe");
+            path.exists().then_some(path)
+        })
+        .or_else(|| {
+            std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .map(|path| path.join("Microsoft/WinGet/Links/claude.exe"))
+                .filter(|path| path.exists())
+        })
+        .or_else(|| {
+            std::env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .map(|path| path.join("npm/claude.cmd"))
+                .filter(|path| path.exists())
+        })
+        .or_else(|| {
+            let path = home_dir().join(".claude/local/claude.exe");
+            path.exists().then_some(path)
+        })
+}
+
+pub fn codex_cli_state() -> CliState {
+    if resolve_codex_command().is_some() {
+        return CliState::Ready;
+    }
+    let desktop_bundle_found = ["codex.exe", "codex"]
+        .iter()
+        .flat_map(|name| command_candidates(name))
+        .any(|path| is_protected_codex_desktop_resource(&path));
+    if desktop_bundle_found {
+        CliState::DesktopBundleOnly
+    } else {
+        CliState::Missing
+    }
+}
+
+pub fn claude_cli_state() -> CliState {
+    if resolve_claude_command().is_some() {
+        CliState::Ready
+    } else {
+        CliState::Missing
+    }
+}
+
+fn auth_state_from_success(success: bool) -> AuthState {
+    if success {
+        AuthState::Authenticated
+    } else {
+        AuthState::Unauthenticated
+    }
+}
+
+fn probe_auth_command(
+    executable: Option<PathBuf>,
+    arguments: &[&str],
+    timeout: Duration,
+) -> AuthProbe {
+    let Some(executable) = executable else {
+        return AuthProbe {
+            state: AuthState::Unavailable,
+            error: None,
+        };
+    };
+    let mut command = executable_command(&executable);
+    command.args(arguments).stdin(Stdio::null());
+    match command_output_with_timeout(command, timeout) {
+        Ok(output) => AuthProbe {
+            // 계정 이메일이나 조직명이 포함될 수 있는 stdout/stderr는 판정 후 즉시 버립니다.
+            state: auth_state_from_success(output.status.success()),
+            error: None,
+        },
+        Err(error) => AuthProbe {
+            state: AuthState::Error,
+            error: Some(error),
+        },
+    }
+}
+
+pub fn probe_codex_auth(timeout: Duration) -> AuthProbe {
+    probe_auth_command(resolve_codex_command(), &["login", "status"], timeout)
+}
+
+pub fn probe_claude_auth(timeout: Duration) -> AuthProbe {
+    probe_auth_command(resolve_claude_command(), &["auth", "status"], timeout)
+}
+
+fn executable_command(path: &Path) -> Command {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat") {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/D", "/C"]).arg(path);
+        command
+    } else {
+        Command::new(path)
+    }
 }
 
 fn write_rpc(stdin: &mut impl Write, message: &Value) -> Result<(), String> {
@@ -125,10 +365,9 @@ pub fn capture_codex(
     history_dir: &Path,
     timeout: Duration,
 ) -> Result<Value, String> {
-    let executable = resolve_command("codex.exe")
-        .or_else(|| resolve_command("codex"))
-        .ok_or_else(|| "Codex CLI를 찾을 수 없습니다.".to_string())?;
-    let mut command = Command::new(executable);
+    let executable =
+        resolve_codex_command().ok_or_else(|| "Codex CLI를 찾을 수 없습니다.".to_string())?;
+    let mut command = executable_command(&executable);
     command
         .args(["app-server", "--listen", "stdio://"])
         .stdin(Stdio::piped())
@@ -164,7 +403,7 @@ pub fn capture_codex(
         &json!({
             "method": "initialize",
             "id": 1,
-            "params": {"clientInfo": {"name": "ai_usage_monitor", "title": "AI Usage Monitor", "version": "1.0.1"}}
+            "params": {"clientInfo": {"name": "ai_usage_monitor", "title": "AI Usage Monitor", "version": env!("CARGO_PKG_VERSION")}}
         }),
     )?;
 
@@ -326,10 +565,9 @@ pub fn capture_claude(
     history_dir: &Path,
     timeout: Duration,
 ) -> Result<Value, String> {
-    let executable = resolve_command("claude.exe")
-        .or_else(|| resolve_command("claude"))
-        .ok_or_else(|| "Claude Code를 찾을 수 없습니다.".to_string())?;
-    let mut command = Command::new(executable);
+    let executable =
+        resolve_claude_command().ok_or_else(|| "Claude Code를 찾을 수 없습니다.".to_string())?;
+    let mut command = executable_command(&executable);
     command.arg("/usage");
     let output = command_output_with_timeout(command, timeout)?;
     let raw = format!(
@@ -395,5 +633,32 @@ mod tests {
         assert_eq!(limits[0]["remaining_percent"], 58);
         assert_eq!(limits[0]["reset_text"], "resets 07/18 21:30");
         assert_eq!(limits[1]["remaining_percent"], 29);
+    }
+
+    #[test]
+    fn packaged_codex_desktop_binary_is_not_a_standalone_cli() {
+        let packaged = Path::new(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.707.9981.0_x64__example\app\resources\codex.exe",
+        );
+        let standalone = Path::new(r"C:\Users\tester\AppData\Roaming\npm\codex.cmd");
+        assert!(is_protected_codex_desktop_resource(packaged));
+        assert!(!is_protected_codex_desktop_resource(standalone));
+    }
+
+    #[test]
+    fn extensionless_command_checks_windows_launchers() {
+        assert_eq!(
+            path_candidate_names("codex"),
+            ["codex", "codex.exe", "codex.cmd", "codex.bat"]
+        );
+        assert_eq!(path_candidate_names("codex.exe"), ["codex.exe"]);
+    }
+
+    #[test]
+    fn auth_exit_status_is_reduced_to_a_boolean_state() {
+        assert_eq!(auth_state_from_success(true), AuthState::Authenticated);
+        assert_eq!(auth_state_from_success(false), AuthState::Unauthenticated);
+        assert_eq!(AuthState::Unavailable.as_str(), "unavailable");
+        assert_eq!(AuthState::Error.as_str(), "error");
     }
 }

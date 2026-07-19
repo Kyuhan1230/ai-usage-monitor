@@ -12,6 +12,7 @@ window.usageApp = {
   setOpacity: (value) => invoke("set_opacity", { value }),
   minimize: () => invoke("minimize_window"),
   close: () => invoke("close_window"),
+  openCompact: () => invoke("show_window", { label: "compact" }),
   openDetails: () => invoke("show_window", { label: "details" }),
   openInsights: () => invoke("show_window", { label: "insights" }),
   openSetup: () => invoke("show_window", { label: "setup" }),
@@ -25,5 +26,8 @@ window.usageApp = {
   },
   openCodexLogin: () => invoke("open_login_terminal", { provider: "codex" }),
   openClaudeAuth: () => invoke("open_login_terminal", { provider: "claude" }),
+  installProvider: (provider) => invoke("open_install_terminal", { provider }),
+  openOfficialGuide: (provider) => invoke("open_official_guide", { provider }),
+  completeOnboarding: (skipped) => invoke("complete_onboarding", { skipped }),
   setLaunchAtLogin: (enabled) => invoke("set_launch_at_login", { enabled }),
 };

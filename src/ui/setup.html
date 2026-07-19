@@ -11,24 +11,24 @@
     <header>
       <p class="eyebrow">Setup</p>
       <h1>Codex Claude Usage</h1>
-      <p class="summary">토큰이나 쿠키를 저장하지 않습니다. Codex는 새로고침 때 공식 app-server를 잠깐 실행하고, Claude는 statusLine 이벤트를 로컬 파일에 기록합니다.</p>
+      <p class="summary">Codex와 Claude의 설치·로그인 상태를 직접 확인합니다. 계정 정보나 명령 출력은 저장하지 않으며, 필요한 단계만 실행할 수 있습니다.</p>
     </header>
 
     <section class="checks">
       <article class="check">
         <div>
           <h2>Codex CLI</h2>
-          <p id="codex-detail">확인 중</p>
+          <p id="codex-detail" class="status-message">확인 중</p>
         </div>
-        <button id="codex-login" type="button">codex login</button>
+        <button id="codex-login" type="button">확인 중</button>
       </article>
 
       <article class="check">
         <div>
           <h2>Claude Code</h2>
-          <p id="claude-detail">확인 중</p>
+          <p id="claude-detail" class="status-message">확인 중</p>
         </div>
-        <button id="claude-auth" type="button">claude auth</button>
+        <button id="claude-auth" type="button">확인 중</button>
       </article>
 
       <article class="check">
@@ -59,8 +59,17 @@
       </article>
     </section>
 
+    <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+
     <footer>
-      <button id="refresh" type="button">지금 수집</button>
+      <div class="onboarding-actions">
+        <button id="setup-later" type="button">나중에</button>
+        <button id="setup-complete" type="button" disabled>설정 완료</button>
+      </div>
+      <div class="status-actions">
+        <button id="refresh" type="button">상태 다시 확인</button>
+        <button id="collect" type="button">사용량 확인</button>
+      </div>
     </footer>
   </main>
   <script src="bridge.js"></script>

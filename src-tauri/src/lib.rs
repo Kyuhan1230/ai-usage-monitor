@@ -5,7 +5,10 @@ mod storage;
 mod usage;
 
 use crate::analytics::build_analytics;
-use crate::collector::{capture_claude, capture_codex, command_exists};
+use crate::collector::{
+    AuthProbe, CliState, capture_claude, capture_codex, claude_cli_state, codex_cli_state,
+    probe_claude_auth, probe_codex_auth, resolve_claude_command, resolve_codex_command,
+};
 use crate::storage::{data_dir, read_history, read_json, write_json};
 use serde_json::{Map, Value, json};
 use std::process::Command;
@@ -148,12 +151,46 @@ fn snapshot_value(app: &AppHandle) -> Value {
 
 fn setup_snapshot_value(app: &AppHandle) -> Value {
     let mut snapshot = snapshot_value(app);
+    let codex_state = codex_cli_state();
+    let claude_state = claude_cli_state();
+    let (codex_auth, claude_auth) = std::thread::scope(|scope| {
+        let codex = scope.spawn(|| probe_codex_auth(Duration::from_secs(8)));
+        let claude = scope.spawn(|| probe_claude_auth(Duration::from_secs(8)));
+        (
+            codex.join().unwrap_or_else(|_| AuthProbe {
+                state: crate::collector::AuthState::Error,
+                error: Some("Codex 인증 확인 작업이 중단됐습니다.".into()),
+            }),
+            claude.join().unwrap_or_else(|_| AuthProbe {
+                state: crate::collector::AuthState::Error,
+                error: Some("Claude 인증 확인 작업이 중단됐습니다.".into()),
+            }),
+        )
+    });
     snapshot.as_object_mut().expect("snapshot object").insert("setup".into(), json!({
-        "codexCommand": command_exists("codex.exe") || command_exists("codex"),
-        "claudeCommand": command_exists("claude.exe") || command_exists("claude"),
+        "codexCommand": codex_state == CliState::Ready,
+        "codexCommandState": codex_state.as_str(),
+        "codexAuth": auth_probe_value(&codex_auth),
+        "claudeCommand": claude_state == CliState::Ready,
+        "claudeCommandState": claude_state.as_str(),
+        "claudeAuth": auth_probe_value(&claude_auth),
+        "onboardingComplete": onboarding_complete(),
         "hookCommand": format!("\"{}\" --claude-status-hook", std::env::current_exe().map(|path| path.display().to_string()).unwrap_or_default())
     }));
     snapshot
+}
+
+fn auth_probe_value(probe: &AuthProbe) -> Value {
+    json!({
+        "state": probe.state.as_str(),
+        "error": probe.error,
+    })
+}
+
+fn onboarding_complete() -> bool {
+    read_json(&data_dir().join("onboarding.json"))
+        .and_then(|value| value.get("completed").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 fn notify_alerts(app: &AppHandle, report: &Value) {
@@ -259,17 +296,32 @@ async fn refresh_snapshot(app: AppHandle) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn setup_snapshot(app: AppHandle) -> Value {
-    setup_snapshot_value(&app)
+async fn setup_snapshot(app: AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || setup_snapshot_value(&app))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn refresh_setup_snapshot(app: AppHandle) -> Result<Value, String> {
-    let refreshed = app.clone();
-    tauri::async_runtime::spawn_blocking(move || refresh_all(&refreshed))
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(setup_snapshot_value(&app))
+    tauri::async_runtime::spawn_blocking(move || {
+        refresh_all(&app);
+        setup_snapshot_value(&app)
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn complete_onboarding(skipped: bool) -> Result<Value, String> {
+    let value = json!({
+        "schemaVersion": 1,
+        "completed": true,
+        "skipped": skipped,
+        "completedAt": chrono::Utc::now().to_rfc3339(),
+    });
+    write_json(&data_dir().join("onboarding.json"), &value)?;
+    Ok(value)
 }
 
 #[tauri::command]
@@ -371,7 +423,7 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             620.0,
             true,
         ),
-        "setup" => ("setup.html", "Setup", 560.0, 720.0, 500.0, 580.0, true),
+        "setup" => ("setup.html", "Setup", 680.0, 820.0, 560.0, 640.0, true),
         _ => return Err("unknown window label".to_string()),
     };
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
@@ -415,14 +467,77 @@ fn install_claude_hook(force: bool) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn open_login_terminal(provider: String) -> Result<(), String> {
-    let command = if provider == "codex" {
-        "codex login"
-    } else {
-        "claude auth"
+fn open_login_terminal(provider: String) -> Result<Value, String> {
+    let (executable, arguments, display_command) = match provider.as_str() {
+        "codex" => (
+            resolve_codex_command().ok_or_else(|| {
+                if codex_cli_state() == CliState::DesktopBundleOnly {
+                    "Codex 데스크톱 앱의 보호된 실행 파일만 감지됐습니다. 독립 실행 Codex CLI를 설치하세요."
+                        .to_string()
+                } else {
+                    "Codex CLI를 찾을 수 없습니다. 공식 설치 안내에서 CLI를 먼저 설치하세요."
+                        .to_string()
+                }
+            })?,
+            &["login"][..],
+            "codex login",
+        ),
+        "claude" => (
+            resolve_claude_command().ok_or_else(|| {
+                "Claude Code를 찾을 수 없습니다. 공식 설치 안내에서 CLI를 먼저 설치하세요."
+                    .to_string()
+            })?,
+            &["auth", "login"][..],
+            "claude auth login",
+        ),
+        _ => return Err("지원하지 않는 로그인 제공자입니다.".to_string()),
+    };
+    let quoted_path = executable.to_string_lossy().replace('\'', "''");
+    let command = format!("& '{quoted_path}' {}", arguments.join(" "));
+    Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-NoExit", "-Command", &command])
+        .spawn()
+        .map(|_| json!({"status":"opened","command":display_command}))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_install_terminal(provider: String) -> Result<Value, String> {
+    let (script, display_command) = match provider.as_str() {
+        "codex" => (
+            "irm https://chatgpt.com/codex/install.ps1 | iex",
+            "OpenAI Codex CLI 공식 설치 프로그램",
+        ),
+        "claude" => (
+            "irm https://claude.ai/install.ps1 | iex",
+            "Anthropic Claude Code 공식 설치 프로그램",
+        ),
+        _ => return Err("지원하지 않는 CLI 제공자입니다.".to_string()),
     };
     Command::new("powershell.exe")
-        .args(["-NoExit", "-Command", command])
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NoExit",
+            "-ExecutionPolicy",
+            "ByPass",
+            "-Command",
+            script,
+        ])
+        .spawn()
+        .map(|_| json!({"status":"opened","command":display_command}))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_official_guide(provider: String) -> Result<(), String> {
+    let url = match provider.as_str() {
+        "codex" => "https://learn.chatgpt.com/docs/codex/cli",
+        "claude" => "https://code.claude.com/docs/en/setup",
+        _ => return Err("지원하지 않는 설치 안내 제공자입니다.".to_string()),
+    };
+    Command::new("explorer.exe")
+        .arg(url)
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -494,7 +609,12 @@ pub fn run() {
         .setup(|app| {
             build_tray(app)?;
             if !std::env::args().any(|argument| argument == "--background") {
-                show_window_by_label(app.handle(), "compact").map_err(std::io::Error::other)?;
+                let first_window = if onboarding_complete() {
+                    "compact"
+                } else {
+                    "setup"
+                };
+                show_window_by_label(app.handle(), first_window).map_err(std::io::Error::other)?;
             }
             Ok(())
         })
@@ -509,6 +629,7 @@ pub fn run() {
             refresh_snapshot,
             setup_snapshot,
             refresh_setup_snapshot,
+            complete_onboarding,
             set_always_on_top,
             set_opacity,
             minimize_window,
@@ -516,6 +637,8 @@ pub fn run() {
             show_window,
             install_claude_hook,
             open_login_terminal,
+            open_install_terminal,
+            open_official_guide,
             set_launch_at_login,
             quit_app
         ])
