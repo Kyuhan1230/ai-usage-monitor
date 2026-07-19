@@ -106,6 +106,8 @@ assert(
 );
 assert(insightsHtml.includes("실제 구독 청구액 아님"), "API 정가 환산은 실제 청구액과 구분해야 합니다.");
 assert(insightsScript.includes("function renderDecision"), "Insights는 최우선 판정과 행동을 별도로 렌더링해야 합니다.");
+assert(insightsScript.includes("function formatForecastRange"), "예상 고갈은 단일 시각보다 범위를 우선 표시해야 합니다.");
+assert(insightsScript.includes("rateVariabilityPercent"), "예측 신뢰도에는 속도 변동 근거가 필요합니다.");
 for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
   assert(setupHtml.includes(`id="${id}"`), `Setup 온보딩 컨트롤 누락: ${id}`);
 }

@@ -363,10 +363,48 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
     let rate = (elapsed_hours >= 1.0 / 12.0 && depleted > 0.0).then_some(depleted / elapsed_hours);
     let exhaustion =
         rate.map(|rate| latest.captured_ms + (latest.remaining / rate * HOUR_MS as f64) as i64);
+    let interval_rates = cycle
+        .windows(2)
+        .filter_map(|pair| {
+            let hours = (pair[1].captured_ms - pair[0].captured_ms) as f64 / HOUR_MS as f64;
+            (hours >= 1.0 / 12.0)
+                .then_some(((pair[0].remaining - pair[1].remaining).max(0.0)) / hours)
+        })
+        .collect::<Vec<_>>();
+    let variability = rate.and_then(|center| {
+        (interval_rates.len() >= 2).then(|| {
+            let mad = median(
+                interval_rates
+                    .iter()
+                    .map(|value| (value - center).abs())
+                    .collect(),
+            )
+            .unwrap_or(0.0);
+            round((mad / center) * 100.0, 0)
+        })
+    });
+    let exhaustion_range = rate.and_then(|center| {
+        let variability = variability? / 100.0;
+        let spread = variability.clamp(0.15, 0.75);
+        let fast_rate = center * (1.0 + spread);
+        let slow_rate = (center * (1.0 - spread)).max(center * 0.1);
+        Some((
+            latest.captured_ms + (latest.remaining / fast_rate * HOUR_MS as f64) as i64,
+            latest.captured_ms + (latest.remaining / slow_rate * HOUR_MS as f64) as i64,
+        ))
+    });
     let reset = reset_at(&latest.limit, now_ms);
-    let confidence = if cycle.len() >= 6 && elapsed_hours >= 6.0 {
+    let confidence = if cycle.len() >= 8
+        && elapsed_hours >= 6.0
+        && interval_rates.len() >= 5
+        && variability.is_some_and(|value| value <= 25.0)
+    {
         "high"
-    } else if cycle.len() >= 3 && elapsed_hours >= 1.0 {
+    } else if cycle.len() >= 4
+        && elapsed_hours >= 2.0
+        && interval_rates.len() >= 3
+        && variability.is_some_and(|value| value <= 60.0)
+    {
         "medium"
     } else {
         "low"
@@ -375,8 +413,13 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
         "remainingPercent": round(latest.remaining, 0),
         "sampleCount": cycle.len(),
         "observedHours": round(elapsed_hours, 1),
+        "observedIntervalCount": interval_rates.len(),
         "depletionRatePercentPerHour": rate.map(|value| round(value, 2)),
         "expectedExhaustionAt": exhaustion.map(iso),
+        "expectedExhaustionEarliestAt": exhaustion_range.map(|value| iso(value.0)),
+        "expectedExhaustionLatestAt": exhaustion_range.map(|value| iso(value.1)),
+        "rateVariabilityPercent": variability,
+        "forecastMethod": "cycle_average_with_interval_mad_band",
         "resetAt": reset.map(iso),
         "willExhaustBeforeReset": exhaustion.zip(reset).is_some_and(|(empty, reset)| empty < reset),
         "confidence": confidence,
@@ -750,6 +793,18 @@ mod tests {
         assert_eq!(
             report["providers"]["codex"]["limits"]["five_hour"]["willExhaustBeforeReset"],
             true
+        );
+        assert!(
+            report["providers"]["codex"]["limits"]["five_hour"]["expectedExhaustionEarliestAt"]
+                .is_string()
+        );
+        assert!(
+            report["providers"]["codex"]["limits"]["five_hour"]["expectedExhaustionLatestAt"]
+                .is_string()
+        );
+        assert_eq!(
+            report["providers"]["codex"]["limits"]["five_hour"]["confidence"],
+            "medium"
         );
         assert_eq!(report["anomalies"]["codex"]["detected"], true);
         assert!(report["costs"]["estimatedUsd"].as_f64().unwrap() > 0.0);

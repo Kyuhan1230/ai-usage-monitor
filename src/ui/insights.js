@@ -42,6 +42,16 @@ function formatDateTime(value) {
   }).format(new Date(timestamp));
 }
 
+function formatForecastRange(limit) {
+  const earliest = Date.parse(limit.expectedExhaustionEarliestAt);
+  const latest = Date.parse(limit.expectedExhaustionLatestAt);
+  if (Number.isFinite(earliest) && Number.isFinite(latest)) {
+    return `${formatDateTime(limit.expectedExhaustionEarliestAt)} ~ ${formatDateTime(limit.expectedExhaustionLatestAt)}`;
+  }
+  const expected = formatDateTime(limit.expectedExhaustionAt);
+  return expected === "예측 불가" ? expected : `약 ${expected} · 범위 기록 부족`;
+}
+
 function appendListItem(list, text, className = "") {
   const item = document.createElement("li");
   item.textContent = text;
@@ -70,10 +80,10 @@ function renderForecasts(analytics) {
       const details = document.createElement("dl");
       const pairs = [
         ["소진 속도", Number.isFinite(limit.depletionRatePercentPerHour) ? `${limit.depletionRatePercentPerHour}%p/시간` : "기록 부족"],
-        ["예상 고갈", formatDateTime(limit.expectedExhaustionAt)],
+        ["예상 범위", formatForecastRange(limit)],
         ["리셋", formatDateTime(limit.resetAt)],
         ["판정", limit.willExhaustBeforeReset ? "리셋 전 고갈 위험" : "현재 속도 양호"],
-        ["신뢰도", `${CONFIDENCE_LABELS[limit.confidence] || limit.confidence} · ${limit.sampleCount}개 표본`],
+        ["신뢰 근거", `${CONFIDENCE_LABELS[limit.confidence] || limit.confidence} · ${limit.sampleCount}개 표본${Number.isFinite(limit.rateVariabilityPercent) ? ` · 속도 변동 ${limit.rateVariabilityPercent}%` : " · 변동 기록 부족"}`],
       ];
       for (const [label, value] of pairs) {
         const term = document.createElement("dt");
