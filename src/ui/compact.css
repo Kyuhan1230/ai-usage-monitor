@@ -53,7 +53,7 @@ input:focus-visible {
 }
 
 .shell {
-  height: 100vh;
+  min-height: 100vh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   gap: 10px;
@@ -223,7 +223,7 @@ h1 {
 
 .decision-strip strong {
   display: -webkit-box;
-  overflow: hidden;
+  overflow: auto;
   color: var(--text);
   font-size: 12px;
   font-weight: 600;

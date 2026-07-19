@@ -394,6 +394,12 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
         ))
     });
     let reset = reset_at(&latest.limit, now_ms);
+    let will_exhaust_before_reset = exhaustion.zip(reset).map(|(empty, reset)| empty < reset);
+    let forecast_status = match will_exhaust_before_reset {
+        Some(true) => "risk",
+        Some(false) => "safe",
+        None => "unknown",
+    };
     let confidence = if cycle.len() >= 8
         && elapsed_hours >= 6.0
         && interval_rates.len() >= 5
@@ -421,7 +427,8 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
         "rateVariabilityPercent": variability,
         "forecastMethod": "cycle_average_with_interval_mad_band",
         "resetAt": reset.map(iso),
-        "willExhaustBeforeReset": exhaustion.zip(reset).is_some_and(|(empty, reset)| empty < reset),
+        "willExhaustBeforeReset": will_exhaust_before_reset,
+        "forecastStatus": forecast_status,
         "confidence": confidence,
         "anomaly": {"detected": false}
     })
@@ -461,6 +468,7 @@ fn usage_anomaly(rows: &[UsageRow], provider: &str, now_ms: i64) -> Value {
     if today >= 10_000 && today as f64 > threshold {
         json!({
             "detected": true,
+            "date": local_date(now_ms, 0),
             "todayTokens": today,
             "baselineDailyTokens": round(baseline, 0),
             "multiplier": round(today as f64 / baseline, 1)
@@ -645,7 +653,9 @@ pub fn build_analytics(history: &[Value], rows: &[UsageRow], now_ms: i64) -> Val
                         "limitType": kind,
                         "severity": severity,
                         "remainingPercent": remaining,
-                        "reason": reason
+                        "reason": reason,
+                        "confidence": analysis.get("confidence").cloned().unwrap_or(Value::Null),
+                        "resetAt": analysis.get("resetAt").cloned().unwrap_or(Value::Null)
                     }));
                 }
             }
@@ -809,5 +819,22 @@ mod tests {
         assert_eq!(report["anomalies"]["codex"]["detected"], true);
         assert!(report["costs"]["estimatedUsd"].as_f64().unwrap() > 0.0);
         assert!(!report["recommendations"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_forecast_inputs_are_unknown_instead_of_safe() {
+        let now_ms = chrono::DateTime::parse_from_rfc3339("2026-07-18T12:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        let limit = analyze_limit(
+            &[Sample {
+                captured_ms: now_ms,
+                remaining: 80.0,
+                limit: json!({"type": "five_hour", "remaining_percent": 80}),
+            }],
+            now_ms,
+        );
+        assert_eq!(limit["forecastStatus"], "unknown");
+        assert!(limit["willExhaustBeforeReset"].is_null());
     }
 }

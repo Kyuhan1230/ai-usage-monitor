@@ -43,7 +43,7 @@ impl Default for RuntimeState {
                 always_on_top: false,
                 opacity: 0.96,
             }),
-            last_alert_signature: Mutex::new(String::new()),
+            last_alert_signature: Mutex::new(stored_notification_signature()),
             last_collection_ms: Mutex::new(0),
         }
     }
@@ -77,6 +77,19 @@ fn has_new_activity(previous: Option<u64>, current: Option<u64>) -> bool {
 
 fn auto_refresh_cooldown_elapsed(last_collection_ms: i64, now_ms: i64) -> bool {
     now_ms - last_collection_ms >= AUTO_REFRESH_COOLDOWN_MS
+}
+
+fn automatic_refresh_decision(
+    pending_activity: bool,
+    changed: bool,
+    cooldown_elapsed: bool,
+) -> (bool, bool) {
+    let pending_activity = pending_activity || changed;
+    if pending_activity && cooldown_elapsed {
+        (false, true)
+    } else {
+        (pending_activity, false)
+    }
 }
 
 fn status_age_ms(status: Option<&Value>) -> Value {
@@ -227,11 +240,46 @@ fn onboarding_complete() -> bool {
         .unwrap_or(false)
 }
 
+fn notification_state_path() -> std::path::PathBuf {
+    data_dir().join("notification-state.json")
+}
+
+fn stored_notification_signature() -> String {
+    read_json(&notification_state_path())
+        .and_then(|value| {
+            value
+                .get("signature")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
+}
+
+fn persist_notification_signature(signature: &str) {
+    let _ = write_json(
+        &notification_state_path(),
+        &json!({
+            "schemaVersion": 1,
+            "signature": signature,
+            "updatedAt": chrono::Utc::now().to_rfc3339(),
+        }),
+    );
+}
+
 fn notification_payload(report: &Value) -> Option<(String, String)> {
     let alerts = report
         .get("alerts")
         .and_then(Value::as_array)
-        .cloned()
+        .map(|alerts| {
+            alerts
+                .iter()
+                .filter(|alert| {
+                    alert.get("reason").and_then(Value::as_str) != Some("forecast_before_reset")
+                        || alert.get("confidence").and_then(Value::as_str) != Some("low")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
     let anomalies = ["codex", "claude"]
         .iter()
@@ -246,6 +294,7 @@ fn notification_payload(report: &Value) -> Option<(String, String)> {
         .map(|provider| {
             json!({
                 "provider": provider,
+                "date": report["anomalies"][*provider]["date"],
                 "multiplier": report["anomalies"][*provider]["multiplier"]
             })
         })
@@ -253,9 +302,30 @@ fn notification_payload(report: &Value) -> Option<(String, String)> {
     if alerts.is_empty() && anomalies.is_empty() {
         return None;
     }
+    let alert_episodes = alerts
+        .iter()
+        .map(|alert| {
+            json!({
+                "provider": alert.get("provider"),
+                "limitType": alert.get("limitType"),
+                "severity": alert.get("severity"),
+                "reason": alert.get("reason"),
+                "resetAt": alert.get("resetAt"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let anomaly_episodes = anomalies
+        .iter()
+        .map(|anomaly| {
+            json!({
+                "provider": anomaly.get("provider"),
+                "date": anomaly.get("date"),
+            })
+        })
+        .collect::<Vec<_>>();
     let signature = serde_json::to_string(&json!({
-        "alerts": &alerts,
-        "anomalies": &anomalies,
+        "alerts": alert_episodes,
+        "anomalies": anomaly_episodes,
     }))
     .unwrap_or_default();
     let mut messages = alerts
@@ -302,16 +372,30 @@ fn notification_payload(report: &Value) -> Option<(String, String)> {
     Some((signature, messages.join(" · ")))
 }
 
+fn update_notification_signature(previous: &mut String, next: Option<&str>) -> bool {
+    let next = next.unwrap_or_default();
+    if previous == next {
+        return false;
+    }
+    next.clone_into(previous);
+    true
+}
+
 fn notify_alerts(app: &AppHandle, report: &Value) {
-    let Some((signature, body)) = notification_payload(report) else {
-        return;
-    };
+    let payload = notification_payload(report);
     let state = app.state::<RuntimeState>();
     let mut previous = state.last_alert_signature.lock().expect("alert state lock");
-    if *previous == signature {
+    if !update_notification_signature(
+        &mut previous,
+        payload.as_ref().map(|(signature, _)| signature.as_str()),
+    ) {
         return;
     }
-    *previous = signature;
+    persist_notification_signature(&previous);
+    let Some((_, body)) = payload else {
+        return;
+    };
+    drop(previous);
     let _ = app
         .notification()
         .builder()
@@ -384,24 +468,29 @@ fn refresh_all(app: &AppHandle) -> Value {
 fn start_activity_monitor(app: AppHandle) {
     thread::spawn(move || {
         let mut last_activity = usage::latest_session_activity_ms();
+        let mut pending_activity = false;
         loop {
             thread::sleep(ACTIVITY_CHECK_INTERVAL);
             if !activity_monitoring_enabled() {
+                pending_activity = false;
                 continue;
             }
             let current_activity = usage::latest_session_activity_ms();
             let changed = has_new_activity(last_activity, current_activity);
             last_activity = current_activity.or(last_activity);
-            if !changed {
-                continue;
-            }
             let now_ms = chrono::Utc::now().timestamp_millis();
             let last_collection = *app
                 .state::<RuntimeState>()
                 .last_collection_ms
                 .lock()
                 .expect("collection state lock");
-            if !auto_refresh_cooldown_elapsed(last_collection, now_ms) {
+            let (next_pending, should_refresh) = automatic_refresh_decision(
+                pending_activity,
+                changed,
+                auto_refresh_cooldown_elapsed(last_collection, now_ms),
+            );
+            pending_activity = next_pending;
+            if !should_refresh {
                 continue;
             }
             refresh_all(&app);
@@ -742,6 +831,14 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let label = if onboarding_complete() {
+                "compact"
+            } else {
+                "setup"
+            };
+            show_window_on_worker(app.clone(), label.to_string());
+        }))
         .manage(RuntimeState::default())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
@@ -815,6 +912,11 @@ mod tests {
             1_000,
             1_000 + AUTO_REFRESH_COOLDOWN_MS
         ));
+        assert_eq!(
+            automatic_refresh_decision(false, true, false),
+            (true, false)
+        );
+        assert_eq!(automatic_refresh_decision(true, false, true), (false, true));
     }
 
     #[test]
@@ -824,16 +926,18 @@ mod tests {
                 "provider": "codex",
                 "limitType": "five_hour",
                 "remainingPercent": 22,
-                "reason": "forecast_before_reset"
+                "reason": "forecast_before_reset",
+                "severity": "warning",
+                "resetAt": "2026-07-19T09:00:00Z"
             }],
             "anomalies": {
-                "codex": {"detected": true, "multiplier": 2.4},
+                "codex": {"detected": true, "date": "2026-07-19", "multiplier": 2.4},
                 "claude": {"detected": false}
             }
         });
         let (signature, body) = notification_payload(&report).expect("notification payload");
         assert!(signature.contains("forecast_before_reset"));
-        assert!(signature.contains("multiplier"));
+        assert!(!signature.contains("multiplier"));
         assert!(body.contains("Codex 5시간: 22% 남음 · 리셋 전 고갈 예상"));
         assert!(body.contains("Codex 오늘 토큰 2.4배 급증"));
     }
@@ -844,7 +948,7 @@ mod tests {
             "alerts": [],
             "anomalies": {
                 "codex": {"detected": false},
-                "claude": {"detected": true, "multiplier": 1.9}
+                "claude": {"detected": true, "date": "2026-07-19", "multiplier": 1.9}
             }
         });
         assert!(
@@ -862,6 +966,74 @@ mod tests {
                 }
             }))
             .is_none()
+        );
+
+        let mut signature = String::new();
+        assert!(update_notification_signature(&mut signature, Some("risk")));
+        assert!(!update_notification_signature(&mut signature, Some("risk")));
+        assert!(update_notification_signature(&mut signature, None));
+        assert!(signature.is_empty());
+        assert!(update_notification_signature(&mut signature, Some("risk")));
+
+        let low_confidence_forecast = json!({
+            "alerts": [{
+                "provider": "codex",
+                "limitType": "five_hour",
+                "remainingPercent": 40,
+                "reason": "forecast_before_reset",
+                "confidence": "low"
+            }],
+            "anomalies": {
+                "codex": {"detected": false},
+                "claude": {"detected": false}
+            }
+        });
+        assert!(notification_payload(&low_confidence_forecast).is_none());
+    }
+
+    #[test]
+    fn notification_signature_tracks_an_episode_not_live_measurements() {
+        let report = |remaining, multiplier| {
+            json!({
+                "alerts": [{
+                    "provider": "codex",
+                    "limitType": "five_hour",
+                    "remainingPercent": remaining,
+                    "reason": "threshold_warning",
+                    "severity": "warning",
+                    "resetAt": "2026-07-19T09:00:00Z"
+                }],
+                "anomalies": {
+                    "codex": {"detected": true, "date": "2026-07-19", "multiplier": multiplier},
+                    "claude": {"detected": false}
+                }
+            })
+        };
+        let first = notification_payload(&report(24, 2.0))
+            .expect("first episode")
+            .0;
+        let updated = notification_payload(&report(19, 2.7))
+            .expect("updated episode")
+            .0;
+        assert_eq!(first, updated);
+
+        let next_cycle = json!({
+            "alerts": [{
+                "provider": "codex",
+                "limitType": "five_hour",
+                "remainingPercent": 24,
+                "reason": "threshold_warning",
+                "severity": "warning",
+                "resetAt": "2026-07-20T09:00:00Z"
+            }],
+            "anomalies": {
+                "codex": {"detected": true, "date": "2026-07-20", "multiplier": 2.0},
+                "claude": {"detected": false}
+            }
+        });
+        assert_ne!(
+            first,
+            notification_payload(&next_cycle).expect("next episode").0
         );
     }
 }

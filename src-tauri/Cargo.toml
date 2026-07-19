@@ -1,6 +1,6 @@
 [package]
 name = "codex-claude-usage"
-version = "1.0.5"
+version = "1.1.0"
 description = "Local-first Codex and Claude usage forecasts, alerts, costs, and actions"
 authors = ["CodexUsage"]
 license = "MIT"
@@ -25,6 +25,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-notification = "2.3.3"
+tauri-plugin-single-instance = "2.4.3"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
@@ -38,5 +39,9 @@ panic = "abort"
 strip = true
 
 [profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
 debug = 0
 incremental = false
