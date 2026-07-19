@@ -19,6 +19,9 @@ const ids = [
   "claude-seven-day",
   "claude-reset",
   "claude-stamp",
+  "decision",
+  "decision-status",
+  "decision-action",
   "always-on-top",
   "opacity",
   "minimize",
@@ -102,6 +105,33 @@ function renderDial(prefix, limit) {
   el[`${prefix}-dial`].style.setProperty("--tone", tone(percent));
 }
 
+function renderDecision(analytics) {
+  if (!analytics) {
+    el.decision.dataset.tone = "neutral";
+    el["decision-status"].textContent = "분석 기록 없음";
+    el["decision-action"].textContent = "새로고침하면 고갈 위험을 계산합니다.";
+    return;
+  }
+  const critical = analytics.alerts.find((alert) => alert.severity === "critical");
+  const warning = analytics.alerts.find((alert) => alert.severity === "warning");
+  const action = analytics.recommendations && analytics.recommendations[0];
+  if (critical) {
+    el.decision.dataset.tone = "critical";
+    el["decision-status"].textContent = `${critical.provider === "codex" ? "Codex" : "Claude"} 한도 위험 · ${critical.remainingPercent}% 남음`;
+  } else if (warning) {
+    el.decision.dataset.tone = "warning";
+    el["decision-status"].textContent = warning.reason === "forecast_before_reset"
+      ? `${warning.provider === "codex" ? "Codex" : "Claude"} 리셋 전 고갈 가능`
+      : `${warning.provider === "codex" ? "Codex" : "Claude"} 한도 주의 · ${warning.remainingPercent}% 남음`;
+  } else {
+    el.decision.dataset.tone = "ok";
+    el["decision-status"].textContent = "현재 기록에서 고갈 위험 없음";
+  }
+  el["decision-action"].textContent = action
+    ? action.action
+    : "작업 흐름이 달라진 뒤 다시 확인하세요.";
+}
+
 function render(snapshot) {
   const codexFiveHour = snapshot.codex.limits.five_hour;
   const codexWeekly = snapshot.codex.limits.weekly;
@@ -139,6 +169,7 @@ function render(snapshot) {
   el["claude-seven-day"].textContent = percentText(claudeSevenDay);
   el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
   el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
+  renderDecision(snapshot.analytics);
 
   el["always-on-top"].checked = Boolean(snapshot.window.alwaysOnTop);
   el.opacity.value = Math.round((snapshot.window.opacity || 0.96) * 100);
@@ -190,6 +221,7 @@ el.refresh.addEventListener("click", () => refresh(true));
 el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
 el["open-insights"].addEventListener("click", () => window.usageApp.openInsights());
 el["open-details"].addEventListener("click", () => window.usageApp.openDetails());
+el.decision.addEventListener("click", () => window.usageApp.openInsights());
 
 refresh();
 setInterval(refresh, 10000);

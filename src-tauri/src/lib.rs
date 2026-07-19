@@ -492,9 +492,9 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             "compact.html",
             "Codex Claude Usage",
             360.0,
-            430.0,
+            480.0,
             320.0,
-            280.0,
+            360.0,
             false,
         ),
         "insights" => (
