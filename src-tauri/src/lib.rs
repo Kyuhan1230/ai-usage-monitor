@@ -235,18 +235,19 @@ fn notification_payload(report: &Value) -> Option<(String, String)> {
         .unwrap_or_default();
     let anomalies = ["codex", "claude"]
         .iter()
-        .filter_map(|provider| {
+        .filter(|provider| {
             report
-                .get("anomalies")?
-                .get(*provider)?
-                .get("detected")?
-                .as_bool()?
-                .then(|| {
-                    json!({
-                        "provider": provider,
-                        "multiplier": report["anomalies"][*provider]["multiplier"]
-                    })
-                })
+                .get("anomalies")
+                .and_then(|value| value.get(**provider))
+                .and_then(|value| value.get("detected"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .map(|provider| {
+            json!({
+                "provider": provider,
+                "multiplier": report["anomalies"][*provider]["multiplier"]
+            })
         })
         .collect::<Vec<_>>();
     if alerts.is_empty() && anomalies.is_empty() {
