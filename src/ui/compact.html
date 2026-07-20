@@ -25,14 +25,17 @@
           <span>Codex</span>
           <span class="state" id="codex-state">확인 중</span>
         </div>
-        <div class="meter-row">
-          <div class="dial" id="codex-dial" role="meter" aria-label="Codex 단기 한도" aria-valuemin="0" aria-valuemax="100"><span id="codex-value">--</span></div>
-          <div class="meter-copy">
-            <div class="limit-line"><span>5h</span><strong id="codex-five-hour">--</strong></div>
-            <div class="limit-line"><span>Week</span><strong id="codex-weekly">--</strong></div>
-            <div class="reset" id="codex-reset">서버가 값을 읽는 중</div>
-            <div class="stamp" id="codex-stamp">마지막 갱신 확인 중</div>
+        <div class="limit-bars">
+          <div class="limit-bar">
+            <div class="limit-line"><span>5시간</span><strong id="codex-five-hour">--</strong></div>
+            <div class="bar-track" id="codex-five-hour-bar" role="meter" aria-label="Codex 5시간 한도" aria-valuemin="0" aria-valuemax="100"><span></span></div>
           </div>
+          <div class="limit-bar">
+            <div class="limit-line"><span>주간</span><strong id="codex-weekly">--</strong></div>
+            <div class="bar-track" id="codex-weekly-bar" role="meter" aria-label="Codex 주간 한도" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+          </div>
+          <div class="reset" id="codex-reset">서버가 값을 읽는 중</div>
+          <div class="stamp" id="codex-stamp">마지막 갱신 확인 중</div>
         </div>
       </article>
 
@@ -41,14 +44,17 @@
           <span>Claude</span>
           <span class="state" id="claude-state">확인 중</span>
         </div>
-        <div class="meter-row">
-          <div class="dial" id="claude-dial" role="meter" aria-label="Claude 세션 한도" aria-valuemin="0" aria-valuemax="100"><span id="claude-value">--</span></div>
-          <div class="meter-copy">
-            <div class="limit-line"><span>Session</span><strong id="claude-five-hour">--</strong></div>
-            <div class="limit-line"><span>Week</span><strong id="claude-seven-day">--</strong></div>
-            <div class="reset" id="claude-reset">hook 상태 확인 중</div>
-            <div class="stamp" id="claude-stamp">마지막 갱신 확인 중</div>
+        <div class="limit-bars">
+          <div class="limit-bar">
+            <div class="limit-line"><span>세션</span><strong id="claude-five-hour">--</strong></div>
+            <div class="bar-track" id="claude-five-hour-bar" role="meter" aria-label="Claude 세션 한도" aria-valuemin="0" aria-valuemax="100"><span></span></div>
           </div>
+          <div class="limit-bar">
+            <div class="limit-line"><span>주간</span><strong id="claude-seven-day">--</strong></div>
+            <div class="bar-track" id="claude-seven-day-bar" role="meter" aria-label="Claude 주간 한도" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+          </div>
+          <div class="reset" id="claude-reset">hook 상태 확인 중</div>
+          <div class="stamp" id="claude-stamp">마지막 갱신 확인 중</div>
         </div>
       </article>
     </section>

@@ -22,7 +22,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 280px;
-  overflow: hidden;
+  overflow: auto;
   background: var(--bg);
   color: var(--text);
   font: 13px "Segoe UI", system-ui, sans-serif;
@@ -55,7 +55,7 @@ input:focus-visible {
 .shell {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: repeat(5, auto);
   gap: 10px;
   padding: 14px;
 }
@@ -97,8 +97,8 @@ h1 {
 .meters {
   display: grid;
   gap: 10px;
-  min-height: 0;
-  overflow: hidden;
+  min-height: auto;
+  overflow: visible;
 }
 
 .meter {
@@ -109,7 +109,6 @@ h1 {
 }
 
 .meter-head,
-.meter-row,
 .auth-row,
 .actions,
 .controls {
@@ -128,46 +127,32 @@ h1 {
   font: 11px Consolas, "Cascadia Mono", monospace;
 }
 
-.meter-row {
-  gap: 12px;
-}
-
-.dial {
-  --pct: 0;
-  --tone: var(--line);
-  flex: none;
-  width: 70px;
-  height: 70px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: conic-gradient(var(--tone) calc(var(--pct) * 1%), #2a3140 0);
-  position: relative;
-}
-
-.dial::before {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border-radius: 50%;
-  background: var(--panel);
-}
-
-.dial span {
-  position: relative;
-  font: 700 18px Consolas, "Cascadia Mono", monospace;
-}
-
-.meter-copy {
-  min-width: 0;
-}
+.limit-bars { display: grid; gap: 8px; min-width: 0; }
+.limit-bar { display: grid; gap: 4px; }
 
 .limit-line {
-  display: grid;
-  grid-template-columns: 58px 1fr;
-  gap: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   align-items: baseline;
   margin-bottom: 3px;
+}
+
+.bar-track {
+  --pct: 0;
+  --tone: var(--line);
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #2a3140;
+}
+
+.bar-track span {
+  display: block;
+  width: calc(var(--pct) * 1%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tone);
 }
 
 .limit-line span {
