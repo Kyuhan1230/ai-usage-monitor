@@ -6,17 +6,17 @@ const { stateText } = window.usageStatusHealth;
 
 const ids = [
   "codex-state",
-  "codex-dial",
-  "codex-value",
   "codex-five-hour",
+  "codex-five-hour-bar",
   "codex-weekly",
+  "codex-weekly-bar",
   "codex-reset",
   "codex-stamp",
   "claude-state",
-  "claude-dial",
-  "claude-value",
   "claude-five-hour",
+  "claude-five-hour-bar",
   "claude-seven-day",
+  "claude-seven-day-bar",
   "claude-reset",
   "claude-stamp",
   "decision",
@@ -45,13 +45,6 @@ function tone(percent) {
     return "var(--warn)";
   }
   return "var(--ok)";
-}
-
-function percentText(limit) {
-  if (!limit || !Number.isInteger(limit.remaining_percent)) {
-    return "--";
-  }
-  return `${limit.remaining_percent}%`;
 }
 
 function resetText(limit) {
@@ -98,17 +91,18 @@ function ageText(ageMs) {
   return rest ? `${hours}시간 ${rest}분 전 갱신` : `${hours}시간 전 갱신`;
 }
 
-function renderDial(prefix, limit) {
+function renderLimitBar(id, limit) {
   const percent = limit && Number.isInteger(limit.remaining_percent) ? limit.remaining_percent : null;
-  el[`${prefix}-value`].textContent = percent === null ? "--" : `${percent}%`;
-  el[`${prefix}-dial`].style.setProperty("--pct", percent === null ? 0 : percent);
-  el[`${prefix}-dial`].style.setProperty("--tone", tone(percent));
+  el[id].textContent = percent === null ? "--" : `${percent}%`;
+  const bar = el[`${id}-bar`];
+  bar.style.setProperty("--pct", percent === null ? 0 : percent);
+  bar.style.setProperty("--tone", tone(percent));
   if (percent === null) {
-    el[`${prefix}-dial`].removeAttribute("aria-valuenow");
-    el[`${prefix}-dial`].setAttribute("aria-valuetext", "수집 중");
+    bar.removeAttribute("aria-valuenow");
+    bar.setAttribute("aria-valuetext", "수집 중");
   } else {
-    el[`${prefix}-dial`].setAttribute("aria-valuenow", String(percent));
-    el[`${prefix}-dial`].setAttribute("aria-valuetext", `${percent}% 남음`);
+    bar.setAttribute("aria-valuenow", String(percent));
+    bar.setAttribute("aria-valuetext", `${percent}% 남음`);
   }
 }
 
@@ -158,7 +152,9 @@ function renderDecision(analytics, snapshot) {
     el.decision.dataset.tone = "ok";
     el["decision-status"].textContent = "현재 기록에서 고갈 위험 없음";
   }
-  el["decision-action"].textContent = action
+  el["decision-action"].textContent = warning && warning.reason === "forecast_before_reset" && warning.confidence === "low"
+    ? "예비 추세입니다. 기록을 더 수집한 뒤 감속 목표를 확인하세요."
+    : action
     ? action.action
     : "작업 흐름이 달라진 뒤 다시 확인하세요.";
 }
@@ -171,7 +167,8 @@ function render(snapshot) {
   const claudeSevenDay = snapshot.claude.limits.seven_day;
   const claudeLimit = claudeFiveHour || claudeSevenDay;
 
-  renderDial("codex", codexLimit);
+  renderLimitBar("codex-five-hour", codexFiveHour);
+  renderLimitBar("codex-weekly", codexWeekly);
   el["codex-state"].textContent = stateText({
     connected: snapshot.codex.connected,
     ageMs: snapshot.codex.ageMs,
@@ -181,12 +178,11 @@ function render(snapshot) {
       : null,
     freshnessMs: snapshot.capture.codexFreshnessMs,
   });
-  el["codex-five-hour"].textContent = percentText(codexFiveHour);
-  el["codex-weekly"].textContent = percentText(codexWeekly);
   el["codex-reset"].textContent = resetText(codexLimit);
   el["codex-stamp"].textContent = ageText(snapshot.codex.ageMs);
 
-  renderDial("claude", claudeLimit);
+  renderLimitBar("claude-five-hour", claudeFiveHour);
+  renderLimitBar("claude-seven-day", claudeSevenDay);
   el["claude-state"].textContent = stateText({
     connected: snapshot.claude.connected,
     ageMs: snapshot.claude.ageMs,
@@ -196,8 +192,6 @@ function render(snapshot) {
       : null,
     freshnessMs: snapshot.capture.claudeFreshnessMs,
   });
-  el["claude-five-hour"].textContent = percentText(claudeFiveHour);
-  el["claude-seven-day"].textContent = percentText(claudeSevenDay);
   el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
   el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
   renderDecision(snapshot.analytics, snapshot);

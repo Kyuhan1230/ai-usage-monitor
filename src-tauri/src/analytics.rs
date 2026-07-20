@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 const HOUR_MS: i64 = 60 * 60 * 1000;
 const DAY_MS: i64 = 24 * HOUR_MS;
+pub const STATUS_FRESHNESS_MS: i64 = 10 * 60 * 1000;
 
 #[derive(Clone, Copy)]
 struct Price {
@@ -394,12 +395,28 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
         ))
     });
     let reset = reset_at(&latest.limit, now_ms);
-    let will_exhaust_before_reset = exhaustion.zip(reset).map(|(empty, reset)| empty < reset);
-    let forecast_status = match will_exhaust_before_reset {
-        Some(true) => "risk",
-        Some(false) => "safe",
+    let forecast_status = match exhaustion_range.zip(reset) {
+        Some(((_, latest), reset)) if latest < reset => "risk",
+        Some(((earliest, _), reset)) if earliest >= reset => "safe",
+        Some(_) => "unknown",
         None => "unknown",
     };
+    let will_exhaust_before_reset = match forecast_status {
+        "risk" => Some(true),
+        "safe" => Some(false),
+        _ => None,
+    };
+    let hours_until_reset = reset
+        .filter(|reset| *reset > latest.captured_ms)
+        .map(|reset| (reset - latest.captured_ms) as f64 / HOUR_MS as f64);
+    let safe_rate = hours_until_reset.map(|hours| latest.remaining / hours);
+    let required_reduction = rate.zip(safe_rate).map(|(current, safe)| {
+        if current <= 0.0 {
+            0.0
+        } else {
+            ((1.0 - safe / current) * 100.0).clamp(0.0, 100.0)
+        }
+    });
     let confidence = if cycle.len() >= 8
         && elapsed_hours >= 6.0
         && interval_rates.len() >= 5
@@ -417,10 +434,16 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
     };
     json!({
         "remainingPercent": round(latest.remaining, 0),
+        "sourceCapturedAt": iso(latest.captured_ms),
+        "staleAfterMs": STATUS_FRESHNESS_MS,
         "sampleCount": cycle.len(),
         "observedHours": round(elapsed_hours, 1),
         "observedIntervalCount": interval_rates.len(),
         "depletionRatePercentPerHour": rate.map(|value| round(value, 2)),
+        "currentRatePercentPerHour": rate.map(|value| round(value, 2)),
+        "safeRatePercentPerHour": safe_rate.map(|value| round(value, 2)),
+        "requiredReductionPercent": required_reduction.map(|value| round(value, 1)),
+        "reductionMethod": "remaining_over_hours_until_reset_vs_cycle_average",
         "expectedExhaustionAt": exhaustion.map(iso),
         "expectedExhaustionEarliestAt": exhaustion_range.map(|value| iso(value.0)),
         "expectedExhaustionLatestAt": exhaustion_range.map(|value| iso(value.1)),
@@ -523,7 +546,7 @@ fn provider_cost(rows: &[UsageRow], provider: &str, today: &str) -> Value {
     })
 }
 
-fn recommendations(providers: &Value, costs: &Value, anomalies: &Value, now_ms: i64) -> Vec<Value> {
+fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<Value> {
     let mut result = Vec::<Value>::new();
     for provider in ["codex", "claude"] {
         if let Some(limits) = providers
@@ -544,26 +567,17 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value, now_ms: 
                         "priority": "critical", "provider": provider, "reason": "critical_limit",
                         "action": format!("{} {} 한도가 {}% 남았습니다. 큰 작업을 멈추고 초기화 이후로 미루세요.", if provider == "codex" { "Codex" } else { "Claude" }, kind, remaining as i64)
                     }));
-                } else if limit.get("willExhaustBeforeReset").and_then(Value::as_bool) == Some(true)
+                } else if limit.get("forecastStatus").and_then(Value::as_str) == Some("risk")
+                    && limit.get("confidence").and_then(Value::as_str) != Some("low")
+                    && let Some(reduction) = limit
+                        .get("requiredReductionPercent")
+                        .and_then(Value::as_f64)
                 {
-                    let reset = limit
-                        .get("resetAt")
-                        .and_then(Value::as_str)
-                        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                        .map(|value| value.timestamp_millis());
-                    let rate = limit
-                        .get("depletionRatePercentPerHour")
-                        .and_then(Value::as_f64);
-                    if let Some((reset, rate)) = reset.zip(rate) {
-                        let hours = ((reset - now_ms) as f64 / HOUR_MS as f64).max(0.1);
-                        let safe_rate = remaining / hours;
-                        let reduction = ((1.0 - safe_rate / rate) * 100.0).clamp(0.0, 100.0);
-                        let rounded = (reduction / 5.0).ceil() as i64 * 5;
-                        result.push(json!({
-                            "priority": "warning", "provider": provider, "reason": "forecast_before_reset",
-                            "action": format!("{} 사용 속도를 약 {}% 줄이면 초기화 전 고갈을 피할 가능성이 큽니다.", if provider == "codex" { "Codex" } else { "Claude" }, rounded)
-                        }));
-                    }
+                    let rounded = (reduction / 5.0).ceil() as i64 * 5;
+                    result.push(json!({
+                        "priority": "warning", "provider": provider, "reason": "forecast_before_reset",
+                        "action": format!("{} 사용 속도를 약 {}% 줄이면 초기화 전 고갈을 피할 가능성이 큽니다.", if provider == "codex" { "Codex" } else { "Claude" }, rounded)
+                    }));
                 }
             }
         }
@@ -634,10 +648,8 @@ pub fn build_analytics(history: &[Value], rows: &[UsageRow], now_ms: i64) -> Val
                     .get("remainingPercent")
                     .and_then(Value::as_f64)
                     .unwrap_or(100.0);
-                let forecast = analysis
-                    .get("willExhaustBeforeReset")
-                    .and_then(Value::as_bool)
-                    == Some(true);
+                let forecast =
+                    analysis.get("forecastStatus").and_then(Value::as_str) == Some("risk");
                 let (severity, reason) = if remaining <= 10.0 {
                     ("critical", "threshold_critical")
                 } else if remaining <= 25.0 {
@@ -718,7 +730,7 @@ pub fn build_analytics(history: &[Value], rows: &[UsageRow], now_ms: i64) -> Val
             })
     });
     details.truncate(500);
-    let actions = recommendations(&providers, &costs, &anomalies, now_ms);
+    let actions = recommendations(&providers, &costs, &anomalies);
     json!({
         "schemaVersion": 1,
         "generatedAt": iso(now_ms),
@@ -801,6 +813,22 @@ mod tests {
             5.0
         );
         assert_eq!(
+            report["providers"]["codex"]["limits"]["five_hour"]["currentRatePercentPerHour"],
+            5.0
+        );
+        assert_eq!(
+            report["providers"]["codex"]["limits"]["five_hour"]["safeRatePercentPerHour"],
+            2.0
+        );
+        assert_eq!(
+            report["providers"]["codex"]["limits"]["five_hour"]["requiredReductionPercent"],
+            60.0
+        );
+        assert_eq!(
+            report["providers"]["codex"]["limits"]["five_hour"]["sourceCapturedAt"],
+            iso(now_ms)
+        );
+        assert_eq!(
             report["providers"]["codex"]["limits"]["five_hour"]["willExhaustBeforeReset"],
             true
         );
@@ -834,6 +862,26 @@ mod tests {
             }],
             now_ms,
         );
+        assert_eq!(limit["forecastStatus"], "unknown");
+        assert!(limit["willExhaustBeforeReset"].is_null());
+    }
+
+    #[test]
+    fn forecast_range_overlapping_reset_is_unknown() {
+        let now_ms = chrono::DateTime::parse_from_rfc3339("2026-07-18T12:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        let reset = (now_ms + 8 * HOUR_MS) / 1000;
+        let values = [60.0, 55.0, 50.0, 45.0, 40.0]
+            .iter()
+            .enumerate()
+            .map(|(index, remaining)| Sample {
+                captured_ms: now_ms - (4 - index as i64) * HOUR_MS,
+                remaining: *remaining,
+                limit: json!({"type": "five_hour", "remaining_percent": remaining, "resets_at": reset}),
+            })
+            .collect::<Vec<_>>();
+        let limit = analyze_limit(&values, now_ms);
         assert_eq!(limit["forecastStatus"], "unknown");
         assert!(limit["willExhaustBeforeReset"].is_null());
     }

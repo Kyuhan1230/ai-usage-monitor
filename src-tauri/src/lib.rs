@@ -4,7 +4,7 @@ mod hook;
 mod storage;
 mod usage;
 
-use crate::analytics::build_analytics;
+use crate::analytics::{STATUS_FRESHNESS_MS, build_analytics};
 use crate::collector::{
     AuthProbe, CliState, capture_claude, capture_codex, claude_cli_state, codex_cli_state,
     probe_claude_auth, probe_codex_auth, resolve_claude_command, resolve_codex_command,
@@ -174,7 +174,7 @@ fn snapshot_value(app: &AppHandle) -> Value {
     json!({
         "capturedAt": chrono::Utc::now().to_rfc3339(),
         "details": {"running": app.get_webview_window("details").is_some(), "mode": "embedded"},
-        "capture": {"mode":"on_demand", "codexFreshnessMs":600000, "claudeFreshnessMs":600000},
+        "capture": {"mode":"on_demand", "codexFreshnessMs":STATUS_FRESHNESS_MS, "claudeFreshnessMs":STATUS_FRESHNESS_MS},
         "monitoring": monitoring_snapshot(),
         "refresh": refresh,
         "analytics": analytics,
