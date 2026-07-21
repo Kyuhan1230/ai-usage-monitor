@@ -34,7 +34,7 @@ jobs:
         run: npm test
 
       - name: Build Tauri NSIS installer
-        run: npm run dist -- --config src-tauri/tauri.ci.conf.json
+        run: npm run dist:ci
 
       - name: Enforce lightweight installer budget
         shell: pwsh

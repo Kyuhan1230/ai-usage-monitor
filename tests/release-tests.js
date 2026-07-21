@@ -12,9 +12,20 @@ const releaseWorkflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "release.yml"),
   "utf8",
 );
+const ciWorkflow = fs.readFileSync(
+  path.join(__dirname, "..", ".github", "workflows", "ci.yml"),
+  "utf8",
+);
+const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
 assert.match(releaseWorkflow, /Authenticode 코드 서명이 적용되지 않았습니다/);
 assert.match(releaseWorkflow, /v1\.1\.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치/);
 assert.match(releaseWorkflow, /--notes \$releaseNotice --generate-notes/);
+assert.strictEqual(
+  packageJson.scripts["dist:ci"],
+  "tauri build --bundles nsis --config src-tauri/tauri.ci.conf.json",
+);
+assert.match(ciWorkflow, /run: npm run dist:ci/);
+assert.doesNotMatch(ciWorkflow, /npm run dist -- --config/);
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-manifest-"));
 try {

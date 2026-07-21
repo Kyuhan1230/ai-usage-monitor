@@ -15,6 +15,7 @@
     "app:tauri": "tauri dev",
     "pack": "tauri build --no-bundle",
     "dist": "tauri build --bundles nsis",
+    "dist:ci": "tauri build --bundles nsis --config src-tauri/tauri.ci.conf.json",
     "create:updater-manifest": "node scripts/create-updater-manifest.js",
     "verify:release-tag": "node scripts/verify-release-tag.js",
     "verify:updater-manifest": "node scripts/verify-updater-manifest.js",
