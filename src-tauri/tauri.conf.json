@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MUY3M0NBOUVDMjk2MjIKUldRaWxzS2V5bk1mR0h3THVTazg0ZThRRllUNmcxSERiSC9zdVJ3UDk1eHhOeXFBcTRIbGVKQUUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFFOTc2NjY2ODAzQzQxNDgKUldSSVFUeUFabWFYSHFHWTdrcmRsbUNGSW9XZkZnbGNIU0RjWWR0Vjl6bnhuSStGV1ltTkFGL3EK",
       "endpoints": [
         "https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/latest.json"
       ],

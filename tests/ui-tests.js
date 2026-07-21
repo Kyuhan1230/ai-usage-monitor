@@ -23,6 +23,7 @@ for (const name of ["compact", "insights", "details", "setup", "update"]) {
 
 const packageJson = require("../package.json");
 const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"));
+const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
 assert.strictEqual(packageJson.version, "1.2.0");
@@ -35,6 +36,7 @@ assert(!JSON.stringify(packageJson).match(/electron|python|fastapi|node-pty/i));
 assert(!cargoToml.match(/reqwest|ureq|hyper|tauri-plugin-http/i));
 assert.strictEqual((cargoToml.match(/tauri-plugin-updater/g) || []).length, 1);
 assert.strictEqual(tauriConfig.bundle.createUpdaterArtifacts, true);
+assert.strictEqual(tauriCiConfig.bundle.createUpdaterArtifacts, false, "일반 CI는 공식 서명키 없이 updater artifact를 만들면 안 됩니다.");
 assert.deepStrictEqual(
   tauriConfig.plugins.updater.endpoints,
   ["https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/latest.json"],
