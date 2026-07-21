@@ -8,6 +8,14 @@ const path = require("path");
 const { createManifest, projectVersion } = require("../scripts/create-updater-manifest");
 const { verifyManifest } = require("../scripts/verify-updater-manifest");
 
+const releaseWorkflow = fs.readFileSync(
+  path.join(__dirname, "..", ".github", "workflows", "release.yml"),
+  "utf8",
+);
+assert.match(releaseWorkflow, /Authenticode 코드 서명이 적용되지 않았습니다/);
+assert.match(releaseWorkflow, /v1\.1\.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치/);
+assert.match(releaseWorkflow, /--notes \$releaseNotice --generate-notes/);
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-manifest-"));
 try {
   const version = projectVersion();

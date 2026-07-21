@@ -86,13 +86,19 @@ jobs:
           $installer = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe").Path
           $signature = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe.sig").Path
           $manifest = (Resolve-Path "release-assets/latest.json").Path
+          $releaseNotice = @(
+            '> [!WARNING]'
+            '> 이 설치 파일은 SignPath Foundation 승인 전이므로 Authenticode 코드 서명이 적용되지 않았습니다. Windows SmartScreen에 `알 수 없는 게시자` 경고가 표시될 수 있습니다.'
+            '>'
+            '> v1.1.1에는 자동 업데이트 기능이 없습니다. v1.1.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치해야 하며, 이후 버전부터 앱 내 업데이트를 사용할 수 있습니다.'
+          ) -join [Environment]::NewLine
           gh release view "${{ github.ref_name }}" --json isDraft 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             $release = gh release view "${{ github.ref_name }}" --json isDraft | ConvertFrom-Json
             if (-not $release.isDraft) { throw "Refusing to replace an already published release" }
             gh release upload "${{ github.ref_name }}" $installer $signature $manifest --clobber
           } else {
-            gh release create "${{ github.ref_name }}" $installer $signature $manifest --draft --title "Codex Claude Usage $version" --generate-notes
+            gh release create "${{ github.ref_name }}" $installer $signature $manifest --draft --title "Codex Claude Usage $version" --notes $releaseNotice --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { throw "Uploading release asset failed" }
         env:
