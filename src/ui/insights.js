@@ -28,6 +28,10 @@ function formatPercent(value, signed = false) {
   return `${prefix}${value}%`;
 }
 
+function formatRate(value) {
+  return Number.isFinite(value) ? `시간당 ${value}%p` : "계산 전";
+}
+
 function formatDateTime(value) {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) {
@@ -46,10 +50,24 @@ function formatForecastRange(limit) {
   const earliest = Date.parse(limit.expectedExhaustionEarliestAt);
   const latest = Date.parse(limit.expectedExhaustionLatestAt);
   if (Number.isFinite(earliest) && Number.isFinite(latest)) {
-    return `${formatDateTime(limit.expectedExhaustionEarliestAt)} ~ ${formatDateTime(limit.expectedExhaustionLatestAt)}`;
+    return `빠르면 ${formatDateTime(limit.expectedExhaustionEarliestAt)} · 늦으면 ${formatDateTime(limit.expectedExhaustionLatestAt)}`;
   }
   const expected = formatDateTime(limit.expectedExhaustionAt);
-  return expected === "예측 불가" ? expected : `약 ${expected} · 범위 기록 부족`;
+  return expected === "예측 불가" ? "소진 속도 계산 전" : `${expected} 전후`;
+}
+
+function formatForecastEvidence(limit) {
+  const parts = [CONFIDENCE_LABELS[limit.confidence] || "확인 전"];
+  if (Number.isFinite(limit.observedHours)) {
+    parts.push(`${limit.observedHours}시간 관찰`);
+  }
+  if (Number.isFinite(limit.depletionEventCount)) {
+    parts.push(`잔여량 감소 ${limit.depletionEventCount}회`);
+  }
+  if (Number.isFinite(limit.forecastSpreadPercent)) {
+    parts.push(`평균 속도 오차 약 ±${limit.forecastSpreadPercent}%`);
+  }
+  return parts.join(" · ");
 }
 
 function formatDuration(milliseconds) {
@@ -146,12 +164,10 @@ function renderSurvivalTimeline(candidate, snapshot) {
   track.className = "timeline-track";
   container.replaceChildren(labels, track);
 
-  const confidence = CONFIDENCE_LABELS[limit.confidence] || "알 수 없음";
-  if (limit.confidence === "low" || !Number.isFinite(earliest) || !Number.isFinite(latest)) {
-    setVizState("timeline-state", "예비 추세", "unknown");
-    container.setAttribute("role", "img");
-    container.setAttribute("aria-label", `수집 시점부터 ${formatDateTime(limit.resetAt)} 리셋까지의 타임라인. 고갈 위치는 기록 부족으로 표시하지 않음.`);
-    summary.textContent = `신뢰도 ${confidence} · 고갈 위치를 표시하려면 속도 기록이 더 필요합니다.`;
+  if (!Number.isFinite(earliest) || !Number.isFinite(latest)) {
+    setVizState("timeline-state", "소진 속도 계산 전", "unknown");
+    renderPlaceholder(container, "잔여량이 실제로 줄어들면 고갈 시점을 계산합니다");
+    summary.textContent = "수집 횟수보다 잔여량이 변한 기록이 필요합니다.";
     return;
   }
 
@@ -167,14 +183,14 @@ function renderSurvivalTimeline(candidate, snapshot) {
   }
 
   if (limit.forecastStatus === "risk") {
-    setVizState("timeline-state", "리셋 전 소진", "risk");
-    summary.textContent = `늦어도 리셋 ${formatDuration(reset - latest)} 전에 소진될 범위입니다 · 신뢰도 ${confidence}.`;
+    setVizState("timeline-state", "리셋 전 소진 가능성 큼", "risk");
+    summary.textContent = `늦게 소진돼도 리셋보다 ${formatDuration(reset - latest)} 빠릅니다. ${formatForecastEvidence(limit)}.`;
   } else if (limit.forecastStatus === "safe") {
-    setVizState("timeline-state", "리셋까지 생존", "safe");
-    summary.textContent = `빨라도 리셋 ${formatDuration(earliest - reset)} 후에 소진될 범위입니다 · 신뢰도 ${confidence}.`;
+    setVizState("timeline-state", "리셋까지 유지 가능", "safe");
+    summary.textContent = `빠르게 소진돼도 리셋보다 ${formatDuration(earliest - reset)} 늦습니다. ${formatForecastEvidence(limit)}.`;
   } else {
-    setVizState("timeline-state", "판단 불가", "unknown");
-    summary.textContent = `예상 고갈 범위가 리셋 시각과 겹칩니다 · 신뢰도 ${confidence}.`;
+    setVizState("timeline-state", "판단 유보", "unknown");
+    summary.textContent = `빠른 경우와 느린 경우가 리셋 전후로 갈립니다. ${formatForecastEvidence(limit)}.`;
   }
   container.setAttribute("role", "img");
   container.setAttribute("aria-label", `${PROVIDER_LABELS[candidate.provider]} ${LIMIT_LABELS[candidate.type] || candidate.type}. ${summary.textContent}`);
@@ -193,10 +209,10 @@ function renderSlowdownBullet(candidate, snapshot) {
     summary.textContent = "오래된 데이터에는 감속 목표를 제시하지 않습니다.";
     return;
   }
-  if (limit.confidence === "low" || !Number.isFinite(current) || !Number.isFinite(safe) || !Number.isFinite(reduction)) {
-    setVizState("slowdown-state", "기록 부족", "unknown");
-    renderPlaceholder(container, "속도 표본이 더 필요합니다");
-    summary.textContent = "저신뢰 추정치를 정확한 처방처럼 표시하지 않습니다.";
+  if (!Number.isFinite(current) || !Number.isFinite(safe) || !Number.isFinite(reduction)) {
+    setVizState("slowdown-state", "속도 계산 전", "unknown");
+    renderPlaceholder(container, "잔여량 변화가 확인되면 필요한 속도를 계산합니다");
+    summary.textContent = "아직 사용량이 줄어든 기록이 없어 감속 목표를 계산할 수 없습니다.";
     return;
   }
 
@@ -226,12 +242,15 @@ function renderSlowdownBullet(candidate, snapshot) {
   container.setAttribute("role", "img");
   container.setAttribute("aria-label", `현재 속도 ${current.toFixed(2)} 퍼센트포인트 매시간, 허용 속도 ${safe.toFixed(2)} 퍼센트포인트 매시간.`);
 
-  if (reduction > 0) {
+  if (limit.confidence === "low") {
+    setVizState("slowdown-state", "참고용 비교", "unknown");
+    summary.textContent = `최근 평균은 ${formatRate(current)}입니다. 관찰 기간이 짧아 정확한 감속률은 아직 제시하지 않습니다.`;
+  } else if (reduction > 0) {
     setVizState("slowdown-state", `최소 약 ${Math.ceil(reduction / 5) * 5}% 감속`, "risk");
-    summary.textContent = `현재 속도를 약 ${Math.ceil(reduction / 5) * 5}% 줄이면 리셋까지 버틸 가능성이 커집니다.`;
+    summary.textContent = `최근 속도를 약 ${Math.ceil(reduction / 5) * 5}% 낮추면 다음 리셋까지 한도를 유지할 가능성이 커집니다.`;
   } else {
     setVizState("slowdown-state", "감속 불필요", "safe");
-    summary.textContent = "현재 속도가 리셋까지 허용되는 속도 안에 있습니다.";
+    summary.textContent = "현재 속도라면 다음 리셋까지 한도를 유지할 가능성이 큽니다.";
   }
 }
 
@@ -278,11 +297,11 @@ function renderForecasts(analytics) {
       head.append(title, badge);
       const details = document.createElement("dl");
       const pairs = [
-        ["소진 속도", Number.isFinite(limit.depletionRatePercentPerHour) ? `${limit.depletionRatePercentPerHour}%p/시간` : "기록 부족"],
-        ["예상 범위", formatForecastRange(limit)],
-        ["리셋", formatDateTime(limit.resetAt)],
-        ["판정", limit.forecastStatus === "risk" ? "리셋 전 고갈 위험" : limit.forecastStatus === "safe" ? "현재 속도 양호" : "판단할 기록 부족"],
-        ["신뢰 근거", `${CONFIDENCE_LABELS[limit.confidence] || limit.confidence} · ${limit.sampleCount}개 표본${Number.isFinite(limit.rateVariabilityPercent) ? ` · 속도 변동 ${limit.rateVariabilityPercent}%` : " · 변동 기록 부족"}`],
+        ["최근 소진 속도", formatRate(limit.depletionRatePercentPerHour)],
+        ["고갈 예상", formatForecastRange(limit)],
+        ["다음 리셋", formatDateTime(limit.resetAt)],
+        ["판정", limit.forecastStatus === "risk" ? "리셋 전 소진 가능성 큼" : limit.forecastStatus === "safe" ? "리셋까지 유지 가능" : Number.isFinite(limit.depletionRatePercentPerHour) ? "리셋 전후가 겹쳐 판단 유보" : "소진 속도 계산 전"],
+        ["판정 근거", formatForecastEvidence(limit)],
       ];
       for (const [label, value] of pairs) {
         const term = document.createElement("dt");
@@ -298,7 +317,7 @@ function renderForecasts(analytics) {
   if (!container.children.length) {
     const note = document.createElement("p");
     note.className = "muted";
-    note.textContent = "고갈 시각을 계산하려면 같은 한도를 두 번 이상 수집해야 합니다.";
+    note.textContent = "잔여량이 실제로 줄어든 뒤 고갈 시점을 계산할 수 있습니다.";
     container.appendChild(note);
   }
 }
@@ -375,45 +394,48 @@ function renderDecision(analytics, snapshot) {
   const hasKnownForecast = limits.some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk");
   const stale = staleProviders(snapshot);
   const stalePriority = priority && stale.has(priority.provider);
+  const priorityLimit = priority
+    ? analytics.providers[priority.provider].limits[priority.limitType]
+    : null;
 
   panel.className = "decision-panel";
   if (stalePriority || (!priority && stale.size)) {
     badge.textContent = "판정 보류";
-    title.textContent = "일부 사용량 데이터가 오래돼 현재 위험을 판단할 수 없습니다";
+    title.textContent = "최신 사용량을 확인한 뒤 다시 판단하겠습니다";
   } else if (critical) {
     panel.classList.add("critical");
     badge.textContent = "위험";
     title.textContent = `${PROVIDER_LABELS[critical.provider]} ${LIMIT_LABELS[critical.limitType] || critical.limitType} 한도가 거의 소진됐습니다`;
   } else if (warning) {
     panel.classList.add("warning");
-    badge.textContent = warning.confidence === "low" && warning.reason === "forecast_before_reset" ? "예비 추세" : "주의";
+    badge.textContent = warning.reason === "forecast_before_reset" ? "리셋 전 소진" : "주의";
     title.textContent = warning.reason === "forecast_before_reset"
-      ? `${PROVIDER_LABELS[warning.provider]} 한도가 리셋 전에 바닥날 수 있습니다`
+      ? `현재 사용 흐름이면 ${PROVIDER_LABELS[warning.provider]} ${LIMIT_LABELS[warning.limitType] || warning.limitType} 한도가 리셋 전에 소진될 가능성이 큽니다`
       : `${PROVIDER_LABELS[warning.provider]} ${LIMIT_LABELS[warning.limitType] || warning.limitType} 한도를 확인하세요`;
   } else if (!hasKnownForecast) {
-    badge.textContent = "판단 불가";
-    title.textContent = "리셋 전 고갈 여부를 판단할 기록이 부족합니다";
+    badge.textContent = "속도 계산 전";
+    title.textContent = "잔여량 변화가 확인되면 고갈 시점을 계산할 수 있습니다";
   } else {
-    badge.textContent = "현재 양호";
-    title.textContent = "현재 기록에서는 리셋 전 고갈 위험이 보이지 않습니다";
+    badge.textContent = "유지 가능";
+    title.textContent = "현재 사용 흐름이면 다음 리셋까지 한도를 유지할 가능성이 큽니다";
   }
 
   detail.textContent = stalePriority || (!priority && stale.size)
-    ? "마지막 성공 수집 후 10분이 지났습니다. 이전 값은 현재 잔여량과 다를 수 있습니다."
+    ? "마지막 수집 후 10분이 지났습니다. 이전 값 대신 최신 사용량으로 다시 계산하세요."
     : priority
-    ? `${PROVIDER_LABELS[priority.provider]} ${LIMIT_LABELS[priority.limitType] || priority.limitType} 한도 ${priority.remainingPercent}% 남음 · ${ALERT_REASON_LABELS[priority.reason] || priority.reason}`
+    ? `${PROVIDER_LABELS[priority.provider]} ${LIMIT_LABELS[priority.limitType] || priority.limitType} ${priority.remainingPercent}% 남음${priorityLimit && Number.isFinite(priorityLimit.depletionRatePercentPerHour) ? ` · 최근 평균 ${formatRate(priorityLimit.depletionRatePercentPerHour)}` : ""}${priorityLimit && Date.parse(priorityLimit.resetAt) ? ` · ${formatDateTime(priorityLimit.resetAt)} 리셋` : ""}`
     : hasKnownForecast
-      ? "표본이 적거나 사용 패턴이 달라지면 판정도 바뀔 수 있습니다. 작업 흐름이 바뀐 뒤에는 다시 계산하세요."
-      : "같은 한도의 잔여량과 리셋 시각을 두 번 이상 수집해야 예측할 수 있습니다.";
+      ? "최근 평균 사용 속도를 기준으로 한 결과입니다. 작업량이 크게 달라지면 다시 계산하세요."
+      : "수집 횟수가 아니라 실제 잔여량 변화가 있어야 소진 속도를 계산할 수 있습니다.";
   primaryAction.textContent = stalePriority || (!priority && stale.size)
     ? "지금 다시 계산해 최신 사용량을 확인하세요."
     : warning && warning.reason === "forecast_before_reset" && warning.confidence === "low"
-    ? "예비 추세입니다. 기록을 더 수집한 뒤 감속 목표를 확인하세요."
+    ? "고갈 시점의 오차가 큽니다. 큰 작업을 나누고 사용량을 줄이세요."
     : !hasKnownForecast && !priority
-    ? "작업을 조금 더 진행한 뒤 새로고침하거나 활동 기반 자동 확인을 켜세요."
+    ? "잔여량이 줄어든 뒤 다시 계산하거나 활동 기반 자동 확인을 켜세요."
     : recommendation
     ? recommendation.action
-    : "현재 즉시 바꿀 설정이 없습니다.";
+    : "현재 속도를 유지해도 됩니다. 작업량이 달라지면 다시 확인하세요.";
 }
 
 function render(snapshot) {
@@ -427,7 +449,7 @@ function render(snapshot) {
   }
   empty.hidden = true;
   content.hidden = false;
-  document.getElementById("generated-at").textContent = `${formatDateTime(analytics.generatedAt)} 계산 · 한도 ${analytics.historySampleCount}개 / 토큰 ${analytics.usageRowCount}개 집계`;
+  document.getElementById("generated-at").textContent = `${formatDateTime(analytics.generatedAt)} 계산 · 한도 기록 ${analytics.historySampleCount}개 · 토큰 기록 ${analytics.usageRowCount}개`;
   document.getElementById("alert-count").textContent = String(analytics.alerts.length);
   const hasKnownForecast = ["codex", "claude"].some((provider) =>
     Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {})
@@ -435,7 +457,7 @@ function render(snapshot) {
       .some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk"));
   document.getElementById("alert-detail").textContent = analytics.alerts.length
     ? "확인 필요"
-    : hasKnownForecast ? "위험 알림 없음" : "판정 기록 부족";
+    : hasKnownForecast ? "위험 알림 없음" : "소진 속도 계산 전";
   document.getElementById("total-cost").textContent = `$${analytics.costs.estimatedUsd.toFixed(2)}`;
   document.getElementById("day-change").textContent = formatPercent(analytics.comparison.dayOverDayPercent, true);
   document.getElementById("day-tokens").textContent = `${formatNumber(analytics.comparison.todayTokens)} vs ${formatNumber(analytics.comparison.yesterdayTokens)} tokens`;

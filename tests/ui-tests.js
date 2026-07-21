@@ -107,27 +107,33 @@ assert(
 assert(insightsHtml.includes("실제 구독 청구액 아님"), "API 정가 환산은 실제 청구액과 구분해야 합니다.");
 assert(insightsScript.includes("function renderDecision"), "Insights는 최우선 판정과 행동을 별도로 렌더링해야 합니다.");
 assert(insightsScript.includes("function formatForecastRange"), "예상 고갈은 단일 시각보다 범위를 우선 표시해야 합니다.");
-assert(insightsScript.includes("rateVariabilityPercent"), "예측 신뢰도에는 속도 변동 근거가 필요합니다.");
+assert(insightsScript.includes("forecastSpreadPercent"), "예측 근거에는 평균 속도의 오차 범위가 필요합니다.");
+assert(insightsScript.includes("depletionEventCount"), "원시 표본 수와 실제 잔여량 감소 횟수를 구분해야 합니다.");
 assert(insightsScript.includes('limit.forecastStatus === "safe"'), "예측 불가 상태를 안전으로 표시하면 안 됩니다.");
 assert(insightsHtml.includes('id="survival-timeline"'), "리셋 생존 타임라인 영역이 필요합니다.");
 assert(insightsHtml.includes('id="slowdown-bullet"'), "필요 감속률 불릿 차트 영역이 필요합니다.");
 assert(insightsScript.includes("function renderSurvivalTimeline"), "예상 고갈 범위와 리셋을 같은 축에서 비교해야 합니다.");
 assert(insightsScript.includes("function renderSlowdownBullet"), "현재 속도와 허용 속도를 구조화된 값으로 비교해야 합니다.");
-assert(insightsScript.includes("저신뢰 추정치를 정확한 처방처럼 표시하지 않습니다"), "저신뢰 감속 목표를 숨겨야 합니다.");
-assert(insightsScript.includes("예비 추세입니다. 기록을 더 수집한 뒤 감속 목표를 확인하세요"), "저신뢰 결정에는 정확한 감속 처방 대신 수집 안내가 필요합니다.");
+assert(insightsScript.includes("관찰 기간이 짧아 정확한 감속률은 아직 제시하지 않습니다"), "짧은 관찰 결과를 정확한 처방처럼 표시하면 안 됩니다.");
+assert(insightsScript.includes("수집 횟수보다 잔여량이 변한 기록이 필요합니다"), "표본 수가 충분한 사용자에게 막연히 기록을 더 모으라고 안내하면 안 됩니다.");
 const compactHtml = fs.readFileSync(path.join(ui, "compact.html"), "utf8");
 const compactCss = fs.readFileSync(path.join(ui, "compact.css"), "utf8");
 const compactScript = fs.readFileSync(path.join(ui, "compact.js"), "utf8");
 assert(compactHtml.includes('id="decision"'), "첫 Compact 창에서 고갈 판정을 바로 보여줘야 합니다.");
 assert(compactScript.includes("function renderDecision"), "Compact 창은 분석 결과의 최우선 판정을 렌더링해야 합니다.");
-assert(compactScript.includes("고갈 판단에 기록 더 필요"), "Compact 창은 예측 불가 상태를 명시해야 합니다.");
-assert(compactScript.includes("오래된 데이터 · 판정 보류"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
-assert(insightsScript.includes("일부 사용량 데이터가 오래돼"), "Insights는 오래된 데이터의 판정을 보류해야 합니다.");
+assert(compactScript.includes("소진 속도 계산 전"), "Compact 창은 속도를 계산하지 못한 상태를 명시해야 합니다.");
+assert(compactScript.includes("최신 사용량 확인 필요"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
+assert(insightsScript.includes("최신 사용량을 확인한 뒤 다시 판단하겠습니다"), "Insights는 오래된 데이터의 판정을 보류해야 합니다.");
 assert(compactScript.includes("el.decision.addEventListener"), "Compact 판정에서 상세 근거로 이동할 수 있어야 합니다.");
 assert(!compactHtml.includes('class="dial"'), "의미가 모호한 대표 원형 게이지를 사용하면 안 됩니다.");
 for (const id of ["codex-five-hour-bar", "codex-weekly-bar", "claude-five-hour-bar", "claude-seven-day-bar"]) {
   assert(compactHtml.includes(`id="${id}"`), `Compact 한도 막대 누락: ${id}`);
 }
+for (const id of ["codex-five-hour-rate", "codex-weekly-rate", "claude-five-hour-rate", "claude-seven-day-rate"]) {
+  assert(compactHtml.includes(`id="${id}"`), `Compact 소진 속도 누락: ${id}`);
+}
+assert(compactScript.includes("function renderLimitRate"), "Compact 창은 한도별 시간당 소진 속도를 렌더링해야 합니다.");
+assert(compactScript.includes("시간당 ${rate}%p"), "Compact 소진 속도는 시간 단위를 명시해야 합니다.");
 assert(/body\s*\{[^}]*overflow:\s*auto/s.test(compactCss), "확대된 Compact 내용은 세로로 스크롤할 수 있어야 합니다.");
 assert(/\.meters\s*\{[^}]*overflow:\s*visible/s.test(compactCss), "확대 시 공급자 한도 카드가 잘리면 안 됩니다.");
 for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
@@ -151,7 +157,7 @@ assert(rustEntry.includes("tauri_plugin_single_instance::init"), "앱 중복 실
 assert(rustEntry.indexOf("tauri_plugin_single_instance::init") < rustEntry.indexOf("tauri_plugin_notification::init"), "single-instance 플러그인은 가장 먼저 등록해야 합니다.");
 assert(rustEntry.includes("오늘 토큰 {multiplier:.1}배 급증"), "토큰 이상 급증도 Windows 알림에 포함해야 합니다.");
 assert(rustEntry.includes('Some("low")'), "저신뢰 예측만으로 Windows 고갈 알림을 보내면 안 됩니다.");
-for (const field of ["sourceCapturedAt", "currentRatePercentPerHour", "safeRatePercentPerHour", "requiredReductionPercent"]) {
+for (const field of ["sourceCapturedAt", "currentRatePercentPerHour", "safeRatePercentPerHour", "requiredReductionPercent", "depletionEventCount", "forecastSpreadPercent"]) {
   assert(trackedSource.includes(field), `시각화용 구조화 데이터 계약 누락: ${field}`);
 }
 

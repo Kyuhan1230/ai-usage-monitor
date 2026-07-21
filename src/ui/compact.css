@@ -164,6 +164,20 @@ h1 {
   font: 700 14px Consolas, "Cascadia Mono", monospace;
 }
 
+.limit-values {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.limit-values small {
+  color: var(--muted);
+  font: 11px Consolas, "Cascadia Mono", monospace;
+  white-space: nowrap;
+}
+
 .reset,
 .stamp {
   color: var(--muted);
