@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>새 버전이 있습니다</title>
+  <link rel="stylesheet" href="update.css">
+</head>
+<body>
+  <main class="update-card">
+    <p class="eyebrow">Application update</p>
+    <h1>새 버전이 있습니다</h1>
+    <p class="version-line">현재 <strong id="current-version">확인 중</strong> · 새 버전 <strong id="new-version">확인 중</strong></p>
+    <p class="restart-note">업데이트하면 앱을 잠시 다시 시작합니다. 사용 기록은 그대로 유지됩니다.</p>
+
+    <details class="release-details">
+      <summary>릴리스 내용 보기</summary>
+      <p id="release-notes"></p>
+    </details>
+
+    <section id="progress-section" class="progress-section" hidden aria-live="polite">
+      <div class="progress-heading">
+        <span id="progress-label">업데이트 준비 중</span>
+        <span id="progress-value"></span>
+      </div>
+      <progress id="download-progress" max="100"></progress>
+    </section>
+
+    <p id="error-message" class="error-message" role="alert" hidden></p>
+
+    <footer>
+      <button id="postpone" type="button">나중에</button>
+      <button id="install" class="primary" type="button">업데이트</button>
+    </footer>
+  </main>
+  <script src="bridge.js"></script>
+  <script src="update.js"></script>
+</body>
+</html>

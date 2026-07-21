@@ -18,6 +18,8 @@ const codexButton = document.getElementById("codex-login");
 const claudeButton = document.getElementById("claude-auth");
 const hookButton = document.getElementById("install-hook");
 const actionMessage = document.getElementById("action-message");
+const checkUpdateButton = document.getElementById("check-update");
+const updateDetail = document.getElementById("update-detail");
 
 let latestSnapshot = null;
 
@@ -206,6 +208,31 @@ async function finishOnboarding(skipped) {
   await window.usageApp.close();
 }
 
+async function checkForUpdate() {
+  checkUpdateButton.disabled = true;
+  actionMessage.dataset.kind = "progress";
+  actionMessage.textContent = "새 버전을 확인하는 중입니다.";
+  try {
+    const result = await window.usageApp.checkForUpdate(true);
+    if (result.status === "up_to_date") {
+      updateDetail.textContent = "현재 최신 버전을 사용하고 있습니다.";
+      actionMessage.textContent = "현재 최신 버전을 사용하고 있습니다.";
+    } else if (result.status === "available") {
+      const version = result.available && result.available.version;
+      updateDetail.textContent = `${version || "새 버전"} 업데이트를 사용할 수 있습니다.`;
+      actionMessage.textContent = "업데이트 안내 창을 열었습니다.";
+    } else {
+      actionMessage.textContent = "다른 업데이트 확인이 진행 중입니다. 잠시 후 다시 시도하세요.";
+    }
+    actionMessage.dataset.kind = "ok";
+  } catch (error) {
+    actionMessage.dataset.kind = "error";
+    actionMessage.textContent = `업데이트 확인 실패: ${String(error)} 네트워크를 확인한 뒤 다시 시도하세요.`;
+  } finally {
+    checkUpdateButton.disabled = false;
+  }
+}
+
 codexButton.addEventListener("click", () => runProviderAction(codexButton));
 claudeButton.addEventListener("click", () => runProviderAction(claudeButton));
 hookButton.addEventListener("click", async () => {
@@ -235,5 +262,6 @@ refreshButton.addEventListener("click", () => refresh(false));
 collectButton.addEventListener("click", () => refresh(true));
 completeButton.addEventListener("click", () => finishOnboarding(false));
 laterButton.addEventListener("click", () => finishOnboarding(true));
+checkUpdateButton.addEventListener("click", checkForUpdate);
 
 refresh(false);
