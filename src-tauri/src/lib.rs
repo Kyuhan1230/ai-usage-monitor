@@ -2,6 +2,7 @@ mod analytics;
 mod collector;
 mod hook;
 mod storage;
+mod update;
 mod usage;
 
 use crate::analytics::{STATUS_FRESHNESS_MS, build_analytics};
@@ -15,6 +16,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -621,6 +623,108 @@ fn close_window(window: WebviewWindow) -> Result<(), String> {
     window.destroy().map_err(|error| error.to_string())
 }
 
+async fn check_and_show_update(
+    app: AppHandle,
+    manual: bool,
+) -> Result<update::UpdateCheckResult, String> {
+    let result = update::check_for_update(app.clone(), manual).await?;
+    if result.should_open_window {
+        let available_version = result
+            .available
+            .as_ref()
+            .map(|available| available.version.clone())
+            .ok_or_else(|| "업데이트 창에 표시할 버전 정보가 없습니다.".to_string())?;
+        let window_app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || show_window_by_label(&window_app, "update"))
+            .await
+            .map_err(|error| error.to_string())??;
+        update::mark_window_opened(&app, &available_version)?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+async fn check_for_update(
+    app: AppHandle,
+    manual: bool,
+) -> Result<update::UpdateCheckResult, String> {
+    check_and_show_update(app, manual).await
+}
+
+#[tauri::command]
+fn get_update_state(app: AppHandle) -> update::UpdateViewState {
+    update::view_state(&app)
+}
+
+#[tauri::command]
+fn postpone_update(app: AppHandle, version: String) -> Result<update::UpdateViewState, String> {
+    update::postpone_update(&app, &version)
+}
+
+#[tauri::command]
+async fn install_update(
+    app: AppHandle,
+    expected_version: String,
+    on_progress: Channel<update::UpdateProgress>,
+) -> Result<update::UpdateInstallResult, String> {
+    update::install_update(app, expected_version, on_progress).await
+}
+
+fn start_automatic_update_check(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let _ = tauri::async_runtime::spawn_blocking(|| {
+            thread::sleep(Duration::from_secs(update::AUTO_CHECK_DELAY_SECONDS));
+        })
+        .await;
+        let _ = check_and_show_update(app, false).await;
+    });
+}
+
+fn start_tray_update_check(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        match check_and_show_update(app.clone(), true).await {
+            Ok(result) if result.status == "up_to_date" => {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("업데이트 확인")
+                    .body("현재 최신 버전을 사용하고 있습니다.")
+                    .show();
+            }
+            Ok(result) if result.status == "busy" => {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("업데이트 확인 중")
+                    .body("이미 진행 중인 확인이 끝날 때까지 잠시 기다려 주세요.")
+                    .show();
+            }
+            Ok(result) if result.status == "available" && !result.should_open_window => {
+                let version = result
+                    .available
+                    .as_ref()
+                    .map(|update| update.version.as_str())
+                    .unwrap_or("새 버전");
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("새 버전이 있습니다")
+                    .body(format!("{version} 업데이트가 이미 안내되었습니다."))
+                    .show();
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("업데이트 확인 실패")
+                    .body(format!("네트워크를 확인한 뒤 다시 시도하세요. {error}"))
+                    .show();
+            }
+        }
+    });
+}
+
 fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
     let (url, title, width, height, min_width, min_height, decorations) = match label {
         "compact" => (
@@ -651,6 +755,15 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             true,
         ),
         "setup" => ("setup.html", "Setup", 680.0, 820.0, 560.0, 640.0, true),
+        "update" => (
+            "update.html",
+            "새 버전이 있습니다",
+            520.0,
+            440.0,
+            460.0,
+            380.0,
+            true,
+        ),
         _ => return Err("unknown window label".to_string()),
     };
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
@@ -786,11 +899,20 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let insights = MenuItem::with_id(app, "insights", "Usage insights", true, None::<&str>)?;
     let details = MenuItem::with_id(app, "details", "Token details", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "setup", "Setup", true, None::<&str>)?;
+    let check_update = MenuItem::with_id(app, "check_update", "업데이트 확인", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&compact, &insights, &details, &setup, &separator, &quit],
+        &[
+            &compact,
+            &insights,
+            &details,
+            &setup,
+            &check_update,
+            &separator,
+            &quit,
+        ],
     )?;
     let mut builder = TrayIconBuilder::new()
         .tooltip("Codex, Claude Usage")
@@ -798,6 +920,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" => app.exit(0),
+            "check_update" => start_tray_update_check(app.clone()),
             label => {
                 show_window_on_worker(app.clone(), label.to_string());
             }
@@ -840,10 +963,13 @@ pub fn run() {
             show_window_on_worker(app.clone(), label.to_string());
         }))
         .manage(RuntimeState::default())
+        .manage(update::UpdateRuntime::default())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             build_tray(app)?;
             start_activity_monitor(app.handle().clone());
+            start_automatic_update_check(app.handle().clone());
             if !std::env::args().any(|argument| argument == "--background") {
                 let first_window = if onboarding_complete() {
                     "compact"
@@ -857,6 +983,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                if window.label() == "update" {
+                    if update::installation_in_progress(window.app_handle()) {
+                        return;
+                    }
+                    update::postpone_pending_on_close(window.app_handle());
+                }
                 let _ = window.destroy();
             }
         })
@@ -872,6 +1004,10 @@ pub fn run() {
             minimize_window,
             close_window,
             show_window,
+            check_for_update,
+            get_update_state,
+            postpone_update,
+            install_update,
             install_claude_hook,
             open_login_terminal,
             open_install_terminal,
