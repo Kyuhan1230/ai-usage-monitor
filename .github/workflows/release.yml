@@ -135,16 +135,25 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $url = "https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/latest.json"
-          $response = $null
+          $manifest = $null
+          $lastFailure = "No response"
           for ($attempt = 1; $attempt -le 6; $attempt++) {
             try {
-              $response = Invoke-WebRequest -Uri $url -UseBasicParsing
-              if ($response.StatusCode -eq 200) { break }
+              $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+              $candidate = Invoke-RestMethod -Uri "${url}?cachebust=$cacheBust" -Headers @{ "Cache-Control" = "no-cache" }
+              if ($candidate.version -eq $version) {
+                $manifest = $candidate
+                break
+              }
+              $lastFailure = "Expected $version but received $($candidate.version)"
             } catch {
-              if ($attempt -eq 6) { throw }
+              $lastFailure = $_.Exception.Message
             }
-            Start-Sleep -Seconds 10
+            if ($attempt -lt 6) { Start-Sleep -Seconds 10 }
           }
-          if ($null -eq $response -or $response.StatusCode -ne 200) { throw "Published latest.json did not return HTTP 200" }
-          $manifest = $response.Content | ConvertFrom-Json
-          if ($manifest.version -ne $version) { throw "Published manifest version mismatch: $($manifest.version)" }
+          if ($null -eq $manifest) { throw "Published latest.json was not ready after retries: $lastFailure" }
+          $platform = $manifest.platforms.'windows-x86_64'
+          $expectedUrl = "https://github.com/Kyuhan1230/ai-usage-monitor/releases/download/v$version/Codex-Claude-Usage-Setup-$version.exe"
+          if ($null -eq $platform) { throw "Published manifest is missing windows-x86_64" }
+          if ($platform.url -ne $expectedUrl) { throw "Published installer URL mismatch: $($platform.url)" }
+          if ([string]::IsNullOrWhiteSpace([string]$platform.signature)) { throw "Published manifest signature is empty" }
