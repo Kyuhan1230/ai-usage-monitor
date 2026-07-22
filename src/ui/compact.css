@@ -20,8 +20,8 @@
 
 body {
   margin: 0;
-  min-width: 320px;
-  min-height: 280px;
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
   background: var(--bg);
   color: var(--text);
@@ -53,6 +53,7 @@ input:focus-visible {
 }
 
 .shell {
+  min-width: 0;
   min-height: 100vh;
   display: grid;
   grid-template-rows: repeat(5, auto);
@@ -260,4 +261,113 @@ h1 {
 .actions button {
   flex: 1;
   padding: 0 8px;
+}
+
+.resize-grip {
+  -webkit-app-region: no-drag;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  width: 22px;
+  min-height: 22px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: nwse-resize;
+}
+
+.resize-grip::before {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #68758a;
+  border-bottom: 2px solid #68758a;
+}
+
+@media (min-width: 680px) {
+  .shell {
+    padding: 18px;
+  }
+
+  .meters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 340px) {
+  .shell {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .titlebar {
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+
+  h1 {
+    font-size: 16px;
+  }
+
+  .meter {
+    padding: 10px;
+  }
+
+  .limit-line {
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .limit-values {
+    flex-wrap: wrap;
+    gap: 2px 6px;
+  }
+
+  .limit-values small,
+  .reset,
+  .stamp {
+    white-space: normal;
+  }
+
+  .reset,
+  .stamp {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+
+  .controls {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .opacity-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+}
+
+@media (max-height: 560px) {
+  .shell {
+    gap: 8px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .meter,
+  .decision-strip {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
 }

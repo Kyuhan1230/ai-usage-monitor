@@ -5,6 +5,7 @@
   "windows": ["compact", "insights", "details", "setup", "update"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-resize-dragging",
     "notification:default"
   ]
 }

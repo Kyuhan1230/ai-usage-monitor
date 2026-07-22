@@ -725,6 +725,55 @@ fn start_tray_update_check(app: AppHandle) {
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct WindowMetrics {
+    width: f64,
+    height: f64,
+    min_width: f64,
+    min_height: f64,
+}
+
+fn fitted_window_metrics(
+    preferred: (f64, f64),
+    minimum: (f64, f64),
+    work_area: (f64, f64),
+) -> WindowMetrics {
+    fn fit_dimension(preferred: f64, minimum: f64, available: f64, margin: f64) -> (f64, f64) {
+        let maximum = (available - margin).max(1.0);
+        let fitted_minimum = minimum.min(maximum);
+        (preferred.min(maximum).max(fitted_minimum), fitted_minimum)
+    }
+
+    let (width, min_width) = fit_dimension(preferred.0, minimum.0, work_area.0, 48.0);
+    let (height, min_height) = fit_dimension(preferred.1, minimum.1, work_area.1, 64.0);
+    WindowMetrics {
+        width,
+        height,
+        min_width,
+        min_height,
+    }
+}
+
+fn primary_work_area(app: &AppHandle) -> (f64, f64) {
+    app.primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| {
+            let scale = monitor.scale_factor();
+            let scale = if scale.is_finite() && scale > 0.0 {
+                scale
+            } else {
+                1.0
+            };
+            let size = &monitor.work_area().size;
+            (
+                f64::from(size.width) / scale,
+                f64::from(size.height) / scale,
+            )
+        })
+        .unwrap_or((1920.0, 1080.0))
+}
+
 fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
     let (url, title, width, height, min_width, min_height, decorations) = match label {
         "compact" => (
@@ -732,8 +781,8 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             "Codex Claude Usage",
             360.0,
             480.0,
+            280.0,
             320.0,
-            360.0,
             false,
         ),
         "insights" => (
@@ -741,8 +790,8 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             "Usage Insights",
             820.0,
             1000.0,
-            720.0,
-            640.0,
+            360.0,
+            480.0,
             true,
         ),
         "details" => (
@@ -750,27 +799,35 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             "Local Token Details",
             1180.0,
             760.0,
-            900.0,
-            620.0,
+            360.0,
+            440.0,
             true,
         ),
-        "setup" => ("setup.html", "Setup", 680.0, 820.0, 560.0, 640.0, true),
+        "setup" => ("setup.html", "Setup", 680.0, 820.0, 360.0, 480.0, true),
         "update" => (
             "update.html",
             "새 버전이 있습니다",
             520.0,
             440.0,
-            460.0,
-            380.0,
+            340.0,
+            360.0,
             true,
         ),
         _ => return Err("unknown window label".to_string()),
     };
+    let metrics = fitted_window_metrics(
+        (width, height),
+        (min_width, min_height),
+        primary_work_area(app),
+    );
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
         .title(title)
-        .inner_size(width, height)
-        .min_inner_size(min_width, min_height)
+        .inner_size(metrics.width, metrics.height)
+        .min_inner_size(metrics.min_width, metrics.min_height)
+        .resizable(true)
+        .maximizable(decorations)
         .decorations(decorations)
+        .center()
         .build()
         .map_err(|error| error.to_string())
 }
@@ -1029,6 +1086,28 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secondary_windows_fit_inside_the_logical_work_area() {
+        assert_eq!(
+            fitted_window_metrics((820.0, 1000.0), (360.0, 480.0), (1366.0, 728.0)),
+            WindowMetrics {
+                width: 820.0,
+                height: 664.0,
+                min_width: 360.0,
+                min_height: 480.0,
+            }
+        );
+        assert_eq!(
+            fitted_window_metrics((520.0, 440.0), (340.0, 360.0), (320.0, 240.0)),
+            WindowMetrics {
+                width: 272.0,
+                height: 176.0,
+                min_width: 272.0,
+                min_height: 176.0,
+            }
+        );
+    }
 
     #[test]
     fn activity_monitor_requires_a_new_or_changed_session_file() {

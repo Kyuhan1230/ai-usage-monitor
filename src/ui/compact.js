@@ -30,6 +30,7 @@ const ids = [
   "opacity",
   "minimize",
   "close",
+  "resize-grip",
   "refresh",
   "open-setup",
   "open-insights",
@@ -269,6 +270,13 @@ el.opacity.addEventListener("input", () => {
 
 el.minimize.addEventListener("click", () => window.usageApp.minimize());
 el.close.addEventListener("click", () => window.usageApp.close());
+el["resize-grip"].addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  window.usageApp.startResize().catch(() => {});
+});
 el.refresh.addEventListener("click", () => refresh(true));
 el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
 el["open-insights"].addEventListener("click", () => window.usageApp.openInsights());

@@ -17,6 +17,7 @@
 
 body {
   margin: 0;
+  min-width: 0;
   background: var(--bg);
   color: var(--text);
   font: 14px "Segoe UI", system-ui, sans-serif;
@@ -25,7 +26,7 @@ body {
 .setup {
   max-width: 720px;
   margin: 0 auto;
-  padding: 28px;
+  padding: clamp(14px, 4vw, 28px);
 }
 
 .eyebrow {
@@ -184,6 +185,44 @@ footer {
   .onboarding-actions,
   .status-actions {
     justify-content: flex-end;
+  }
+}
+
+@media (max-width: 520px) {
+  h1 {
+    font-size: clamp(21px, 7vw, 26px);
+  }
+
+  .summary {
+    margin-bottom: 16px;
+  }
+
+  .check {
+    grid-template-columns: 1fr;
+    gap: 11px;
+    padding: 12px;
+  }
+
+  .check > button,
+  .check > .toggle {
+    width: 100%;
+    justify-content: center;
+  }
+
+  footer {
+    position: static;
+  }
+
+  .onboarding-actions,
+  .status-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 390px) {
+  .status-actions {
+    grid-template-columns: 1fr;
   }
 }
 

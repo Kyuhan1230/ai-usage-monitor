@@ -12,6 +12,7 @@ window.usageApp = {
   setOpacity: (value) => invoke("set_opacity", { value }),
   minimize: () => invoke("minimize_window"),
   close: () => invoke("close_window"),
+  startResize: () => window.__TAURI__.window.getCurrentWindow().startResizeDragging("SouthEast"),
   openCompact: () => invoke("show_window", { label: "compact" }),
   openDetails: () => invoke("show_window", { label: "details" }),
   openInsights: () => invoke("show_window", { label: "insights" }),
