@@ -26,12 +26,12 @@
         <div class="decision-head">
           <div>
             <p class="eyebrow">Decision</p>
-            <p id="decision-label" class="decision-label">현재 상태</p>
-            <h2 id="decision-title">고갈 위험을 계산하는 중입니다</h2>
+            <p id="decision-label" class="decision-label">우선 확인할 한도</p>
+            <h2 id="decision-title">가장 먼저 소진될 한도를 찾고 있습니다</h2>
           </div>
           <span id="decision-badge" class="decision-badge">확인 중</span>
         </div>
-        <p id="decision-detail" class="decision-detail">한도 기록과 리셋 시각을 확인하고 있습니다.</p>
+        <p id="decision-detail" class="decision-detail">최근 사용 속도와 다음 리셋 시각을 비교하고 있습니다.</p>
         <div class="primary-action">
           <span>지금 할 일</span>
           <strong id="primary-action">새로고침해 최신 상태를 확인하세요.</strong>
@@ -40,33 +40,33 @@
 
       <section class="panel decision-visuals" aria-labelledby="survival-heading">
         <div class="panel-head">
-          <div><p class="eyebrow">Survival</p><h2 id="survival-heading">리셋까지 버틸 수 있는가</h2></div>
+          <div><p class="eyebrow">Survival</p><h2 id="survival-heading">이 속도로 리셋까지 버틸까?</h2></div>
           <span id="decision-visual-source" class="legend">최우선 한도를 찾는 중</span>
         </div>
         <div class="decision-viz-grid">
           <article class="decision-viz-block" aria-labelledby="timeline-heading">
             <div class="viz-title-row">
-              <h3 id="timeline-heading">리셋 생존 타임라인</h3>
+              <h3 id="timeline-heading">고갈 예상과 리셋 시점</h3>
               <span id="timeline-state" class="viz-state">계산 중</span>
             </div>
             <div id="survival-timeline" class="survival-timeline"></div>
-            <p id="timeline-summary" class="viz-summary">예상 고갈 범위와 리셋 시각을 비교합니다.</p>
+            <p id="timeline-summary" class="viz-summary">빠른 경우와 느린 경우를 다음 리셋 시점과 비교합니다.</p>
           </article>
           <article class="decision-viz-block" aria-labelledby="slowdown-heading">
             <div class="viz-title-row">
-              <h3 id="slowdown-heading">필요 감속률</h3>
+              <h3 id="slowdown-heading">리셋까지 필요한 속도</h3>
               <span id="slowdown-state" class="viz-state">계산 중</span>
             </div>
             <div id="slowdown-bullet" class="slowdown-bullet"></div>
-            <p id="slowdown-summary" class="viz-summary">현재 속도와 리셋까지 허용되는 속도를 비교합니다.</p>
+            <p id="slowdown-summary" class="viz-summary">현재 속도를 리셋까지 유지 가능한 수준과 비교합니다.</p>
           </article>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-head">
-          <div><p class="eyebrow">Forecast</p><h2>소진 속도와 예상 고갈 시각</h2></div>
-          <span class="legend">낮은 신뢰도는 기록이 더 필요합니다</span>
+          <div><p class="eyebrow">Forecast</p><h2>최근 소진 속도와 고갈 예상</h2></div>
+          <span class="legend">최근 평균 사용 속도가 이어진다고 가정합니다</span>
         </div>
         <div id="forecasts" class="forecast-grid"></div>
       </section>
@@ -80,8 +80,8 @@
           <div class="summary-grid secondary-grid">
             <article class="summary-card"><span>알림 수</span><strong id="alert-count">0</strong><small id="alert-detail">정상 범위</small></article>
             <article class="summary-card"><span>API 정가 환산</span><strong id="total-cost">$0.00</strong><small>실제 구독 청구액 아님</small></article>
-            <article class="summary-card"><span>전일 대비</span><strong id="day-change">--</strong><small id="day-tokens">기록 부족</small></article>
-            <article class="summary-card"><span>전주 대비</span><strong id="week-change">--</strong><small id="week-tokens">기록 부족</small></article>
+            <article class="summary-card"><span>전일 대비</span><strong id="day-change">--</strong><small id="day-tokens">아직 비교 전</small></article>
+            <article class="summary-card"><span>전주 대비</span><strong id="week-change">--</strong><small id="week-tokens">아직 비교 전</small></article>
           </div>
 
           <section class="two-column">

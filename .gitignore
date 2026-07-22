@@ -1,4 +1,10 @@
 node_modules/
+.env
+.env.*
+*.key
+*.key.pub
+*.p12
+*.pfx
 src-tauri/target/
 src-tauri/gen/
 release-assets/

@@ -1,6 +1,6 @@
 {
   "name": "codex-usage-wrapper",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "productName": "Codex Claude Usage",
   "author": "CodexUsage",
@@ -15,11 +15,16 @@
     "app:tauri": "tauri dev",
     "pack": "tauri build --no-bundle",
     "dist": "tauri build --bundles nsis",
+    "dist:ci": "tauri build --bundles nsis --config src-tauri/tauri.ci.conf.json",
+    "create:updater-manifest": "node scripts/create-updater-manifest.js",
     "verify:release-tag": "node scripts/verify-release-tag.js",
+    "verify:updater-manifest": "node scripts/verify-updater-manifest.js",
+    "verify:updater-signature": "cargo run --locked --quiet --manifest-path src-tauri/Cargo.toml --example verify_updater_signature --",
     "test:ui": "node tests/ui-tests.js",
+    "test:release": "node tests/release-tests.js",
     "lint:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --locked --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings",
     "test:rust": "cargo test --locked --manifest-path src-tauri/Cargo.toml",
-    "test": "npm run lint:rust && npm run test:rust && npm run test:ui"
+    "test": "npm run lint:rust && npm run test:rust && npm run test:ui && npm run test:release"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.0"

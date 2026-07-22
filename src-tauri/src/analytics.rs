@@ -304,6 +304,38 @@ fn current_cycle(samples: &[Sample]) -> Vec<Sample> {
     samples[start..].to_vec()
 }
 
+fn forecast_window_ms(limit: &Value) -> i64 {
+    let is_short_window = limit
+        .get("window_duration_mins")
+        .and_then(Value::as_i64)
+        .is_some_and(|minutes| minutes <= 6 * 60)
+        || limit.get("type").and_then(Value::as_str) == Some("five_hour");
+    if is_short_window {
+        HOUR_MS / 2
+    } else {
+        2 * HOUR_MS
+    }
+}
+
+fn aggregated_rates(samples: &[Sample], minimum_span_ms: i64) -> Vec<f64> {
+    if samples.len() < 2 {
+        return Vec::new();
+    }
+    let mut rates = Vec::new();
+    let mut start = 0;
+    for end in 1..samples.len() {
+        let elapsed_ms = samples[end].captured_ms - samples[start].captured_ms;
+        if elapsed_ms < minimum_span_ms {
+            continue;
+        }
+        let hours = elapsed_ms as f64 / HOUR_MS as f64;
+        let depleted = (samples[start].remaining - samples[end].remaining).max(0.0);
+        rates.push(depleted / hours);
+        start = end;
+    }
+    rates
+}
+
 fn reset_at(limit: &Value, now_ms: i64) -> Option<i64> {
     if let Some(epoch) = limit
         .get("resets_at")
@@ -357,21 +389,15 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
     } else {
         0.0
     };
-    let depleted = cycle
+    let depleted = (cycle[0].remaining - latest.remaining).max(0.0);
+    let depletion_events = cycle
         .windows(2)
-        .map(|pair| (pair[0].remaining - pair[1].remaining).max(0.0))
-        .sum::<f64>();
+        .filter(|pair| pair[0].remaining > pair[1].remaining)
+        .count();
     let rate = (elapsed_hours >= 1.0 / 12.0 && depleted > 0.0).then_some(depleted / elapsed_hours);
     let exhaustion =
         rate.map(|rate| latest.captured_ms + (latest.remaining / rate * HOUR_MS as f64) as i64);
-    let interval_rates = cycle
-        .windows(2)
-        .filter_map(|pair| {
-            let hours = (pair[1].captured_ms - pair[0].captured_ms) as f64 / HOUR_MS as f64;
-            (hours >= 1.0 / 12.0)
-                .then_some(((pair[0].remaining - pair[1].remaining).max(0.0)) / hours)
-        })
-        .collect::<Vec<_>>();
+    let interval_rates = aggregated_rates(&cycle, forecast_window_ms(&latest.limit));
     let variability = rate.and_then(|center| {
         (interval_rates.len() >= 2).then(|| {
             let mad = median(
@@ -384,9 +410,14 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
             round((mad / center) * 100.0, 0)
         })
     });
+    let forecast_spread_percent = variability.map(|value| {
+        round(
+            (value / (interval_rates.len() as f64).sqrt()).clamp(10.0, 50.0),
+            0,
+        )
+    });
     let exhaustion_range = rate.and_then(|center| {
-        let variability = variability? / 100.0;
-        let spread = variability.clamp(0.15, 0.75);
+        let spread = forecast_spread_percent? / 100.0;
         let fast_rate = center * (1.0 + spread);
         let slow_rate = (center * (1.0 - spread)).max(center * 0.1);
         Some((
@@ -417,16 +448,16 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
             ((1.0 - safe / current) * 100.0).clamp(0.0, 100.0)
         }
     });
-    let confidence = if cycle.len() >= 8
-        && elapsed_hours >= 6.0
+    let confidence = if elapsed_hours >= 6.0
+        && depletion_events >= 5
         && interval_rates.len() >= 5
-        && variability.is_some_and(|value| value <= 25.0)
+        && forecast_spread_percent.is_some_and(|value| value <= 25.0)
     {
         "high"
-    } else if cycle.len() >= 4
-        && elapsed_hours >= 2.0
+    } else if elapsed_hours >= 2.0
+        && depletion_events >= 2
         && interval_rates.len() >= 3
-        && variability.is_some_and(|value| value <= 60.0)
+        && forecast_spread_percent.is_some_and(|value| value <= 50.0)
     {
         "medium"
     } else {
@@ -439,6 +470,7 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
         "sampleCount": cycle.len(),
         "observedHours": round(elapsed_hours, 1),
         "observedIntervalCount": interval_rates.len(),
+        "depletionEventCount": depletion_events,
         "depletionRatePercentPerHour": rate.map(|value| round(value, 2)),
         "currentRatePercentPerHour": rate.map(|value| round(value, 2)),
         "safeRatePercentPerHour": safe_rate.map(|value| round(value, 2)),
@@ -448,7 +480,8 @@ fn analyze_limit(values: &[Sample], now_ms: i64) -> Value {
         "expectedExhaustionEarliestAt": exhaustion_range.map(|value| iso(value.0)),
         "expectedExhaustionLatestAt": exhaustion_range.map(|value| iso(value.1)),
         "rateVariabilityPercent": variability,
-        "forecastMethod": "cycle_average_with_interval_mad_band",
+        "forecastSpreadPercent": forecast_spread_percent,
+        "forecastMethod": "cycle_average_with_aggregated_window_mad_error",
         "resetAt": reset.map(iso),
         "willExhaustBeforeReset": will_exhaust_before_reset,
         "forecastStatus": forecast_status,
@@ -546,6 +579,23 @@ fn provider_cost(rows: &[UsageRow], provider: &str, today: &str) -> Value {
     })
 }
 
+fn provider_label(provider: &str) -> &'static str {
+    if provider == "codex" {
+        "Codex"
+    } else {
+        "Claude"
+    }
+}
+
+fn limit_label(kind: &str) -> &'static str {
+    match kind {
+        "five_hour" => "5시간",
+        "weekly" | "seven_day" => "주간",
+        "monthly" => "월간",
+        _ => "사용량",
+    }
+}
+
 fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<Value> {
     let mut result = Vec::<Value>::new();
     for provider in ["codex", "claude"] {
@@ -565,7 +615,7 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                 if remaining <= 10.0 {
                     result.push(json!({
                         "priority": "critical", "provider": provider, "reason": "critical_limit",
-                        "action": format!("{} {} 한도가 {}% 남았습니다. 큰 작업을 멈추고 초기화 이후로 미루세요.", if provider == "codex" { "Codex" } else { "Claude" }, kind, remaining as i64)
+                        "action": format!("{} {} 한도가 {}% 남았습니다. 큰 작업은 다음 리셋 뒤로 미루고, 지금은 짧은 작업만 진행하세요.", provider_label(provider), limit_label(kind), remaining as i64)
                     }));
                 } else if limit.get("forecastStatus").and_then(Value::as_str) == Some("risk")
                     && limit.get("confidence").and_then(Value::as_str) != Some("low")
@@ -576,7 +626,7 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                     let rounded = (reduction / 5.0).ceil() as i64 * 5;
                     result.push(json!({
                         "priority": "warning", "provider": provider, "reason": "forecast_before_reset",
-                        "action": format!("{} 사용 속도를 약 {}% 줄이면 초기화 전 고갈을 피할 가능성이 큽니다.", if provider == "codex" { "Codex" } else { "Claude" }, rounded)
+                        "action": format!("{} {} 사용 속도를 약 {}% 낮추면 다음 리셋까지 한도를 유지할 가능성이 커집니다.", provider_label(provider), limit_label(kind), rounded)
                     }));
                 }
             }
@@ -618,7 +668,7 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
     if result.is_empty() {
         result.push(json!({
             "priority": "ok", "provider": Value::Null, "reason": "healthy",
-            "action": "현재 속도에서는 즉시 바꿀 설정이 없습니다. 다음 작업 전 새로고침해 추세를 확인하세요."
+            "action": "현재 속도라면 다음 리셋까지 한도를 유지할 가능성이 큽니다. 작업량이 달라지면 다시 확인하세요."
         }));
     }
     result.sort_by_key(|item| match item.get("priority").and_then(Value::as_str) {
@@ -884,5 +934,33 @@ mod tests {
         let limit = analyze_limit(&values, now_ms);
         assert_eq!(limit["forecastStatus"], "unknown");
         assert!(limit["willExhaustBeforeReset"].is_null());
+    }
+
+    #[test]
+    fn frequent_unchanged_samples_do_not_force_low_confidence() {
+        let now_ms = chrono::DateTime::parse_from_rfc3339("2026-07-20T12:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        let reset = (now_ms + 3 * DAY_MS) / 1000;
+        let values = (0..=24)
+            .map(|index| Sample {
+                captured_ms: now_ms - (24 - index) * HOUR_MS / 2,
+                remaining: 80.0 - (index / 2) as f64,
+                limit: json!({
+                    "type": "weekly",
+                    "remaining_percent": 80.0 - (index / 2) as f64,
+                    "window_duration_mins": 10_080,
+                    "resets_at": reset
+                }),
+            })
+            .collect::<Vec<_>>();
+
+        let limit = analyze_limit(&values, now_ms);
+
+        assert_eq!(limit["confidence"], "high");
+        assert_eq!(limit["depletionEventCount"], 12);
+        assert_eq!(limit["observedIntervalCount"], 6);
+        assert_eq!(limit["forecastSpreadPercent"], 10.0);
+        assert_eq!(limit["depletionRatePercentPerHour"], 1.0);
     }
 }

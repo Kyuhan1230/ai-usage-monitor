@@ -8,15 +8,19 @@ const ids = [
   "codex-state",
   "codex-five-hour",
   "codex-five-hour-bar",
+  "codex-five-hour-rate",
   "codex-weekly",
   "codex-weekly-bar",
+  "codex-weekly-rate",
   "codex-reset",
   "codex-stamp",
   "claude-state",
   "claude-five-hour",
   "claude-five-hour-bar",
+  "claude-five-hour-rate",
   "claude-seven-day",
   "claude-seven-day-bar",
+  "claude-seven-day-rate",
   "claude-reset",
   "claude-stamp",
   "decision",
@@ -106,6 +110,17 @@ function renderLimitBar(id, limit) {
   }
 }
 
+function renderLimitRate(id, limit, stale) {
+  if (stale) {
+    el[id].textContent = "속도 갱신 필요";
+    return;
+  }
+  const rate = limit && limit.depletionRatePercentPerHour;
+  el[id].textContent = Number.isFinite(rate)
+    ? `시간당 ${rate}%p`
+    : "속도 계산 전";
+}
+
 function staleProviders(snapshot) {
   return new Set(["codex", "claude"].filter((provider) => {
     const state = snapshot[provider];
@@ -117,8 +132,8 @@ function staleProviders(snapshot) {
 function renderDecision(analytics, snapshot) {
   if (!analytics) {
     el.decision.dataset.tone = "neutral";
-    el["decision-status"].textContent = "분석 기록 없음";
-    el["decision-action"].textContent = "새로고침하면 고갈 위험을 계산합니다.";
+    el["decision-status"].textContent = "사용 흐름 확인 전";
+    el["decision-action"].textContent = "새로고침하면 최근 사용 속도와 고갈 시점을 계산합니다.";
     return;
   }
   const critical = analytics.alerts.find((alert) => alert.severity === "critical");
@@ -131,8 +146,8 @@ function renderDecision(analytics, snapshot) {
   const priority = critical || warning;
   if ((priority && stale.has(priority.provider)) || (!priority && stale.size)) {
     el.decision.dataset.tone = "neutral";
-    el["decision-status"].textContent = "오래된 데이터 · 판정 보류";
-    el["decision-action"].textContent = "현재 잔여량과 다를 수 있습니다. 지금 새로고침하세요.";
+    el["decision-status"].textContent = "최신 사용량 확인 필요";
+    el["decision-action"].textContent = "마지막 수집 후 시간이 지났습니다. 지금 새로고침하세요.";
     return;
   }
   if (critical) {
@@ -141,22 +156,22 @@ function renderDecision(analytics, snapshot) {
   } else if (warning) {
     el.decision.dataset.tone = "warning";
     el["decision-status"].textContent = warning.reason === "forecast_before_reset"
-      ? `${warning.provider === "codex" ? "Codex" : "Claude"} ${warning.confidence === "low" ? "예비 추세 · " : ""}리셋 전 고갈 가능`
+      ? `${warning.provider === "codex" ? "Codex" : "Claude"} 리셋 전 소진 가능성`
       : `${warning.provider === "codex" ? "Codex" : "Claude"} 한도 주의 · ${warning.remainingPercent}% 남음`;
   } else if (!hasKnownForecast) {
     el.decision.dataset.tone = "neutral";
-    el["decision-status"].textContent = "고갈 판단에 기록 더 필요";
-    el["decision-action"].textContent = "같은 한도를 두 번 이상 수집하면 리셋 전 고갈 여부를 계산합니다.";
+    el["decision-status"].textContent = "소진 속도 계산 전";
+    el["decision-action"].textContent = "잔여량이 실제로 줄어들면 리셋 전 고갈 여부를 계산합니다.";
     return;
   } else {
     el.decision.dataset.tone = "ok";
-    el["decision-status"].textContent = "현재 기록에서 고갈 위험 없음";
+    el["decision-status"].textContent = "현재 속도라면 리셋까지 유지 가능";
   }
   el["decision-action"].textContent = warning && warning.reason === "forecast_before_reset" && warning.confidence === "low"
-    ? "예비 추세입니다. 기록을 더 수집한 뒤 감속 목표를 확인하세요."
+    ? "고갈 시점의 오차가 큽니다. 큰 작업을 나누고 사용량을 줄이세요."
     : action
     ? action.action
-    : "작업 흐름이 달라진 뒤 다시 확인하세요.";
+    : "작업량이 달라지면 다시 확인하세요.";
 }
 
 function render(snapshot) {
@@ -166,9 +181,19 @@ function render(snapshot) {
   const claudeFiveHour = snapshot.claude.limits.five_hour;
   const claudeSevenDay = snapshot.claude.limits.seven_day;
   const claudeLimit = claudeFiveHour || claudeSevenDay;
+  const analytics = snapshot.analytics;
+  const stale = staleProviders(snapshot);
+  const codexAnalytics = analytics && analytics.providers && analytics.providers.codex
+    ? analytics.providers.codex.limits
+    : {};
+  const claudeAnalytics = analytics && analytics.providers && analytics.providers.claude
+    ? analytics.providers.claude.limits
+    : {};
 
   renderLimitBar("codex-five-hour", codexFiveHour);
   renderLimitBar("codex-weekly", codexWeekly);
+  renderLimitRate("codex-five-hour-rate", codexAnalytics.five_hour, stale.has("codex"));
+  renderLimitRate("codex-weekly-rate", codexAnalytics.weekly, stale.has("codex"));
   el["codex-state"].textContent = stateText({
     connected: snapshot.codex.connected,
     ageMs: snapshot.codex.ageMs,
@@ -183,6 +208,8 @@ function render(snapshot) {
 
   renderLimitBar("claude-five-hour", claudeFiveHour);
   renderLimitBar("claude-seven-day", claudeSevenDay);
+  renderLimitRate("claude-five-hour-rate", claudeAnalytics.five_hour, stale.has("claude"));
+  renderLimitRate("claude-seven-day-rate", claudeAnalytics.seven_day, stale.has("claude"));
   el["claude-state"].textContent = stateText({
     connected: snapshot.claude.connected,
     ageMs: snapshot.claude.ageMs,

@@ -1,5 +1,19 @@
 # Windows 코드 서명 설정
 
+## Tauri updater 서명
+
+Tauri updater 서명은 Windows 게시자를 표시하는 Authenticode와 별개다. updater 기능은 이 서명을 필수로 검증한다.
+
+1. `npx tauri signer generate -w <안전한 저장소의 key 경로>`로 저장소 전용 키를 만든다.
+2. 생성된 `.pub` 파일 내용을 `src-tauri/tauri.conf.json`의 `plugins.updater.pubkey`에 넣는다. 이 값은 공개해도 된다.
+3. 개인키 내용과 암호를 GitHub Actions secret에 등록한다.
+   - `TAURI_SIGNING_PRIVATE_KEY`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+4. 개인키와 암호는 `.env`, 저장소 파일, workflow 로그 또는 Release asset에 넣지 않는다.
+5. Release workflow가 만든 installer를 공개키로 검증하고, `.exe`, `.exe.sig`, `latest.json` 세 asset이 모두 맞을 때만 공개한다.
+
+현재 개인키는 암호화되어 GitHub secret에 등록되어 있으며, 로컬 백업의 암호는 Windows 사용자 범위 DPAPI로 보호한다. 키 교체는 기존 설치본이 새 키를 신뢰하지 않으므로 첫 updater 릴리스 이후 임의로 하면 안 된다.
+
 ## 권장 경로: SignPath Foundation
 
 이 프로젝트는 MIT 오픈소스이며 SignPath Foundation의 무료 오픈소스 코드 서명 프로그램에 신청서를 제출했다. 현재는 심사 결과를 기다리고 있다.
@@ -13,9 +27,9 @@
 5. 승인 후 SignPath GitHub App을 이 저장소에 연결하고 프로젝트·artifact configuration·signing policy를 만든다.
 6. GitHub Actions secret `SIGNPATH_API_TOKEN`을 등록한다. 조직 ID와 각 slug는 승인된 SignPath 프로젝트 값으로 설정한다.
 7. unsigned artifact를 `actions/upload-artifact`로 먼저 올린 뒤, 승인 시점에 SignPath가 안내하는 현재 GitHub Action과 artifact configuration으로 서명 요청을 연결한다.
-8. 애플리케이션 EXE와 최종 NSIS 설치 파일의 서명을 모두 검증한 뒤에만 GitHub Release를 공개한다. 이 앱은 자동 업데이트 메타데이터를 만들지 않는다.
+8. 애플리케이션 EXE와 최종 NSIS 설치 파일의 Authenticode 서명을 모두 검증한 뒤, 최종 installer 바이트에 Tauri updater 서명을 다시 적용하고 `latest.json`을 생성한 경우에만 GitHub Release를 공개한다.
 
-SignPath 설정값은 계정 승인 뒤 발급되므로 저장소에 가짜 ID나 토큰을 넣지 않는다. 현재 Release workflow는 서명 단계를 구현하지 않았고 미서명 NSIS만 만든다. 승인 뒤에는 아래 식별자를 실제 값으로 등록하고, 서명 검증이 실패하면 Release도 실패하도록 workflow를 별도 변경한다.
+SignPath 설정값은 계정 승인 뒤 발급되므로 저장소에 가짜 ID나 토큰을 넣지 않는다. 현재 Release workflow는 Tauri updater 서명을 구현했지만 Authenticode는 아직 적용하지 않는다. 승인 뒤에는 아래 식별자를 실제 값으로 등록하고, Authenticode와 그 이후 재생성한 Tauri updater 서명 검증이 실패하면 Release도 실패하도록 workflow를 변경한다.
 
 승인 후 GitHub 저장소의 Actions secret에 다음 값을 등록한다.
 

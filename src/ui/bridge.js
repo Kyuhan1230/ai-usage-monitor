@@ -16,6 +16,14 @@ window.usageApp = {
   openDetails: () => invoke("show_window", { label: "details" }),
   openInsights: () => invoke("show_window", { label: "insights" }),
   openSetup: () => invoke("show_window", { label: "setup" }),
+  checkForUpdate: (manual = true) => invoke("check_for_update", { manual }),
+  getUpdateState: () => invoke("get_update_state"),
+  postponeUpdate: (version) => invoke("postpone_update", { version }),
+  installUpdate: (expectedVersion, onProgress) => {
+    const channel = new window.__TAURI__.core.Channel();
+    channel.onmessage = onProgress;
+    return invoke("install_update", { expectedVersion, onProgress: channel });
+  },
   installClaudeHook: async () => {
     const first = await invoke("install_claude_hook", { force: false });
     if (first.status !== "replacement_required") {
