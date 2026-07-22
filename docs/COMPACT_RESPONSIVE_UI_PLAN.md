@@ -1,6 +1,6 @@
 # Compact 창 반응형 UI 개발 계획
 
-- 상태: 구현 대기
+- 상태: 구현·검증 완료 (2026-07-22)
 - 목표 버전: `1.2.2`
 - 대상 화면: `src/ui/compact.html`, `src/ui/compact.css`
 - 창 생성 코드: `src-tauri/src/lib.rs`
