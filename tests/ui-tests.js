@@ -26,7 +26,7 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.1");
+assert.strictEqual(packageJson.version, "1.2.2");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.build.frontendDist, "../src/ui");
 assert.deepStrictEqual(tauriConfig.app.windows, [], "백그라운드 시작 시 WebView를 만들면 안 됩니다.");
@@ -153,8 +153,20 @@ for (const id of ["codex-five-hour-rate", "codex-weekly-rate", "claude-five-hour
 }
 assert(compactScript.includes("function renderLimitRate"), "Compact 창은 한도별 시간당 소진 속도를 렌더링해야 합니다.");
 assert(compactScript.includes("시간당 ${rate}%p"), "Compact 소진 속도는 시간 단위를 명시해야 합니다.");
-assert(/body\s*\{[^}]*overflow:\s*auto/s.test(compactCss), "확대된 Compact 내용은 세로로 스크롤할 수 있어야 합니다.");
+assert(/body\s*\{[^}]*overflow-x:\s*hidden/s.test(compactCss), "Compact 창은 가로 스크롤을 만들면 안 됩니다.");
+assert(/body\s*\{[^}]*overflow-y:\s*auto/s.test(compactCss), "작은 Compact 창은 전체 세로 스크롤로 기능에 접근할 수 있어야 합니다.");
 assert(/\.meters\s*\{[^}]*overflow:\s*visible/s.test(compactCss), "확대 시 공급자 한도 카드가 잘리면 안 됩니다.");
+assert(compactCss.includes("--compact-font-body: 13px"), "Compact 기본 본문 글꼴 토큰이 필요합니다.");
+assert(compactCss.includes("--compact-font-title: 18px"), "Compact 기본 제목 글꼴 토큰이 필요합니다.");
+assert(compactCss.includes("--compact-font-meta: 12px"), "Compact 기본 보조 글꼴 토큰이 필요합니다.");
+assert(compactCss.includes("@media (max-width: 679px) and (max-height: 560px)"), "세로 카드의 중간 높이 밀도 단계가 필요합니다.");
+assert(compactCss.includes("@media (max-height: 520px)"), "Compact 기본 높이를 포함하는 밀도 단계가 필요합니다.");
+assert(compactCss.includes("--compact-font-body: 12px"), "낮은 Compact 창은 본문 글꼴을 단계적으로 줄여야 합니다.");
+assert(compactCss.includes("--compact-font-title: 16px"), "낮은 Compact 창은 제목 글꼴을 단계적으로 줄여야 합니다.");
+assert(compactCss.includes("--compact-font-meta: 11px"), "Compact 보조 글꼴은 11px 아래로 줄이면 안 됩니다.");
+assert(compactCss.includes("--compact-control-height: 28px"), "낮은 Compact 창에서도 조작 높이는 28px 이상이어야 합니다.");
+assert(/\.decision-strip strong\s*\{[^}]*overflow:\s*hidden/s.test(compactCss), "결정 안내에 중첩 스크롤이 생기면 안 됩니다.");
+assert(!/\bzoom\s*:|transform\s*:\s*scale/i.test(compactCss), "Compact 화면 전체를 강제로 축소하면 안 됩니다.");
 assert(compactHtml.includes('id="resize-grip"'), "프레임 없는 Compact 창에 크기 조절 손잡이가 필요합니다.");
 assert(bridgeScript.includes('startResizeDragging("SouthEast")'), "Compact 크기 조절은 Tauri 창 API를 사용해야 합니다.");
 assert(compactCss.includes("@media (max-width: 340px)"), "Compact 창에 최소 폭 레이아웃이 필요합니다.");
