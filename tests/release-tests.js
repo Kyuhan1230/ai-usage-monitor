@@ -20,6 +20,10 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "packa
 assert.match(releaseWorkflow, /Authenticode 코드 서명이 적용되지 않았습니다/);
 assert.match(releaseWorkflow, /v1\.1\.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치/);
 assert.match(releaseWorkflow, /--notes \$releaseNotice --generate-notes/);
+assert.match(releaseWorkflow, /Invoke-RestMethod/);
+assert.match(releaseWorkflow, /\$candidate\.version -eq \$version/);
+assert.match(releaseWorkflow, /Published manifest signature is empty/);
+assert.doesNotMatch(releaseWorkflow, /\$response\.Content \| ConvertFrom-Json/);
 assert.strictEqual(
   packageJson.scripts["dist:ci"],
   "tauri build --bundles nsis --config src-tauri/tauri.ci.conf.json",
