@@ -14,12 +14,12 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px "Segoe UI", system-ui, sans-serif; }
+body { margin: 0; min-width: 0; background: var(--bg); color: var(--text); font: 14px "Segoe UI", system-ui, sans-serif; overflow-wrap: anywhere; }
 button { min-height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 0 14px; background: var(--panel-2); color: var(--text); cursor: pointer; }
 button:hover { border-color: var(--accent); }
 button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:disabled { cursor: wait; opacity: .6; }
-.page { max-width: 1120px; margin: 0 auto; padding: 24px; }
+.page { max-width: 1120px; margin: 0 auto; padding: clamp(14px, 3vw, 24px); }
 .hero, .panel-head, .cost-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .hero { margin-bottom: 20px; }
 .eyebrow { margin: 0 0 4px; color: var(--accent); font: 11px Consolas, "Cascadia Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
@@ -119,4 +119,66 @@ h3 { margin: 0; font-size: 14px; }
   .hero { align-items: flex-start; }
   .decision-head, .analysis-details > summary { align-items: flex-start; }
   .primary-action { grid-template-columns: 1fr; gap: 5px; }
+}
+
+@media (max-width: 520px) {
+  .hero,
+  .panel-head,
+  .decision-head,
+  .cost-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .hero button {
+    width: 100%;
+  }
+
+  h1 {
+    font-size: clamp(21px, 7vw, 26px);
+  }
+
+  .decision-panel,
+  .panel {
+    padding: 14px;
+  }
+
+  .decision-panel h2 {
+    font-size: 19px;
+  }
+
+  .decision-badge,
+  .legend {
+    align-self: flex-start;
+    white-space: normal;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .viz-title-row,
+  .timeline-labels,
+  .bullet-labels {
+    gap: 7px;
+  }
+
+  .forecast-head {
+    align-items: flex-start;
+  }
+
+  .forecast dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .analysis-details > summary {
+    gap: 9px;
+    padding: 14px;
+  }
+
+  .analysis-body {
+    padding: 8px;
+  }
 }

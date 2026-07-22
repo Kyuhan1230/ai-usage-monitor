@@ -15,14 +15,15 @@
 
 body {
   margin: 0;
-  min-width: 420px;
+  min-width: 0;
   background: var(--bg);
   color: var(--text);
   font: 14px "Segoe UI", system-ui, sans-serif;
 }
 
 .update-card {
-  padding: 28px;
+  min-height: 100vh;
+  padding: clamp(16px, 5vw, 28px);
 }
 
 .eyebrow {
@@ -134,4 +135,30 @@ summary:focus-visible {
 
 [hidden] {
   display: none !important;
+}
+
+@media (max-width: 400px) {
+  h1 {
+    font-size: clamp(21px, 8vw, 26px);
+  }
+
+  .version-line {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .progress-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  button {
+    width: 100%;
+  }
 }
