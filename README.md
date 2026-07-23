@@ -27,6 +27,10 @@
   <img src="docs/images/demo.gif" alt="Codex Claude Usage showing remaining limits, an exhaustion forecast, a usage spike, and an action recommendation" width="900">
 </p>
 
+<p align="center">
+  <a href="docs/images/walkthrough-45s.mp4">Watch the 45-second walkthrough</a>
+</p>
+
 This is not another generic token dashboard. It is built for heavy Windows users of **Codex CLI** and **Claude Code** who need to decide:
 
 - Will this quota run out before its reset?
