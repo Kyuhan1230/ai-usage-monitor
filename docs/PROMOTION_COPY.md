@@ -1,6 +1,6 @@
 # Channel-specific promotion copy
 
-These are drafts, not text to paste everywhere unchanged. Before posting, re-check each community's current self-promotion rules and replace placeholders with the current release and demo URLs.
+These are drafts, not text to paste everywhere unchanged. Before posting, re-check each community's current self-promotion rules. The links use channel-specific UTM values; GitHub Traffic and the 30-day scorecard remain the authoritative measurement sources.
 
 ## 1. GeekNews
 
@@ -19,6 +19,9 @@ These are drafts, not text to paste everywhere unchanged. Before posting, re-che
 > 현재 가장 큰 제약은 Authenticode 미서명입니다. SignPath Foundation 첫 신청은 아직 외부 신뢰 신호가 부족하다는 이유로 승인되지 않아 SmartScreen 경고가 나올 수 있습니다. GitHub Release의 SHA-256, source build 방법과 local data 경계를 공개하고 제한 beta로 설치 마찰부터 확인하고 있습니다.
 >
 > Windows에서 실제 Codex CLI 또는 Claude Code를 쓰는 분의 피드백이 필요합니다. 특히 설치를 중단하게 만든 지점, 첫 refresh 성공 여부, 고갈 예측 문구가 이해되는지를 알고 싶습니다.
+>
+> 45초 데모: https://github.com/Kyuhan1230/ai-usage-monitor/blob/main/docs/images/walkthrough-45s.mp4?utm_source=geeknews&utm_medium=community&utm_campaign=unsigned_beta&utm_content=engineering_story<br>
+> 소스와 다운로드: https://github.com/Kyuhan1230/ai-usage-monitor?utm_source=geeknews&utm_medium=community&utm_campaign=unsigned_beta&utm_content=engineering_story
 
 ## 2. Reddit — Claude Code angle
 
@@ -38,8 +41,8 @@ Body:
 >
 > I would value feedback from actual Windows Claude Code users on first-run setup and whether the forecast changes a real decision.
 >
-> Demo: `<demo URL>`<br>
-> Source and release: `<repository URL>`
+> Demo: https://github.com/Kyuhan1230/ai-usage-monitor/blob/main/docs/images/walkthrough-45s.mp4?utm_source=reddit&utm_medium=community&utm_campaign=unsigned_beta&utm_content=claude_forecast<br>
+> Source and release: https://github.com/Kyuhan1230/ai-usage-monitor?utm_source=reddit&utm_medium=community&utm_campaign=unsigned_beta&utm_content=claude_forecast
 
 ## 3. Reddit — Codex angle
 
@@ -57,8 +60,8 @@ Body:
 >
 > The installer is currently unsigned with Authenticode, and that limitation is stated before download. SHA-256 and build-from-source instructions are available on the release page.
 >
-> Demo: `<demo URL>`<br>
-> Source and release: `<repository URL>`
+> Demo: https://github.com/Kyuhan1230/ai-usage-monitor/blob/main/docs/images/walkthrough-45s.mp4?utm_source=reddit&utm_medium=community&utm_campaign=unsigned_beta&utm_content=codex_forecast<br>
+> Source and release: https://github.com/Kyuhan1230/ai-usage-monitor?utm_source=reddit&utm_medium=community&utm_campaign=unsigned_beta&utm_content=codex_forecast
 
 ## 4. Developer-tools / Tauri angle
 
@@ -79,7 +82,7 @@ Body:
 >
 > The product use case is quota-exhaustion forecasting for Codex CLI and Claude Code, but I am posting because the lifecycle and measurement trade-off may be useful to other Tauri tray-app developers.
 >
-> Architecture and measurements: `<repository section URL>`
+> Architecture and measurements: https://github.com/Kyuhan1230/ai-usage-monitor#measured-footprint
 
 ## 5. Show HN
 
@@ -99,8 +102,8 @@ Body:
 >
 > Current limitation: the Windows installer is not Authenticode-signed, so SmartScreen may show Unknown publisher. The release page exposes the SHA-256, Tauri update-signature distinction, privacy boundary, and source-build path.
 >
-> Demo: `<demo URL>`<br>
-> GitHub: `<repository URL>`
+> Demo: https://github.com/Kyuhan1230/ai-usage-monitor/blob/main/docs/images/walkthrough-45s.mp4?utm_source=hackernews&utm_medium=launch&utm_campaign=signed_launch&utm_content=quota_forecast<br>
+> GitHub: https://github.com/Kyuhan1230/ai-usage-monitor?utm_source=hackernews&utm_medium=launch&utm_campaign=signed_launch&utm_content=quota_forecast
 
 ## 6. LinkedIn
 
@@ -112,7 +115,7 @@ Body:
 >
 > 회사의 지원이나 업무 산출물이 아닌 개인 프로젝트이며, 자체 telemetry 없이 GitHub에서 소스와 privacy boundary를 공개합니다. 현재는 Windows Codex/Claude 실사용자의 설치와 forecasting feedback을 받고 있습니다.
 >
-> `<repository URL>`
+> https://github.com/Kyuhan1230/ai-usage-monitor?utm_source=linkedin&utm_medium=social&utm_campaign=unsigned_beta&utm_content=personal_project
 
 ## 7. Development article outline
 
