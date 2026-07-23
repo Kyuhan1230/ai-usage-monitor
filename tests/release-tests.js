@@ -30,6 +30,11 @@ assert.match(releaseWorkflow, /Published manifest signature is empty/);
 assert.doesNotMatch(releaseWorkflow, /\$response\.Content \| ConvertFrom-Json/);
 assert.match(releaseWorkflow, /group: release-publication/);
 assert.match(releaseWorkflow, /environment: production-release/);
+assert.match(releaseWorkflow, /RELEASE_TAG: \$\{\{ github\.ref_name \}\}/);
+assert.strictEqual(
+  (releaseWorkflow.match(/\$\{\{ github\.ref_name \}\}/g) || []).length,
+  1,
+);
 assert.match(releaseWorkflow, /Draft release hash mismatch/);
 assert.match(releaseWorkflow, /gh release download/);
 assert.match(releaseWorkflow, /verify:updater-signature/);

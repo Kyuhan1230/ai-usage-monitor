@@ -17,6 +17,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     environment: production-release
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
 
     steps:
       - name: Check out repository
@@ -38,7 +40,8 @@ jobs:
         run: npm ci
 
       - name: Verify tag matches package version
-        run: npm run verify:release-tag -- "${{ github.ref_name }}"
+        shell: pwsh
+        run: npm run verify:release-tag -- "$env:RELEASE_TAG"
 
       - name: Verify tagged commit is the main tip
         shell: pwsh
@@ -82,7 +85,7 @@ jobs:
           $notes = "Codex Claude Usage $version 업데이트입니다. 업데이트 후 앱이 다시 시작되며 사용 기록은 유지됩니다."
           npm run create:updater-manifest -- $signature $manifest $notes
           if ($LASTEXITCODE -ne 0) { throw "Creating updater manifest failed" }
-          npm run verify:updater-manifest -- $manifest $installer $signature "${{ github.ref_name }}"
+          npm run verify:updater-manifest -- $manifest $installer $signature $env:RELEASE_TAG
           if ($LASTEXITCODE -ne 0) { throw "Local updater manifest verification failed" }
           npm run verify:updater-signature -- src-tauri/tauri.conf.json $installer $signature
           if ($LASTEXITCODE -ne 0) { throw "Local updater signature verification failed" }
@@ -100,13 +103,13 @@ jobs:
             '>'
             '> v1.1.1에는 자동 업데이트 기능이 없습니다. v1.1.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치해야 하며, 이후 버전부터 앱 내 업데이트를 사용할 수 있습니다.'
           ) -join [Environment]::NewLine
-          gh release view "${{ github.ref_name }}" --json isDraft 2>$null | Out-Null
+          gh release view $env:RELEASE_TAG --json isDraft 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
-            $release = gh release view "${{ github.ref_name }}" --json isDraft | ConvertFrom-Json
+            $release = gh release view $env:RELEASE_TAG --json isDraft | ConvertFrom-Json
             if (-not $release.isDraft) { throw "Refusing to replace an already published release" }
-            gh release upload "${{ github.ref_name }}" $installer $signature $manifest --clobber
+            gh release upload $env:RELEASE_TAG $installer $signature $manifest --clobber
           } else {
-            gh release create "${{ github.ref_name }}" $installer $signature $manifest --draft --title "Codex Claude Usage $version" --notes $releaseNotice --generate-notes
+            gh release create $env:RELEASE_TAG $installer $signature $manifest --draft --title "Codex Claude Usage $version" --notes $releaseNotice --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { throw "Uploading release asset failed" }
         env:
@@ -121,7 +124,7 @@ jobs:
             "Codex-Claude-Usage-Setup-$version.exe.sig",
             "latest.json"
           )
-          $release = gh release view "${{ github.ref_name }}" --json isDraft,assets | ConvertFrom-Json
+          $release = gh release view $env:RELEASE_TAG --json isDraft,assets | ConvertFrom-Json
           if (-not $release.isDraft) { throw "Release must remain draft until verification succeeds" }
           $actual = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
           if (Compare-Object ($expected | Sort-Object) $actual) { throw "Unexpected release assets: $($actual -join ', ')" }
@@ -133,7 +136,7 @@ jobs:
 
           $remoteDir = Join-Path $env:RUNNER_TEMP 'draft-release-assets'
           New-Item -ItemType Directory -Force $remoteDir | Out-Null
-          gh release download "${{ github.ref_name }}" --dir $remoteDir
+          gh release download $env:RELEASE_TAG --dir $remoteDir
           if ($LASTEXITCODE -ne 0) { throw "Downloading draft release assets failed" }
           foreach ($name in $expected) {
             $localHash = (Get-FileHash -LiteralPath "release-assets/$name" -Algorithm SHA256).Hash
@@ -143,7 +146,7 @@ jobs:
           $remoteInstaller = Join-Path $remoteDir "Codex-Claude-Usage-Setup-$version.exe"
           $remoteSignature = "$remoteInstaller.sig"
           $remoteManifest = Join-Path $remoteDir 'latest.json'
-          npm run verify:updater-manifest -- $remoteManifest $remoteInstaller $remoteSignature "${{ github.ref_name }}"
+          npm run verify:updater-manifest -- $remoteManifest $remoteInstaller $remoteSignature $env:RELEASE_TAG
           if ($LASTEXITCODE -ne 0) { throw "Remote updater manifest verification failed" }
           npm run verify:updater-signature -- src-tauri/tauri.conf.json $remoteInstaller $remoteSignature
           if ($LASTEXITCODE -ne 0) { throw "Remote updater signature verification failed" }
@@ -151,7 +154,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish completed GitHub Release
-        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
+        shell: pwsh
+        run: gh release edit $env:RELEASE_TAG --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
