@@ -1,78 +1,225 @@
-# v1.0 공개 전략
+# 공개 및 초기 사용자 확보 계획
 
-## 냉정한 진단
+## 제품 포지셔닝
 
-“Codex와 Claude 사용량을 보여준다”만으로는 관심을 받기 어렵다. 이미 `ccusage`는 훨씬 많은 CLI와 출력 형식을 지원하고, Claude 전용 대시보드와 네이티브 트레이 앱도 많다. 이 프로젝트가 기억될 이유는 기능 수가 아니라 다음 한 문장이어야 한다.
+대상은 막연한 AI API 비용 관리자가 아니라 **Windows에서 Codex CLI 또는 Claude Code를 많이 쓰는 사용자**다.
 
-> 리셋 전에 한도가 바닥날지 예측하고, 지금 얼마나 줄이거나 어떤 모델로 바꿀지 알려주는 로컬 Windows 앱.
+> Codex와 Claude Code 한도가 언제 바닥날지 예측해주는 로컬 Windows 트레이 앱.
 
-## 첫 사용자
+핵심 가치는 누적 토큰 표가 아니라 의사결정이다.
 
-- Windows에서 Codex CLI와 Claude Code를 모두 쓰는 사람
-- 현재 잔여율보다 “오늘 작업을 끝낼 수 있는가”가 중요한 사람
-- 토큰·세션 원문을 외부 대시보드에 보내고 싶지 않은 사람
-- 터미널 표보다 트레이 알림과 작은 창을 원하는 사람
+- 구독 한도 고갈 시각 예측
+- reset 전 소진 여부와 예측 신뢰도
+- 평소 대비 한도·토큰 급증 감지
+- 감속, 반복 작업 점검, 모델 변경 추천
+- 자체 텔레메트리와 수집 서버가 없는 로컬 처리
 
-다음 사용자는 당장 잡지 않는다.
+초기 홍보에서는 Python, LangChain, PyPI, 일반 API 비용 관리 메시지를 사용하지 않는다. 제품과 맞지 않는 방문자를 늘리는 것보다 실제 Windows CLI 사용자의 설치와 피드백이 중요하다.
 
-- 많은 AI CLI를 한꺼번에 집계하려는 사용자: `ccusage`가 더 적합하다.
-- macOS 네이티브 메뉴바 경험이 최우선인 사용자: Swift 기반 도구가 더 가볍다.
-- 구독 청구액과 정확히 일치하는 회계 도구가 필요한 사용자: 이 앱의 비용은 API 정가 등가 참고치다.
+## 30일 목표
 
-## 30초 데모 순서
+| 목표 | 정의 | 증거 |
+| --- | --- | --- |
+| 확인된 설치 사용자 30명 | 설치 성공을 Issue, Discussion, 설문 또는 직접 베타 대화로 확인 | 피드백 링크와 날짜를 개인정보 없이 기록 |
+| GitHub star 50개 | 저장소 공개 수치 | GitHub |
+| 구체적인 피드백 10건 | 설치, 예측, 추천 또는 이탈 이유를 설명한 응답 | Beta feedback Issue/Discussion |
+| 외부 기여 또는 Issue 3건 | 유지관리자 외부 사용자가 만든 유효한 Issue, PR 또는 문서 기여 | GitHub |
+| 설치 마찰 파악 | SmartScreen 중단, 설치 실패, CLI 탐지 실패, 첫 refresh 실패를 구분 | Beta feedback 선택 항목 |
 
-1. Compact에서 Codex/Claude 잔여율과 리셋 시각을 보여준다.
-2. **지금 다시 계산**을 누른다. CLI가 요청 중에만 나타났다가 종료되는 것을 보여준다.
-3. Usage Insights에서 “리셋 전 고갈”, 소진 속도, 전일 대비와 한 줄 행동 추천을 보여준다.
-4. `X`로 창을 닫고 작업 관리자에서 1개 프로세스·WebView 0개로 돌아가는 모습을 보여준다.
-5. “텔레메트리 0, 열린 포트 0, 설치 파일 1.47MB”를 마지막 프레임에 둔다.
+`확인된 설치 사용자`는 release download 수와 같지 않다. 텔레메트리가 없으므로 다운로드를 설치 성공으로 간주하지 않는다.
 
-## 공개 전에 저장소에서 할 일
+## 측정 원칙
 
-- GitHub topics: `codex`, `claude-code`, `usage-monitor`, `tauri`, `windows`, `local-first`.
-- 저장소 Social preview에는 Usage Insights와 “Will you run out before reset?” 문구가 함께 보이는 1280×640 이미지를 사용한다.
-- v1.0 Release 본문 첫 화면에 설치 파일 크기, 미서명 여부, 개인정보 경계와 30초 GIF를 둔다.
-- README의 첫 스크린샷은 기능 목록보다 예측·추천이 한 화면에 보이는 Usage Insights로 유지한다.
-- SignPath 승인 전에는 SmartScreen 경고를 숨기지 말고 설치 단계에 명시한다.
+앱에 익명 텔레메트리를 추가하지 않는다.
 
-## 공개 글의 핵심 서사
+- GitHub Traffic: unique visitors, clones, referring sites
+- GitHub Release: installer download count
+- GitHub: star, fork, Issue, Discussion, PR
+- 각 게시 플랫폼이 제공하는 공개 또는 작성자용 클릭·조회 통계
+- 사용자가 자발적으로 제출한 beta feedback
 
-기능 나열보다 이 리팩터링 이야기가 더 강하다.
+GitHub Traffic은 UTM parameter별 클릭을 제공하지 않으므로 UTM만 붙였다고 채널별 전환이 측정되는 것은 아니다. 별도 추적 서버를 두지 않는 동안에는 게시 시각, GitHub referring sites, 플랫폼 자체 통계, 피드백의 선택적 유입 경로를 함께 사용한다. 향후 랜딩 페이지를 운영한다면 다음 규칙으로 UTM을 통일한다.
 
-> 95.4MB Electron 설치 파일을 1.47MB Tauri 설치 파일로 줄였다. 그런데 창을 열어 보니 WebView2까지 합친 메모리는 여전히 427MB였다. 그래서 숫자를 숨기는 대신 UI를 닫으면 WebView를 파기하고, 로그인 시작은 11.43MB 트레이 프로세스만 남도록 다시 설계했다. CLI도 새로고침 때만 한 번 실행한다.
+```text
+utm_source=<geeknews|reddit|hackernews|linkedin|producthunt|blog>
+utm_medium=<community|social|launch|article>
+utm_campaign=windows-beta
+utm_content=<post-angle>
+```
 
-이 서사는 “또 하나의 사용량 대시보드”보다 기술적 신뢰와 차별점을 동시에 만든다.
+주간 기록 표:
 
-### 짧은 공개 문안
+| 날짜 | 채널/게시물 | 조회·클릭 | GitHub 방문 | Release 다운로드 | 확인 설치 | 피드백 | 주요 이탈 이유 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 
-> I built a local Windows tray app for Codex + Claude that answers one question: will my limit run out before it resets? It forecasts exhaustion, flags spikes, estimates list-price cost, and suggests an action. No telemetry, no local server, no polling CLI. The installer is 1.47MB; idle tray is 11–25MB because WebView2 is loaded only while a window is open. MIT.
+## 서명 상태와 공개 순서
 
-## 배포 순서
+2026-07-23 SignPath Foundation 신청은 외부 신뢰와 인지도 신호 부족으로 승인되지 않았다. 따라서 “서명될 때까지 모든 홍보 보류”는 사용하지 않는다. 인지도가 있어야 무료 서명을 받을 수 있는데 홍보를 서명 뒤로 미루면 순환이 생긴다.
 
-1. `v1.0.0` 태그로 GitHub Actions가 테스트와 NSIS 패키징을 완료하게 한다.
-2. Draft Release의 파일명·크기·SHA-256·서명 상태를 확인한다.
-3. 30초 데모 GIF와 정확한 제한 사항을 Release에 추가한다.
-4. GitHub Release를 먼저 공개해 모든 외부 글이 한 다운로드 URL을 가리키게 한다.
-5. Show HN, 관련 Reddit 커뮤니티, 개발자 SNS에는 같은 글을 복사하지 말고 각 커뮤니티 규칙과 관심사에 맞춰 데모·기술 이야기·프라이버시 중 하나를 앞세운다.
-6. 첫 주에는 새 기능보다 설치 실패, CLI 버전 호환성과 SmartScreen 이탈을 우선 수정한다.
+서명 전:
 
-## 성공 기준
+- Windows 전용 초기 beta로 표현
+- unsigned Authenticode와 SmartScreen 경고를 다운로드 전에 표시
+- GitHub Release SHA-256, Tauri updater signature, 소스 빌드 경로 제공
+- 설치 실패와 신뢰 이탈을 수집할 수 있는 소규모 공개
+- GeekNews, 직접 관련 커뮤니티, 지인 beta 중심
 
-앱에 텔레메트리를 추가하지 않는다. 다음 공개 지표만 본다.
+서명 후:
 
-- GitHub Release 고유 다운로드 수
-- README 방문 대비 Release 클릭
-- 설치/첫 새로고침 실패 Issue 수와 해결 시간
-- “고갈 예측 또는 추천이 실제 행동을 바꿨다”는 사용자의 자발적 피드백
-- 첫 30일 재방문 기여자와 외부 PR 수
+- publisher와 Authenticode 검증 결과 표시
+- Show HN, Product Hunt 등 더 넓은 공개
+- unsigned beta에서 확인된 설치 마찰이 해결됐는지 재검증
 
-별이 아니라 **다운로드 후 첫 새로고침 성공률**이 먼저다. 자체 텔레메트리가 없으므로 Release 다운로드와 opt-in Issue/Discussion을 근거로 개선한다.
+코드 서명이 늦어져도 Show HN을 영구 보류하지 않는다. 영어 README, 데모, 실제 사용자 후기, 안정화 릴리스가 준비되고 unsigned 상태를 충분히 고지할 수 있다면 게시 시점을 다시 판단한다.
 
-## 비교 기준
+모든 릴리스는 [unsigned beta release checklist](BETA_RELEASE_CHECKLIST.md)를 따른다.
 
-- [ccusage](https://github.com/ryoppippi/ccusage): 지원 도구 폭, CLI 자동화와 JSON 출력의 기준.
-- [Claude Usage Dashboard](https://github.com/phuryn/claude-usage): Claude 로컬 히스토리와 브라우저 시각화의 기준.
-- [Usage Monitor for Claude](https://github.com/jens-duttke/usage-monitor-for-claude): Windows 네이티브 트레이의 즉시성과 작은 실행 파일의 기준.
-- [Claude Usage Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker): macOS 네이티브 완성도와 다국어 배포의 기준.
+## 전환 준비
 
-이 프로젝트는 이들을 “이긴다”고 주장하지 않는다. **두 공급자의 한도와 로컬 토큰을 예측·비교·추천으로 연결하는 Windows 의사결정 화면**이라는 좁은 자리를 차지한다.
+### GitHub About
+
+Description:
+
+> A local Windows tray app that predicts when your Codex CLI and Claude Code usage limits will run out.
+
+Topics:
+
+```text
+claude-code
+codex-cli
+codex
+openai
+anthropic
+usage-monitor
+quota-monitor
+developer-tools
+windows
+windows-app
+tauri
+rust
+system-tray
+```
+
+### README 첫 화면
+
+1. 한 줄 문제 정의
+2. 12–18초 demo GIF
+3. Windows download
+4. Forecast, detect, act
+5. local-only 개인정보 경계
+6. unsigned SmartScreen 안내
+7. 상세 설명
+
+영어를 기본으로 하고 기존 한국어 상세 문서는 `docs/README.ko.md`에 유지한다.
+
+### Social preview
+
+크기: 1280×640.
+
+주 문구:
+
+> Will your AI coding limit run out before reset?
+
+하단:
+
+> Codex CLI + Claude Code · Local Windows tray app
+
+Compact UI와 고갈 예측 문구를 크게 보이고 전체 화면을 축소해 넣지 않는다.
+
+### Demo
+
+15초 GIF:
+
+1. Compact에서 Codex·Claude 잔여 한도
+2. reset 전 고갈 예상 강조
+3. Usage Insights의 이상 급증
+4. 감속 또는 모델 변경 추천
+5. 창을 닫아 tray 유지
+
+45초 영상:
+
+| 구간 | 내용 |
+| --- | --- |
+| 0–5초 | 작업 중 한도가 갑자기 끝나는 문제 |
+| 5–15초 | 두 CLI 사용량을 한 화면에 표시 |
+| 15–25초 | 고갈 시각과 reset 전 소진 여부 |
+| 25–35초 | 급증 감지와 행동 추천 |
+| 35–45초 | Windows, local-only, 공식 GitHub 다운로드 |
+
+## 채널 우선순위
+
+### Tier 1
+
+1. 실제 Codex/Claude Windows 사용자 10명에게 제한 beta 요청
+2. GeekNews: 제품 광고보다 개발기와 솔직한 제약
+3. Claude Code, Codex, AI coding 관련 커뮤니티: 커뮤니티별 문제를 바꿔서 게시
+4. 최소 star 조건이 없고 usage/observability 범주가 있는 Awesome list
+
+관련 없는 `r/Python`, 일반 LangChain 커뮤니티, `r/LocalLLaMA`는 우선 대상이 아니다.
+
+### Tier 2
+
+5. 영문 개발기
+6. LinkedIn 개인 프로젝트 게시
+7. Show HN: 제품 가치가 제목, 실제 메모리 수치는 본문
+
+### Tier 3
+
+8. Product Hunt: 영어 자료, 영상, 사용자 후기 3개, 안정화 릴리스 1–2회 뒤
+
+경쟁 프로젝트의 Issue나 Discussion에는 실제 Windows GUI, quota forecast, Codex+Claude 통합 요구 또는 허용된 showcase 문맥이 있을 때만 공유한다. `ccusage 대체품`이 아니라 상세 CLI 집계와 Windows quota decision surface의 보완 관계로 설명한다.
+
+현재 규칙과 실제 Awesome list 자격 조건은 [채널 조사 기록](CHANNEL_RESEARCH.md)에서 관리한다.
+
+## 3주 실행
+
+### 1주차 — 전환과 신뢰
+
+- [x] 영어 README 기본화와 한국어 문서 분리
+- [ ] GitHub Description과 Topics
+- [ ] Social Preview 업로드
+- [ ] 15초 GIF 제작
+- [x] SHA-256, SmartScreen, SignPath 결과 문서화
+- [ ] GitHub Discussions 활성화
+- [x] Beta feedback Issue form
+- [ ] `good first issue`, `feedback wanted` 라벨과 초기 Issue
+
+### 2주차 — 초기 사용자
+
+- [ ] 실제 Windows CLI 사용자 10명에게 개별 beta 요청
+- [ ] GeekNews 개발기 게시
+- [ ] LinkedIn 개인 프로젝트 게시
+- [ ] 커뮤니티 규칙을 확인한 Discord/오픈채팅 공유
+- [ ] 설치 실패, CLI 탐지, 첫 refresh 문제를 기능 추가보다 먼저 수정
+- [ ] 사용자 표현을 README와 onboarding 문구에 반영
+
+### 3주차 — 해외 확장
+
+- [ ] 직접 관련 Reddit 커뮤니티 2–3곳에 서로 다른 글 게시
+- [ ] 조건이 맞는 Awesome list에 선별 PR
+- [ ] 영문 개발기 게시
+- [ ] 서명·후기·안정성 상태를 재평가하고 Show HN 게시 여부 결정
+- [ ] Product Hunt 준비도만 점검하고 조건 미달이면 보류
+
+## 재사용할 원본 소재
+
+| 원본 | 재사용 |
+| --- | --- |
+| 15초 GIF | README, Reddit, LinkedIn, Product Hunt |
+| 메모리 측정 | Show HN, Tauri 커뮤니티, 개발기 |
+| 고갈 예측 | Claude·Codex 커뮤니티 |
+| local-only 구조 | privacy 관심 개발자 |
+| 경쟁 도구 비교 | 블로그, README, 관련 Discussion |
+| unsigned beta와 서명 과정 | 후속 개발기와 SignPath 재신청 근거 |
+
+같은 글을 복사하지 않는다. 각 커뮤니티가 관심을 가질 문제, 측정, 구현 또는 개인정보 경계를 먼저 둔다.
+
+## 핵심 메시지
+
+한국어:
+
+> Codex와 Claude Code 한도가 언제 바닥날지 예측해주는 Windows 앱입니다. 단순히 남은 비율만 보여주는 것이 아니라, 현재 소진 속도라면 reset 전에 막히는지, 평소보다 사용량이 급증했는지, 지금 얼마나 사용 속도를 줄여야 하는지를 로컬에서 계산합니다.
+
+English:
+
+> Know whether your Codex or Claude Code limit will run out before it resets. A local Windows tray app that forecasts quota exhaustion, detects unusual usage spikes, and recommends what to change next.

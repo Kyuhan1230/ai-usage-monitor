@@ -1,0 +1,88 @@
+name: Beta feedback
+description: Tell us whether installation and quota forecasting worked for you.
+title: "[Beta feedback]: "
+labels:
+  - feedback-wanted
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing the Windows beta. Do not attach raw session JSONL, authentication data, account identifiers, or unredacted home-directory paths.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: 1.2.3
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: checkboxes
+    id: tools
+    attributes:
+      label: Tools used
+      options:
+        - label: Codex CLI
+        - label: Claude Code
+    validations:
+      required: true
+  - type: dropdown
+    id: install_result
+    attributes:
+      label: Installation result
+      options:
+        - Installed and opened successfully
+        - Continued after a SmartScreen warning
+        - Stopped because of the SmartScreen warning
+        - Installer failed
+        - Built from source instead
+    validations:
+      required: true
+  - type: dropdown
+    id: first_refresh
+    attributes:
+      label: First refresh result
+      options:
+        - Both providers worked
+        - Codex worked
+        - Claude worked
+        - Neither worked
+        - Not attempted
+    validations:
+      required: true
+  - type: textarea
+    id: forecast
+    attributes:
+      label: Was the exhaustion forecast understandable and useful?
+      description: Mention any wording, confidence, or reset-time confusion.
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: Did the app change what you did next?
+      description: For example, slowed down, switched models, or ignored the recommendation—and why.
+  - type: textarea
+    id: friction
+    attributes:
+      label: Biggest point of friction
+      description: Installation, trust, setup, CLI detection, refresh, UI, or anything else.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Sanitized details or screenshots
+      description: Remove tokens, usernames, account details, local paths, and session content.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed authentication data, account identifiers, home-directory paths, and raw session content.
+          required: true
