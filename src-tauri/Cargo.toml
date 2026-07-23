@@ -1,10 +1,13 @@
 [package]
 name = "codex-claude-usage"
-version = "1.2.2"
+version = "1.2.3"
 description = "Local-first Codex and Claude usage forecasts, alerts, costs, and actions"
 authors = ["CodexUsage"]
 license = "MIT"
 edition = "2024"
+
+[features]
+updater-e2e = []
 
 [package.metadata.tauri-winres]
 FileDescription = "Local Codex and Claude usage monitor"

@@ -1,0 +1,299 @@
+name: Prepare signed updater E2E prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Prepare or remove the isolated E2E prerelease
+        required: true
+        default: prepare
+        type: choice
+        options:
+          - prepare
+          - cleanup
+      confirm:
+        description: Type PREPARE_SIGNED_E2E or DELETE_SIGNED_E2E
+        required: true
+        type: string
+      release_tag:
+        description: updater-e2e-* tag to remove (cleanup only)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
+jobs:
+  prepare-prerelease:
+    if: inputs.action == 'prepare'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CONFIRM: ${{ inputs.confirm }}
+      GITHUB_REF_VALUE: ${{ github.ref }}
+
+    steps:
+      - name: Require explicit confirmation and main tip
+        shell: pwsh
+        run: |
+          if ($env:CONFIRM -ne 'PREPARE_SIGNED_E2E') {
+            throw 'Refusing to prepare an E2E prerelease without PREPARE_SIGNED_E2E confirmation'
+          }
+          if ($env:GITHUB_REF_VALUE -ne 'refs/heads/main') {
+            throw 'Signed E2E prereleases must run from main'
+          }
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out commit is the main tip
+        shell: pwsh
+        run: |
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw 'Fetching origin/main failed' }
+          $mainTip = git rev-parse origin/main
+          if ($LASTEXITCODE -ne 0 -or $mainTip -ne '${{ github.sha }}') {
+            throw "Workflow commit ${{ github.sha }} is not origin/main tip $mainTip"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable 2026-07-23
+
+      - name: Install frontend build tooling
+        run: npm ci
+
+      - name: Derive isolated release metadata
+        shell: pwsh
+        run: |
+          $baseVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($baseVersion -ne '1.2.3') { throw "Expected release candidate 1.2.3, found $baseVersion" }
+          $productionLatest = gh api repos/${{ github.repository }}/releases/latest --jq .tag_name
+          if ($productionLatest -ne 'v1.2.2') {
+            throw "E2E prepare is only valid before v1.2.3 publication; production latest is $productionLatest"
+          }
+          $tag = 'updater-e2e-${{ github.run_id }}-${{ github.run_attempt }}'
+          "E2E_SEED_VERSION=$baseVersion-e2e.0" >> $env:GITHUB_ENV
+          "E2E_TARGET_VERSION=$baseVersion-e2e.${{ github.run_id }}.${{ github.run_attempt }}" >> $env:GITHUB_ENV
+          "E2E_TAG=$tag" >> $env:GITHUB_ENV
+          "PRODUCTION_LATEST_TAG=$productionLatest" >> $env:GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate ephemeral updater signing key
+        shell: pwsh
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'updater-e2e.key'
+          $password = [guid]::NewGuid().ToString('N')
+          npx tauri signer generate --ci --password $password --write-keys $keyPath --force | Out-Null
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $keyPath) -or -not (Test-Path -LiteralPath "$keyPath.pub")) {
+            throw 'Ephemeral updater key generation failed'
+          }
+          $publicKey = (Get-Content -LiteralPath "$keyPath.pub" -Raw -Encoding utf8).Trim()
+          if ([string]::IsNullOrWhiteSpace($publicKey)) { throw 'Ephemeral updater public key is empty' }
+          Write-Output "::add-mask::$password"
+          "E2E_SIGNING_KEY_PATH=$keyPath" >> $env:GITHUB_ENV
+          "E2E_SIGNING_PASSWORD=$password" >> $env:GITHUB_ENV
+          "E2E_PUBLIC_KEY=$publicKey" >> $env:GITHUB_ENV
+
+      - name: Run repository tests
+        run: npm test
+
+      - name: Build isolated current-code seed
+        shell: pwsh
+        run: |
+          $endpoint = "https://github.com/${{ github.repository }}/releases/download/$env:E2E_TAG/latest-e2e.json"
+          $config = [ordered]@{
+            productName = 'Codex Claude Usage E2E'
+            mainBinaryName = 'codex-claude-usage-e2e'
+            identifier = 'local.codex-claude-usage.e2e'
+            version = $env:E2E_SEED_VERSION
+            bundle = @{ createUpdaterArtifacts = $false }
+            plugins = @{ updater = @{ pubkey = $env:E2E_PUBLIC_KEY; endpoints = @($endpoint) } }
+          }
+          $configPath = Join-Path $env:RUNNER_TEMP 'tauri.e2e-seed.json'
+          $config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding utf8
+          "E2E_SEED_CONFIG=$configPath" >> $env:GITHUB_ENV
+          npx tauri build --features updater-e2e --bundles nsis --config $configPath
+          if ($LASTEXITCODE -ne 0) { throw 'E2E seed NSIS build failed' }
+
+          $matches = @(Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*-setup.exe' |
+            Where-Object { $_.Name -like "*$env:E2E_SEED_VERSION*x64-setup.exe" })
+          if ($matches.Count -ne 1) { throw "Expected one E2E seed installer, found $($matches.Count)" }
+          New-Item -ItemType Directory -Force e2e-assets | Out-Null
+          Copy-Item -LiteralPath $matches[0].FullName -Destination "e2e-assets/Codex-Claude-Usage-E2E-Seed-$env:E2E_SEED_VERSION.exe"
+
+      - name: Build ephemeral-key signed target
+        shell: pwsh
+        run: |
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:E2E_SIGNING_KEY_PATH
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:E2E_SIGNING_PASSWORD
+          $endpoint = "https://github.com/${{ github.repository }}/releases/download/$env:E2E_TAG/latest-e2e.json"
+          $config = [ordered]@{
+            productName = 'Codex Claude Usage E2E'
+            mainBinaryName = 'codex-claude-usage-e2e'
+            identifier = 'local.codex-claude-usage.e2e'
+            version = $env:E2E_TARGET_VERSION
+            bundle = @{ createUpdaterArtifacts = $true }
+            plugins = @{ updater = @{ pubkey = $env:E2E_PUBLIC_KEY; endpoints = @($endpoint) } }
+          }
+          $configPath = Join-Path $env:RUNNER_TEMP 'tauri.e2e-target.json'
+          $config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding utf8
+          npx tauri build --features updater-e2e --bundles nsis --config $configPath
+          if ($LASTEXITCODE -ne 0) { throw 'Signed E2E target NSIS build failed' }
+
+          $matches = @(Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*-setup.exe' |
+            Where-Object { $_.Name -like "*$env:E2E_TARGET_VERSION*x64-setup.exe" })
+          if ($matches.Count -ne 1) { throw "Expected one signed E2E target installer, found $($matches.Count)" }
+          $sourceSignature = "$($matches[0].FullName).sig"
+          if (-not (Test-Path -LiteralPath $sourceSignature)) { throw "Updater signature is missing: $sourceSignature" }
+          $targetName = "Codex-Claude-Usage-E2E-Target-$env:E2E_TARGET_VERSION.exe"
+          Copy-Item -LiteralPath $matches[0].FullName -Destination "e2e-assets/$targetName"
+          Copy-Item -LiteralPath $sourceSignature -Destination "e2e-assets/$targetName.sig"
+      - name: Create and verify isolated manifest
+        shell: pwsh
+        run: |
+          $targetName = "Codex-Claude-Usage-E2E-Target-$env:E2E_TARGET_VERSION.exe"
+          $installer = "e2e-assets/$targetName"
+          $signaturePath = "$installer.sig"
+          $signature = (Get-Content -LiteralPath $signaturePath -Raw -Encoding utf8).Trim()
+          if ([string]::IsNullOrWhiteSpace($signature)) { throw 'Updater signature is empty' }
+          $url = "https://github.com/${{ github.repository }}/releases/download/$env:E2E_TAG/$targetName"
+          $manifest = [ordered]@{
+            version = $env:E2E_TARGET_VERSION
+            notes = '격리된 signed updater E2E 대상입니다. 별도 앱 식별자와 임시 데이터 경로만 사용합니다.'
+            pub_date = [DateTimeOffset]::UtcNow.ToString('o')
+            platforms = @{
+              'windows-x86_64' = [ordered]@{ signature = $signature; url = $url }
+            }
+          }
+          $manifestPath = 'e2e-assets/latest-e2e.json'
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+          $parsed = Get-Content -LiteralPath $manifestPath -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($parsed.version -ne $env:E2E_TARGET_VERSION) { throw 'E2E manifest version mismatch' }
+          if ($parsed.platforms.'windows-x86_64'.url -ne $url) { throw 'E2E manifest URL mismatch' }
+          if ($parsed.platforms.'windows-x86_64'.signature -ne $signature) { throw 'E2E manifest signature mismatch' }
+          if ((Get-Item -LiteralPath $installer).Length -gt 20MB) { throw 'E2E target exceeds 20 MB' }
+          npm run verify:updater-signature -- $env:E2E_SEED_CONFIG $installer $signaturePath
+          if ($LASTEXITCODE -ne 0) { throw 'Local E2E updater signature verification failed' }
+
+      - name: Publish isolated prerelease
+        id: publish
+        shell: pwsh
+        run: |
+          $seed = "e2e-assets/Codex-Claude-Usage-E2E-Seed-$env:E2E_SEED_VERSION.exe"
+          $target = "e2e-assets/Codex-Claude-Usage-E2E-Target-$env:E2E_TARGET_VERSION.exe"
+          gh release create $env:E2E_TAG $seed $target "$target.sig" e2e-assets/latest-e2e.json `
+            --prerelease `
+            --latest=false `
+            --target '${{ github.sha }}' `
+            --title "Signed updater E2E $env:E2E_TARGET_VERSION" `
+            --notes "격리 테스트 전용 prerelease입니다. 별도 앱 식별자와 임시 데이터 경로를 사용하며 검증 뒤 cleanup action으로 제거합니다. Production latest는 변경하지 않습니다."
+          if ($LASTEXITCODE -ne 0) { throw 'E2E prerelease creation failed' }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify remote prerelease bytes and isolation
+        shell: pwsh
+        run: |
+          $release = gh release view $env:E2E_TAG --json isDraft,isPrerelease,tagName,assets,url | ConvertFrom-Json
+          if ($release.isDraft -or -not $release.isPrerelease) { throw 'E2E release must be a published prerelease' }
+          $expected = @(
+            "Codex-Claude-Usage-E2E-Seed-$env:E2E_SEED_VERSION.exe",
+            "Codex-Claude-Usage-E2E-Target-$env:E2E_TARGET_VERSION.exe",
+            "Codex-Claude-Usage-E2E-Target-$env:E2E_TARGET_VERSION.exe.sig",
+            'latest-e2e.json'
+          ) | Sort-Object
+          $actual = @($release.assets | ForEach-Object name | Sort-Object)
+          if (Compare-Object $expected $actual) { throw "Unexpected E2E assets: $($actual -join ', ')" }
+
+          $remoteDir = Join-Path $env:RUNNER_TEMP 'remote-e2e-assets'
+          New-Item -ItemType Directory -Force $remoteDir | Out-Null
+          gh release download $env:E2E_TAG --dir $remoteDir
+          if ($LASTEXITCODE -ne 0) { throw 'E2E prerelease download failed' }
+          foreach ($name in $expected) {
+            $localHash = (Get-FileHash -LiteralPath "e2e-assets/$name" -Algorithm SHA256).Hash
+            $remoteHash = (Get-FileHash -LiteralPath (Join-Path $remoteDir $name) -Algorithm SHA256).Hash
+            if ($localHash -ne $remoteHash) { throw "Remote E2E asset hash mismatch: $name" }
+          }
+          $targetName = "Codex-Claude-Usage-E2E-Target-$env:E2E_TARGET_VERSION.exe"
+          $remoteTarget = Join-Path $remoteDir $targetName
+          $remoteSignature = "$remoteTarget.sig"
+          $remoteManifest = Join-Path $remoteDir 'latest-e2e.json'
+          $manifest = Get-Content -LiteralPath $remoteManifest -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($manifest.version -ne $env:E2E_TARGET_VERSION) { throw 'Remote E2E manifest version mismatch' }
+          if ($manifest.platforms.'windows-x86_64'.signature -ne (Get-Content -LiteralPath $remoteSignature -Raw -Encoding utf8).Trim()) {
+            throw 'Remote E2E manifest signature mismatch'
+          }
+          npm run verify:updater-signature -- $env:E2E_SEED_CONFIG $remoteTarget $remoteSignature
+          if ($LASTEXITCODE -ne 0) { throw 'Remote E2E updater signature verification failed' }
+
+          $productionLatest = gh api repos/${{ github.repository }}/releases/latest --jq .tag_name
+          if ($productionLatest -ne $env:PRODUCTION_LATEST_TAG) {
+            throw "Production latest changed from $env:PRODUCTION_LATEST_TAG to $productionLatest"
+          }
+          "### Prepared signed updater E2E prerelease" >> $env:GITHUB_STEP_SUMMARY
+          "- Release: $($release.url)" >> $env:GITHUB_STEP_SUMMARY
+          "- Seed: $env:E2E_SEED_VERSION" >> $env:GITHUB_STEP_SUMMARY
+          "- Target: $env:E2E_TARGET_VERSION" >> $env:GITHUB_STEP_SUMMARY
+          "- Production latest unchanged: $productionLatest" >> $env:GITHUB_STEP_SUMMARY
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove incomplete prerelease
+        if: failure()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:E2E_TAG)) { exit 0 }
+          gh release view $env:E2E_TAG --json isPrerelease 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit 0 }
+          $isPrerelease = gh release view $env:E2E_TAG --json isPrerelease --jq .isPrerelease
+          if ($isPrerelease -eq 'true') { gh release delete $env:E2E_TAG --yes --cleanup-tag }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup-prerelease:
+    if: inputs.action == 'cleanup'
+    runs-on: ubuntu-latest
+    env:
+      CONFIRM: ${{ inputs.confirm }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GITHUB_REF_VALUE: ${{ github.ref }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Remove verified E2E prerelease and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM" != "DELETE_SIGNED_E2E" ]]; then
+            echo "Refusing cleanup without DELETE_SIGNED_E2E confirmation" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_VALUE" != "refs/heads/main" ]]; then
+            echo "E2E cleanup must run from main" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^updater-e2e-[0-9]+-[0-9]+$ ]]; then
+            echo "Invalid E2E release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          is_prerelease="$(gh release view "$RELEASE_TAG" --json isPrerelease --jq .isPrerelease)"
+          if [[ "$is_prerelease" != "true" ]]; then
+            echo "Refusing to delete a non-prerelease: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
