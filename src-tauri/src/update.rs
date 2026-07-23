@@ -1,9 +1,9 @@
 use crate::storage::{data_dir, read_json, write_json};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
@@ -61,6 +61,7 @@ pub struct UpdateCheckResult {
     pub current_version: String,
     pub available: Option<AvailableUpdate>,
     pub last_successful_check_at: Option<String>,
+    pub should_notify: bool,
     pub should_open_window: bool,
 }
 
@@ -96,8 +97,8 @@ pub struct UpdateInstallResult {
 pub struct UpdateRuntime {
     check_in_flight: AtomicBool,
     install_in_flight: AtomicBool,
+    state_io: Mutex<()>,
     pending: Mutex<Option<AvailableUpdate>>,
-    shown_versions: Mutex<HashSet<String>>,
 }
 
 struct AtomicFlagGuard<'a> {
@@ -173,6 +174,17 @@ fn next_automatic_check_delay_ms(
         .unwrap_or(0)
 }
 
+pub fn automatic_check_wait(app: &AppHandle) -> Duration {
+    let runtime = app.state::<UpdateRuntime>();
+    let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
+    let delay_ms = next_automatic_check_delay_ms(
+        &read_state(),
+        &current_version(app),
+        chrono::Utc::now().timestamp_millis(),
+    );
+    Duration::from_millis(delay_ms as u64)
+}
+
 fn check_allowed(
     manual: bool,
     state: &PersistedUpdateState,
@@ -182,14 +194,28 @@ fn check_allowed(
     manual || next_automatic_check_delay_ms(state, current_version, now_ms) == 0
 }
 
-fn update_is_snoozed(state: &PersistedUpdateState, version: &str, now_ms: i64) -> bool {
-    let snooze_active =
-        timestamp_ms(state.snooze_until.as_deref()).is_some_and(|until| until > now_ms);
-    let newer_than_notified = state
+fn should_notify_version(state: &PersistedUpdateState, version: &str) -> bool {
+    state
         .last_notified_version
         .as_deref()
-        .is_none_or(|notified| version_is_newer(version, notified));
-    snooze_active && !newer_than_notified
+        .is_none_or(|notified| version_is_newer(version, notified))
+}
+
+#[derive(Debug, PartialEq)]
+struct CheckEffects {
+    should_notify: bool,
+    should_open_window: bool,
+}
+
+fn available_check_effects(
+    manual: bool,
+    state: &PersistedUpdateState,
+    version: &str,
+) -> CheckEffects {
+    CheckEffects {
+        should_notify: !manual && should_notify_version(state, version),
+        should_open_window: manual,
+    }
 }
 
 fn version_is_newer(candidate: &str, previous: &str) -> bool {
@@ -213,6 +239,22 @@ fn effective_available_version(
         .as_deref()
         .filter(|candidate| version_is_newer(candidate, current_version))
         .map(str::to_owned)
+}
+
+pub fn display_version(version: &str) -> &str {
+    version.strip_prefix('v').unwrap_or(version)
+}
+
+fn tray_menu_text_for(state: &PersistedUpdateState, current_version: &str) -> String {
+    effective_available_version(state, current_version)
+        .map(|version| format!("v{} 업데이트 가능", display_version(&version)))
+        .unwrap_or_else(|| "업데이트 확인".to_string())
+}
+
+pub fn tray_menu_text(app: &AppHandle) -> String {
+    let runtime = app.state::<UpdateRuntime>();
+    let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
+    tray_menu_text_for(&read_state(), &current_version(app))
 }
 
 fn sanitize_check_error(error: &str) -> String {
@@ -239,7 +281,14 @@ fn apply_check_failure(
     }
 }
 
-fn record_check_failure(manual: bool, now: chrono::DateTime<chrono::Utc>, error: &str) {
+fn record_check_failure(
+    app: &AppHandle,
+    manual: bool,
+    now: chrono::DateTime<chrono::Utc>,
+    error: &str,
+) {
+    let runtime = app.state::<UpdateRuntime>();
+    let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
     let mut persisted = read_state();
     apply_check_failure(&mut persisted, manual, now, error);
     let _ = persist_state(&persisted);
@@ -284,7 +333,11 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
     let current_version = current_version(&app);
     let now = chrono::Utc::now();
     let now_ms = now.timestamp_millis();
-    let mut persisted = read_state();
+    let runtime = app.state::<UpdateRuntime>();
+    let persisted = {
+        let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
+        read_state()
+    };
 
     if !check_allowed(manual, &persisted, &current_version, now_ms) {
         return Ok(UpdateCheckResult {
@@ -293,11 +346,11 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
             current_version,
             available: None,
             last_successful_check_at: persisted.last_successful_check_at,
+            should_notify: false,
             should_open_window: false,
         });
     }
 
-    let runtime = app.state::<UpdateRuntime>();
     let Some(_guard) = acquire_flag(&runtime.check_in_flight) else {
         return Ok(UpdateCheckResult {
             status: "busy".into(),
@@ -305,6 +358,7 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
             current_version,
             available: None,
             last_successful_check_at: persisted.last_successful_check_at,
+            should_notify: false,
             should_open_window: false,
         });
     };
@@ -316,7 +370,7 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
     let update = match update {
         Ok(update) => update,
         Err(error) => {
-            record_check_failure(manual, chrono::Utc::now(), &error);
+            record_check_failure(&app, manual, chrono::Utc::now(), &error);
             return Err(error);
         }
     };
@@ -324,8 +378,8 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
     // The network check can overlap with a user clicking "나중에". Re-read the
     // file before writing check results so that the newer user decision wins.
     let completed_at = chrono::Utc::now();
-    let completed_ms = completed_at.timestamp_millis();
-    persisted = read_state();
+    let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
+    let mut persisted = read_state();
     record_check_success(&mut persisted, manual, completed_at, &current_version);
 
     let Some(update) = update else {
@@ -338,6 +392,7 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
             current_version,
             available: None,
             last_successful_check_at: persisted.last_successful_check_at,
+            should_notify: false,
             should_open_window: false,
         });
     };
@@ -359,14 +414,13 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
     *runtime.pending.lock().expect("pending update lock") = Some(available.clone());
     persisted.available_version = Some(available.version.clone());
 
-    let snoozed = !manual && update_is_snoozed(&persisted, &available.version, completed_ms);
-    let already_shown = !manual
-        && runtime
-            .shown_versions
-            .lock()
-            .expect("shown update versions lock")
-            .contains(&available.version);
-    let should_open_window = !snoozed && !already_shown;
+    let effects = available_check_effects(manual, &persisted, &available.version);
+    if effects.should_notify || manual {
+        if persisted.last_notified_version.as_deref() != Some(&available.version) {
+            persisted.snooze_until = None;
+        }
+        persisted.last_notified_version = Some(available.version.clone());
+    }
     persist_state(&persisted)?;
 
     Ok(UpdateCheckResult {
@@ -375,23 +429,9 @@ pub async fn check_for_update(app: AppHandle, manual: bool) -> Result<UpdateChec
         current_version,
         available: Some(available),
         last_successful_check_at: persisted.last_successful_check_at,
-        should_open_window,
+        should_notify: effects.should_notify,
+        should_open_window: effects.should_open_window,
     })
-}
-
-pub fn mark_window_opened(app: &AppHandle, version: &str) -> Result<(), String> {
-    let runtime = app.state::<UpdateRuntime>();
-    runtime
-        .shown_versions
-        .lock()
-        .expect("shown update versions lock")
-        .insert(version.to_string());
-    let mut persisted = read_state();
-    if persisted.last_notified_version.as_deref() != Some(version) {
-        persisted.snooze_until = None;
-    }
-    persisted.last_notified_version = Some(version.to_string());
-    persist_state(&persisted)
 }
 
 pub fn installation_in_progress(app: &AppHandle) -> bool {
@@ -402,6 +442,7 @@ pub fn installation_in_progress(app: &AppHandle) -> bool {
 
 pub fn view_state(app: &AppHandle) -> UpdateViewState {
     let runtime = app.state::<UpdateRuntime>();
+    let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
     let persisted = read_state();
     UpdateViewState {
         current_version: current_version(app),
@@ -426,13 +467,16 @@ pub fn postpone_update(app: &AppHandle, version: &str) -> Result<UpdateViewState
     if pending_version.as_deref() != Some(version) {
         return Err("미뤄 둘 업데이트 버전이 현재 확인 결과와 다릅니다.".into());
     }
-    let mut persisted = read_state();
-    postpone_state(
-        &mut persisted,
-        version,
-        chrono::Utc::now().timestamp_millis(),
-    );
-    persist_state(&persisted)?;
+    {
+        let _state_guard = runtime.state_io.lock().expect("update state I/O lock");
+        let mut persisted = read_state();
+        postpone_state(
+            &mut persisted,
+            version,
+            chrono::Utc::now().timestamp_millis(),
+        );
+        persist_state(&persisted)?;
+    }
     Ok(view_state(app))
 }
 
@@ -604,20 +648,61 @@ mod tests {
     }
 
     #[test]
-    fn the_same_version_is_snoozed_but_a_new_version_is_not() {
-        let now_ms = chrono::DateTime::parse_from_rfc3339("2026-07-21T12:00:00Z")
+    fn successful_checks_preserve_a_concurrent_postpone_decision() {
+        let completed_at = chrono::DateTime::parse_from_rfc3339("2026-07-21T12:00:00Z")
             .unwrap()
-            .timestamp_millis();
-        let state = PersistedUpdateState {
-            last_notified_version: Some("1.2.1".into()),
+            .with_timezone(&chrono::Utc);
+        let mut state = PersistedUpdateState {
+            last_notified_version: Some("1.2.3".into()),
             snooze_until: Some("2026-07-22T12:00:00Z".into()),
             ..Default::default()
         };
 
-        assert!(update_is_snoozed(&state, "1.2.1", now_ms));
-        assert!(!update_is_snoozed(&state, "1.2.2", now_ms));
-        assert!(!update_is_snoozed(&state, "v1.2.2", now_ms));
-        assert!(update_is_snoozed(&state, "1.2.0", now_ms));
+        record_check_success(&mut state, false, completed_at, "1.2.2");
+
+        assert_eq!(state.last_notified_version.as_deref(), Some("1.2.3"));
+        assert_eq!(state.snooze_until.as_deref(), Some("2026-07-22T12:00:00Z"));
+    }
+
+    #[test]
+    fn automatic_available_checks_notify_once_without_opening_a_window() {
+        let state = PersistedUpdateState {
+            last_notified_version: Some("1.2.1".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            available_check_effects(false, &state, "1.2.1"),
+            CheckEffects {
+                should_notify: false,
+                should_open_window: false,
+            }
+        );
+        assert_eq!(
+            available_check_effects(false, &state, "1.2.2"),
+            CheckEffects {
+                should_notify: true,
+                should_open_window: false,
+            }
+        );
+        assert_eq!(
+            available_check_effects(false, &state, "v1.2.2"),
+            CheckEffects {
+                should_notify: true,
+                should_open_window: false,
+            }
+        );
+    }
+
+    #[test]
+    fn manual_available_checks_open_the_window_without_a_second_notification() {
+        assert_eq!(
+            available_check_effects(true, &PersistedUpdateState::default(), "1.2.3"),
+            CheckEffects {
+                should_notify: false,
+                should_open_window: true,
+            }
+        );
     }
 
     #[test]
@@ -687,6 +772,17 @@ mod tests {
         );
         assert!(effective_available_version(&state, "1.2.3").is_none());
         assert!(effective_available_version(&state, "1.2.4").is_none());
+        assert_eq!(tray_menu_text_for(&state, "1.2.2"), "v1.2.3 업데이트 가능");
+        assert_eq!(tray_menu_text_for(&state, "1.2.3"), "업데이트 확인");
+
+        let prefixed = PersistedUpdateState {
+            available_version: Some("v1.2.3".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            tray_menu_text_for(&prefixed, "1.2.2"),
+            "v1.2.3 업데이트 가능"
+        );
     }
 
     #[test]

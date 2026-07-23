@@ -13,7 +13,7 @@ use crate::collector::{
 use crate::storage::{data_dir, read_history, read_json, write_json};
 use serde_json::{Map, Value, json};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tauri::ipc::Channel;
@@ -53,6 +53,10 @@ impl Default for RuntimeState {
 
 const ACTIVITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000;
+const UPDATE_MONITOR_MAX_SLEEP: Duration = Duration::from_secs(60 * 60);
+const UPDATE_MONITOR_BUSY_SLEEP: Duration = Duration::from_secs(60);
+const UPDATE_MONITOR_ERROR_SLEEP: Duration = Duration::from_secs(15 * 60);
+static UPDATE_MENU_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
 
 fn activity_monitoring_enabled() -> bool {
     read_json(&data_dir().join("monitoring.json"))
@@ -623,22 +627,48 @@ fn close_window(window: WebviewWindow) -> Result<(), String> {
     window.destroy().map_err(|error| error.to_string())
 }
 
-async fn check_and_show_update(
+fn sync_update_tray_text(app: &AppHandle) {
+    if let Some(item) = UPDATE_MENU_ITEM.get() {
+        let _ = item.set_text(update::tray_menu_text(app));
+    }
+}
+
+async fn check_and_present_update(
     app: AppHandle,
     manual: bool,
 ) -> Result<update::UpdateCheckResult, String> {
-    let result = update::check_for_update(app.clone(), manual).await?;
-    if result.should_open_window {
-        let available_version = result
+    let result = match update::check_for_update(app.clone(), manual).await {
+        Ok(result) => result,
+        Err(error) => {
+            sync_update_tray_text(&app);
+            return Err(error);
+        }
+    };
+    sync_update_tray_text(&app);
+    if result.should_notify {
+        let version = result
             .available
             .as_ref()
-            .map(|available| available.version.clone())
+            .map(|available| update::display_version(&available.version))
+            .unwrap_or("새 버전");
+        let _ = app
+            .notification()
+            .builder()
+            .title("새 버전이 있습니다")
+            .body(format!(
+                "v{version} 업데이트를 사용할 수 있습니다. 트레이 메뉴에서 확인하세요."
+            ))
+            .show();
+    }
+    if result.should_open_window {
+        result
+            .available
+            .as_ref()
             .ok_or_else(|| "업데이트 창에 표시할 버전 정보가 없습니다.".to_string())?;
         let window_app = app.clone();
         tauri::async_runtime::spawn_blocking(move || show_window_by_label(&window_app, "update"))
             .await
             .map_err(|error| error.to_string())??;
-        update::mark_window_opened(&app, &available_version)?;
     }
     Ok(result)
 }
@@ -648,7 +678,7 @@ async fn check_for_update(
     app: AppHandle,
     manual: bool,
 ) -> Result<update::UpdateCheckResult, String> {
-    check_and_show_update(app, manual).await
+    check_and_present_update(app, manual).await
 }
 
 #[tauri::command]
@@ -670,19 +700,32 @@ async fn install_update(
     update::install_update(app, expected_version, on_progress).await
 }
 
-fn start_automatic_update_check(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let _ = tauri::async_runtime::spawn_blocking(|| {
-            thread::sleep(Duration::from_secs(update::AUTO_CHECK_DELAY_SECONDS));
-        })
-        .await;
-        let _ = check_and_show_update(app, false).await;
+fn start_update_monitor(app: AppHandle) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(update::AUTO_CHECK_DELAY_SECONDS));
+        loop {
+            let wait = update::automatic_check_wait(&app);
+            if !wait.is_zero() {
+                thread::sleep(wait.min(UPDATE_MONITOR_MAX_SLEEP));
+                continue;
+            }
+
+            match tauri::async_runtime::block_on(check_and_present_update(app.clone(), false)) {
+                Ok(result) if result.status == "busy" => thread::sleep(UPDATE_MONITOR_BUSY_SLEEP),
+                Err(_) => {
+                    // State persistence can fail independently of the network check. Always
+                    // keep a local delay so an unwritable state file cannot create a tight loop.
+                    thread::sleep(UPDATE_MONITOR_ERROR_SLEEP);
+                }
+                Ok(_) => {}
+            }
+        }
     });
 }
 
 fn start_tray_update_check(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        match check_and_show_update(app.clone(), true).await {
+        match check_and_present_update(app.clone(), true).await {
             Ok(result) if result.status == "up_to_date" => {
                 let _ = app
                     .notification()
@@ -697,19 +740,6 @@ fn start_tray_update_check(app: AppHandle) {
                     .builder()
                     .title("업데이트 확인 중")
                     .body("이미 진행 중인 확인이 끝날 때까지 잠시 기다려 주세요.")
-                    .show();
-            }
-            Ok(result) if result.status == "available" && !result.should_open_window => {
-                let version = result
-                    .available
-                    .as_ref()
-                    .map(|update| update.version.as_str())
-                    .unwrap_or("새 버전");
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title("새 버전이 있습니다")
-                    .body(format!("{version} 업데이트가 이미 안내되었습니다."))
                     .show();
             }
             Ok(_) => {}
@@ -956,7 +986,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let insights = MenuItem::with_id(app, "insights", "Usage insights", true, None::<&str>)?;
     let details = MenuItem::with_id(app, "details", "Token details", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "setup", "Setup", true, None::<&str>)?;
-    let check_update = MenuItem::with_id(app, "check_update", "업데이트 확인", true, None::<&str>)?;
+    let check_update = MenuItem::with_id(
+        app,
+        "check_update",
+        update::tray_menu_text(app.handle()),
+        true,
+        None::<&str>,
+    )?;
+    let _ = UPDATE_MENU_ITEM.set(check_update.clone());
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -1026,7 +1063,7 @@ pub fn run() {
         .setup(|app| {
             build_tray(app)?;
             start_activity_monitor(app.handle().clone());
-            start_automatic_update_check(app.handle().clone());
+            start_update_monitor(app.handle().clone());
             if !std::env::args().any(|argument| argument == "--background") {
                 let first_window = if onboarding_complete() {
                     "compact"
