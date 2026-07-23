@@ -12,7 +12,7 @@ Codex Claude Usage의 공식 Windows 설치 파일은 이 저장소의 GitHub Ac
 - 사용자의 앱은 manifest에 지정된 파일을 내려받은 뒤 Tauri 서명 검증이 성공한 경우에만 설치한다. updater 서명 검증은 끌 수 없다.
 - 개인키를 잃으면 기존 설치본에 신뢰되는 업데이트를 더 배포할 수 없으므로 GitHub secret 외에 접근 통제된 별도 백업을 유지한다.
 
-서명 인증서가 승인된 뒤에는 다음 정책을 적용한다.
+SignPath Foundation 재신청이 승인되거나 상용 인증서를 확보한 뒤에는 다음 정책을 적용한다.
 
 - Free code signing provided by SignPath.io, certificate by SignPath Foundation.
 - 공식 소스 저장소: <https://github.com/Kyuhan1230/ai-usage-monitor>
@@ -21,7 +21,7 @@ Codex Claude Usage의 공식 Windows 설치 파일은 이 저장소의 GitHub Ac
 - Signing approver: [Kyuhan1230](https://github.com/Kyuhan1230)
 - 개인정보 처리방침: [PRIVACY.md](PRIVACY.md)
 
-현재 SignPath Foundation 승인 전 릴리스는 Authenticode 코드 서명이 적용되지 않을 수 있다. Tauri updater 서명은 승인 여부와 무관하게 필수다. Authenticode 적용 전에는 릴리스 설명에 게시자 서명 여부를 명시하며, 승인 후 Release 워크플로의 Authenticode 단계가 실패하면 배포도 실패하도록 전환한다.
+2026-07-23 SignPath Foundation 첫 신청은 외부 신뢰와 공개 인지도 신호 부족으로 승인되지 않았다. 현재 릴리스는 Authenticode 코드 서명이 적용되지 않는다. Tauri updater 서명은 이 결과와 무관하게 필수다. Authenticode 적용 전에는 릴리스 설명에 게시자 서명 여부를 명시하며, 인증서를 확보한 뒤에는 Release 워크플로의 Authenticode 단계가 실패하면 배포도 실패하도록 전환한다.
 
 ## 릴리스 통제
 

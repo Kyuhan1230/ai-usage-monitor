@@ -14,7 +14,7 @@
 - 일반 CI는 `createUpdaterArtifacts: false` overlay로 공식 키 없이 설치 파일만 검증한다.
 - 로컬 signed NSIS build는 2,263,224 bytes로 20MB 예산 이내였고, 생성된 `.sig`와 `latest.json` 검증을 통과했다.
 
-아직 남은 외부 검증은 `1.2.0`을 수동 설치한 뒤 테스트 Release의 `1.2.1`로 실제 Windows 업데이트하는 E2E와, SignPath 승인 뒤 Authenticode를 적용하고 최종 installer를 Tauri 키로 다시 서명하는 단계다.
+아직 남은 외부 검증은 Authenticode 인증서를 확보한 뒤 게시자 서명을 적용하고 최종 installer를 Tauri 키로 다시 서명하는 단계다. 2026-07-23 SignPath Foundation 첫 신청은 외부 신뢰 신호 부족으로 승인되지 않았으므로, 현재는 unsigned 상태를 공개하고 초기 사용자와 독립적인 외부 근거를 확보한 뒤 재신청한다.
 
 작성일: 2026-07-21 (Asia/Seoul)
 대상 저장소: `Kyuhan1230/ai-usage-monitor`
