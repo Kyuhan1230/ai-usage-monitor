@@ -6,6 +6,9 @@ authors = ["CodexUsage"]
 license = "MIT"
 edition = "2024"
 
+[features]
+updater-e2e = []
+
 [package.metadata.tauri-winres]
 FileDescription = "Local Codex and Claude usage monitor"
 ProductName = "Codex Claude Usage"

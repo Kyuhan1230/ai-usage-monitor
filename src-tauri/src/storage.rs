@@ -12,7 +12,14 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    home_dir().join(".codex-usage-wrapper")
+    #[cfg(feature = "updater-e2e")]
+    {
+        std::env::temp_dir().join("codex-claude-usage-updater-e2e")
+    }
+    #[cfg(not(feature = "updater-e2e"))]
+    {
+        home_dir().join(".codex-usage-wrapper")
+    }
 }
 
 pub fn now_kst_iso() -> String {

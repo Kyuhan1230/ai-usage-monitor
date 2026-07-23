@@ -9,28 +9,30 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-publication
   cancel-in-progress: false
 
 jobs:
   release-windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    environment: production-release
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22.12.0
           cache: npm
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable 2026-07-23
 
       - name: Install frontend build tooling
         run: npm ci
@@ -38,12 +40,15 @@ jobs:
       - name: Verify tag matches package version
         run: npm run verify:release-tag -- "${{ github.ref_name }}"
 
-      - name: Verify tagged commit belongs to main
+      - name: Verify tagged commit is the main tip
         shell: pwsh
         run: |
           git fetch origin main
-          git merge-base --is-ancestor "$env:GITHUB_SHA" "origin/main"
-          if ($LASTEXITCODE -ne 0) { throw "Release tag must point to a commit on main" }
+          if ($LASTEXITCODE -ne 0) { throw "Fetching origin/main failed" }
+          $mainTip = git rev-parse origin/main
+          if ($LASTEXITCODE -ne 0 -or $mainTip -ne $env:GITHUB_SHA) {
+            throw "Release tag commit $env:GITHUB_SHA is not origin/main tip $mainTip"
+          }
 
       - name: Run Rust and UI tests
         run: npm test
@@ -76,8 +81,11 @@ jobs:
           $manifest = "release-assets/latest.json"
           $notes = "Codex Claude Usage $version 업데이트입니다. 업데이트 후 앱이 다시 시작되며 사용 기록은 유지됩니다."
           npm run create:updater-manifest -- $signature $manifest $notes
+          if ($LASTEXITCODE -ne 0) { throw "Creating updater manifest failed" }
           npm run verify:updater-manifest -- $manifest $installer $signature "${{ github.ref_name }}"
+          if ($LASTEXITCODE -ne 0) { throw "Local updater manifest verification failed" }
           npm run verify:updater-signature -- src-tauri/tauri.conf.json $installer $signature
+          if ($LASTEXITCODE -ne 0) { throw "Local updater signature verification failed" }
 
       - name: Create or update draft GitHub Release
         shell: pwsh
@@ -104,7 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify draft release asset
+      - name: Verify draft release bytes and updater signature
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
@@ -122,6 +130,23 @@ jobs:
               throw "Release asset size mismatch: $($asset.name)"
             }
           }
+
+          $remoteDir = Join-Path $env:RUNNER_TEMP 'draft-release-assets'
+          New-Item -ItemType Directory -Force $remoteDir | Out-Null
+          gh release download "${{ github.ref_name }}" --dir $remoteDir
+          if ($LASTEXITCODE -ne 0) { throw "Downloading draft release assets failed" }
+          foreach ($name in $expected) {
+            $localHash = (Get-FileHash -LiteralPath "release-assets/$name" -Algorithm SHA256).Hash
+            $remoteHash = (Get-FileHash -LiteralPath (Join-Path $remoteDir $name) -Algorithm SHA256).Hash
+            if ($localHash -ne $remoteHash) { throw "Draft release hash mismatch: $name" }
+          }
+          $remoteInstaller = Join-Path $remoteDir "Codex-Claude-Usage-Setup-$version.exe"
+          $remoteSignature = "$remoteInstaller.sig"
+          $remoteManifest = Join-Path $remoteDir 'latest.json'
+          npm run verify:updater-manifest -- $remoteManifest $remoteInstaller $remoteSignature "${{ github.ref_name }}"
+          if ($LASTEXITCODE -ne 0) { throw "Remote updater manifest verification failed" }
+          npm run verify:updater-signature -- src-tauri/tauri.conf.json $remoteInstaller $remoteSignature
+          if ($LASTEXITCODE -ne 0) { throw "Remote updater signature verification failed" }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -130,7 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Smoke test published updater manifest
+      - name: Post-publish canary for updater manifest
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
