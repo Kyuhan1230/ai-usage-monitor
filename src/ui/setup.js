@@ -53,6 +53,49 @@ function setStatus(element, text, kind) {
   element.dataset.kind = kind;
 }
 
+function updateCheckTime(value) {
+  const checkedAt = value ? new Date(value) : null;
+  if (!checkedAt || Number.isNaN(checkedAt.getTime())) {
+    return "확인 기록 없음";
+  }
+  return checkedAt.toLocaleString("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderUpdateState(state) {
+  const availableVersion = (state.available && state.available.version) || state.availableVersion;
+  const checkedAt = updateCheckTime(state.lastSuccessfulCheckAt);
+  if (availableVersion) {
+    const version = String(availableVersion).replace(/^v/, "");
+    updateDetail.textContent = state.lastCheckError
+      ? `v${version} 업데이트 가능 · 마지막 확인 실패: ${state.lastCheckError}`
+      : `v${version} 업데이트 가능 · 마지막 확인 ${checkedAt}`;
+    checkUpdateButton.textContent = `v${version} 업데이트 열기`;
+    return;
+  }
+  checkUpdateButton.textContent = state.lastCheckError ? "다시 확인" : "업데이트 확인";
+  if (state.lastCheckError) {
+    updateDetail.textContent = `마지막 업데이트 확인 실패 · ${state.lastCheckError}`;
+  } else if (state.lastSuccessfulCheckAt) {
+    updateDetail.textContent = `현재 최신 버전 · 마지막 확인 ${checkedAt}`;
+  } else {
+    updateDetail.textContent = "아직 업데이트 확인을 완료하지 못했습니다.";
+  }
+}
+
+async function loadUpdateState() {
+  try {
+    renderUpdateState(await window.usageApp.getUpdateState());
+  } catch (error) {
+    updateDetail.textContent = `업데이트 상태를 불러오지 못했습니다. ${String(error)}`;
+    checkUpdateButton.textContent = "다시 확인";
+  }
+}
+
 function providerStatus(provider, commandState, auth, connected, ageMs) {
   const name = provider === "codex" ? "Codex CLI" : "Claude Code";
   if (commandState === "desktop_bundle_only") {
@@ -214,18 +257,17 @@ async function checkForUpdate() {
   actionMessage.textContent = "새 버전을 확인하는 중입니다.";
   try {
     const result = await window.usageApp.checkForUpdate(true);
+    await loadUpdateState();
     if (result.status === "up_to_date") {
-      updateDetail.textContent = "현재 최신 버전을 사용하고 있습니다.";
       actionMessage.textContent = "현재 최신 버전을 사용하고 있습니다.";
     } else if (result.status === "available") {
-      const version = result.available && result.available.version;
-      updateDetail.textContent = `${version || "새 버전"} 업데이트를 사용할 수 있습니다.`;
       actionMessage.textContent = "업데이트 안내 창을 열었습니다.";
     } else {
       actionMessage.textContent = "다른 업데이트 확인이 진행 중입니다. 잠시 후 다시 시도하세요.";
     }
     actionMessage.dataset.kind = "ok";
   } catch (error) {
+    await loadUpdateState();
     actionMessage.dataset.kind = "error";
     actionMessage.textContent = `업데이트 확인 실패: ${String(error)} 네트워크를 확인한 뒤 다시 시도하세요.`;
   } finally {
@@ -265,3 +307,4 @@ laterButton.addEventListener("click", () => finishOnboarding(true));
 checkUpdateButton.addEventListener("click", checkForUpdate);
 
 refresh(false);
+loadUpdateState();

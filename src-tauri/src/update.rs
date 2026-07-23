@@ -583,6 +583,9 @@ mod tests {
             next_automatic_check_delay_ms(&state, "1.2.2", now_ms),
             23 * HOUR_MS
         );
+
+        let due_at = now_ms + 23 * HOUR_MS;
+        assert_eq!(next_automatic_check_delay_ms(&state, "1.2.2", due_at), 0);
     }
 
     #[test]
@@ -662,6 +665,27 @@ mod tests {
 
         assert_eq!(state.last_notified_version.as_deref(), Some("1.2.3"));
         assert_eq!(state.snooze_until.as_deref(), Some("2026-07-22T12:00:00Z"));
+    }
+
+    #[test]
+    fn a_successful_check_clears_the_error_and_automatic_backoff() {
+        let completed_at = chrono::DateTime::parse_from_rfc3339("2026-07-21T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let mut state = PersistedUpdateState {
+            consecutive_automatic_failures: 3,
+            last_check_error: Some("network failed".into()),
+            ..Default::default()
+        };
+
+        record_check_success(&mut state, true, completed_at, "1.2.3");
+
+        assert_eq!(state.consecutive_automatic_failures, 0);
+        assert!(state.last_check_error.is_none());
+        assert_eq!(
+            state.last_successful_check_app_version.as_deref(),
+            Some("1.2.3")
+        );
     }
 
     #[test]
