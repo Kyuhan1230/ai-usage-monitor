@@ -89,3 +89,16 @@ workflow 성공은 자산 준비 완료만 뜻한다. 아래 수동 Windows gate
 - 알림·트레이·업데이트 창 화면
 - 설치 전·후 marker 및 production 데이터 hash 비교
 - 정식 release run, tag, manifest와 installer signature 검증 결과
+
+## 2026-07-23 실행 기록
+
+- 준비 workflow: Actions run `29974352185` 성공
+- seed: `1.2.3-e2e.0`, SHA-256 `2DD3E796257E181710A3968296D4849DDE8BF4C1FBA290AED3E407C395B1B0DF`
+- target: `1.2.3-e2e.29974352185.1`, SHA-256 `25BDB207203832C29CA16CB59453184301474244C7B4ED60D1CF4A582B1DAEF1`
+- signature SHA-256: `98126A2DAF9FBBCBB9BCB960314C052350D0BBD53914CC7C79C40F26D896ACD2`
+- manifest SHA-256: `4588FC836331AC6045ED8674F406FBC86233DF0DE2C45AC750A69AD635EB503B`
+- due 전·후 PID `21076` 유지, target 설치 뒤 PID `25980`으로 재시작
+- marker SHA-256 `8D26584A2673A27C4E1444C5A2A78DD7B352BB762F1EA48779DCB73A684E33FA` 유지
+- target ProductVersion·FileVersion, schema v2, 자동 실패 0, 마지막 오류 없음 확인
+- 자동 발견 당시 데스크톱 잠금으로 toast 시각 확인은 미완료. Setup의 지속 업데이트 진입점과 사용자 승인 업데이트 창·설치·재시작은 확인
+- cleanup workflow: Actions run `29978069880` 성공. prerelease·test tag·로컬 E2E 설치·데이터 파일 제거, production latest `v1.2.2` 유지
