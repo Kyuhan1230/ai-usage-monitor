@@ -15,6 +15,8 @@ Use this checklist for every public release until Authenticode code signing is a
 - [ ] Upgrade from the previous supported release preserves `~/.codex-usage-wrapper`.
 - [ ] Rollback or manual reinstall behavior is documented if the release changes storage or updating.
 
+Community testers can use the [Windows install smoke report template](community/INSTALL_SMOKE_REPORT_TEMPLATE.md) without sharing account or session data.
+
 ## SHA-256
 
 GitHub displays a digest for release assets. Repeat the installer digest in the release body so users can verify it without opening API metadata.
