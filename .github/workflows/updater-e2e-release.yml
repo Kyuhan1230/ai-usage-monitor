@@ -79,10 +79,11 @@ jobs:
         shell: pwsh
         run: |
           $baseVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($baseVersion -ne '1.2.3') { throw "Expected release candidate 1.2.3, found $baseVersion" }
           $productionLatest = gh api repos/${{ github.repository }}/releases/latest --jq .tag_name
-          if ($productionLatest -ne 'v1.2.2') {
-            throw "E2E prepare is only valid before v1.2.3 publication; production latest is $productionLatest"
+          $latestVersion = [version]($productionLatest -replace '^v', '')
+          # 아직 공개되지 않은 후보에서만 e2e를 준비한다. 버전을 고정하지 않고 관계로 검사한다.
+          if ([version]$baseVersion -le $latestVersion) {
+            throw "E2E prepare is only valid before v$baseVersion is published; production latest is $productionLatest"
           }
           $tag = 'updater-e2e-${{ github.run_id }}-${{ github.run_attempt }}'
           "E2E_SEED_VERSION=$baseVersion-e2e.0" >> $env:GITHUB_ENV
