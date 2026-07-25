@@ -596,9 +596,59 @@ fn limit_label(kind: &str) -> &'static str {
     }
 }
 
-fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<Value> {
-    let mut result = Vec::<Value>::new();
+const RECOMMENDATION_LIMIT: usize = 5;
+
+/// 권장 문구 하나와 그 문구를 정렬하는 데 필요한 값을 함께 들고 다닌다.
+/// 정렬이 공급자 순회 순서에 의존하지 않게 하려고 비교값을 문구 생성 시점에 보관한다.
+struct Suggestion {
+    priority: u8,
+    /// 한도 기반 문구는 남은 비율, 한도와 무관한 문구는 `f64::INFINITY`로 두어 같은 우선순위 안에서 동률로 만든다.
+    remaining: f64,
+    today_tokens: u64,
+    provider: &'static str,
+    value: Value,
+}
+
+/// 우선순위 → 남은 한도 비율 오름차순 → 오늘 토큰 사용량 내림차순 → 공급자 이름 사전순.
+/// 마지막 단계는 결과를 결정적으로 만들기 위한 것이며 공급자 선호를 담지 않는다.
+fn suggestion_order(left: &Suggestion, right: &Suggestion) -> Ordering {
+    left.priority
+        .cmp(&right.priority)
+        .then_with(|| left.remaining.total_cmp(&right.remaining))
+        .then_with(|| right.today_tokens.cmp(&left.today_tokens))
+        .then_with(|| left.provider.cmp(right.provider))
+}
+
+/// 상위 문구만 남기되, 문구가 있는 공급자의 최상위 문구는 잘려 나가지 않게 한다.
+fn select_recommendations(mut sorted: Vec<Suggestion>) -> Vec<Suggestion> {
+    if sorted.len() <= RECOMMENDATION_LIMIT {
+        return sorted;
+    }
+    let mut selected = Vec::with_capacity(RECOMMENDATION_LIMIT);
     for provider in ["codex", "claude"] {
+        if let Some(index) = sorted.iter().position(|item| item.provider == provider) {
+            selected.push(sorted.remove(index));
+        }
+    }
+    for item in sorted {
+        if selected.len() >= RECOMMENDATION_LIMIT {
+            break;
+        }
+        selected.push(item);
+    }
+    selected.sort_by(suggestion_order);
+    selected
+}
+
+fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<Value> {
+    let mut result = Vec::<Suggestion>::new();
+    for provider in ["codex", "claude"] {
+        let today_tokens = costs
+            .get("providers")
+            .and_then(|value| value.get(provider))
+            .and_then(|value| value.get("totalTokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         if let Some(limits) = providers
             .get(provider)
             .and_then(|value| value.get("limits"))
@@ -613,10 +663,16 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                     .and_then(Value::as_f64)
                     .unwrap_or(100.0);
                 if remaining <= 10.0 {
-                    result.push(json!({
-                        "priority": "critical", "provider": provider, "reason": "critical_limit",
-                        "action": format!("{} {} 한도가 {}% 남았습니다. 큰 작업은 다음 리셋 뒤로 미루고, 지금은 짧은 작업만 진행하세요.", provider_label(provider), limit_label(kind), remaining as i64)
-                    }));
+                    result.push(Suggestion {
+                        priority: 0,
+                        remaining,
+                        today_tokens,
+                        provider,
+                        value: json!({
+                            "priority": "critical", "provider": provider, "reason": "critical_limit",
+                            "action": format!("{} {} 한도가 {}% 남았습니다. 큰 작업은 다음 리셋 뒤로 미루고, 지금은 짧은 작업만 진행하세요.", provider_label(provider), limit_label(kind), remaining as i64)
+                        }),
+                    });
                 } else if limit.get("forecastStatus").and_then(Value::as_str) == Some("risk")
                     && limit.get("confidence").and_then(Value::as_str) != Some("low")
                     && let Some(reduction) = limit
@@ -624,10 +680,16 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                         .and_then(Value::as_f64)
                 {
                     let rounded = (reduction / 5.0).ceil() as i64 * 5;
-                    result.push(json!({
-                        "priority": "warning", "provider": provider, "reason": "forecast_before_reset",
-                        "action": format!("{} {} 사용 속도를 약 {}% 낮추면 다음 리셋까지 한도를 유지할 가능성이 커집니다.", provider_label(provider), limit_label(kind), rounded)
-                    }));
+                    result.push(Suggestion {
+                        priority: 1,
+                        remaining,
+                        today_tokens,
+                        provider,
+                        value: json!({
+                            "priority": "warning", "provider": provider, "reason": "forecast_before_reset",
+                            "action": format!("{} {} 사용 속도를 약 {}% 낮추면 다음 리셋까지 한도를 유지할 가능성이 커집니다.", provider_label(provider), limit_label(kind), rounded)
+                        }),
+                    });
                 }
             }
         }
@@ -638,10 +700,16 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
             == Some(true)
         {
             let multiplier = anomalies[provider]["multiplier"].as_f64().unwrap_or(0.0);
-            result.push(json!({
-                "priority": "warning", "provider": provider, "reason": "token_spike",
-                "action": format!("오늘 토큰 사용량이 최근 중앙값의 {}배입니다. 자동 반복 작업과 큰 컨텍스트 입력을 점검하세요.", multiplier)
-            }));
+            result.push(Suggestion {
+                priority: 1,
+                remaining: f64::INFINITY,
+                today_tokens,
+                provider,
+                value: json!({
+                    "priority": "warning", "provider": provider, "reason": "token_spike",
+                    "action": format!("{} 오늘 토큰 사용량이 최근 중앙값의 {}배입니다. 자동 반복 작업과 큰 컨텍스트 입력을 점검하세요.", provider_label(provider), multiplier)
+                }),
+            });
         }
         if let Some(savings) = costs
             .get("providers")
@@ -658,27 +726,31 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0);
             if percent >= 20.0 && amount >= 0.01 {
-                result.push(json!({
-                    "priority": "info", "provider": provider, "reason": "model_savings",
-                    "action": format!("단순 작업을 {}로 보내면 같은 토큰 기준 오늘 약 ${:.2} ({}%)를 절약할 수 있습니다.", savings["toModel"].as_str().unwrap_or("저비용 모델"), amount, percent)
-                }));
+                // 대체 모델은 `alternative`가 같은 공급자 안에서 고른다. 문장도 공급자 전환으로 읽히지 않게 대상을 먼저 밝힌다.
+                result.push(Suggestion {
+                    priority: 2,
+                    remaining: f64::INFINITY,
+                    today_tokens,
+                    provider,
+                    value: json!({
+                        "priority": "info", "provider": provider, "reason": "model_savings",
+                        "action": format!("{}의 단순 작업을 {}로 보내면 같은 토큰 기준 오늘 약 ${:.2} ({}%)를 절약할 수 있습니다.", provider_label(provider), savings["toModel"].as_str().unwrap_or("저비용 모델"), amount, percent)
+                    }),
+                });
             }
         }
     }
     if result.is_empty() {
-        result.push(json!({
+        return vec![json!({
             "priority": "ok", "provider": Value::Null, "reason": "healthy",
             "action": "현재 속도라면 다음 리셋까지 한도를 유지할 가능성이 큽니다. 작업량이 달라지면 다시 확인하세요."
-        }));
+        })];
     }
-    result.sort_by_key(|item| match item.get("priority").and_then(Value::as_str) {
-        Some("critical") => 0,
-        Some("warning") => 1,
-        Some("info") => 2,
-        _ => 3,
-    });
-    result.truncate(5);
-    result
+    result.sort_by(suggestion_order);
+    select_recommendations(result)
+        .into_iter()
+        .map(|item| item.value)
+        .collect()
 }
 
 pub fn build_analytics(history: &[Value], rows: &[UsageRow], now_ms: i64) -> Value {
@@ -962,5 +1034,136 @@ mod tests {
         assert_eq!(limit["observedIntervalCount"], 6);
         assert_eq!(limit["forecastSpreadPercent"], 10.0);
         assert_eq!(limit["depletionRatePercentPerHour"], 1.0);
+    }
+
+    /// 한도 문구 하나짜리 `providers` 값을 만든다.
+    fn limits_with(provider: &str, remaining: f64) -> Value {
+        json!({provider: {"limits": {"five_hour": {"remainingPercent": remaining}}}})
+    }
+
+    /// 오늘 토큰 사용량과 절약 여지를 담은 `costs` 값을 만든다.
+    fn costs_with(codex_tokens: u64, claude_tokens: u64) -> Value {
+        json!({"providers": {
+            "codex": {"totalTokens": codex_tokens, "savings": Value::Null},
+            "claude": {"totalTokens": claude_tokens, "savings": Value::Null}
+        }})
+    }
+
+    #[test]
+    fn more_urgent_provider_leads_regardless_of_iteration_order() {
+        let providers = json!({
+            "codex": {"limits": {"five_hour": {"remainingPercent": 8.0}}},
+            "claude": {"limits": {"five_hour": {"remainingPercent": 3.0}}}
+        });
+        let actions = recommendations(&providers, &costs_with(1_000, 1_000), &json!({}));
+        assert_eq!(actions[0]["provider"], "claude");
+        assert_eq!(actions[0]["reason"], "critical_limit");
+    }
+
+    #[test]
+    fn equal_priority_is_broken_by_usage_not_provider_order() {
+        // 두 공급자가 같은 우선순위·같은 잔여 비율이면 오늘 더 많이 쓴 쪽이 앞선다.
+        let providers = json!({
+            "codex": {"limits": {"five_hour": {"remainingPercent": 5.0}}},
+            "claude": {"limits": {"five_hour": {"remainingPercent": 5.0}}}
+        });
+        let actions = recommendations(&providers, &costs_with(10_000, 90_000), &json!({}));
+        assert_eq!(actions[0]["provider"], "claude");
+
+        let flipped = recommendations(&providers, &costs_with(90_000, 10_000), &json!({}));
+        assert_eq!(flipped[0]["provider"], "codex");
+    }
+
+    #[test]
+    fn spike_recommendation_names_its_provider() {
+        let anomalies = json!({"claude": {"detected": true, "multiplier": 3.4}});
+        let actions = recommendations(
+            &limits_with("claude", 80.0),
+            &costs_with(0, 50_000),
+            &anomalies,
+        );
+        let spike = actions
+            .iter()
+            .find(|item| item["reason"] == "token_spike")
+            .expect("token_spike 문구가 있어야 한다");
+        assert_eq!(spike["provider"], "claude");
+        assert!(
+            spike["action"].as_str().unwrap().starts_with("Claude "),
+            "급증 문구는 대상 공급자로 시작해야 한다: {}",
+            spike["action"]
+        );
+    }
+
+    #[test]
+    fn savings_recommendation_stays_within_its_provider() {
+        let costs = json!({"providers": {
+            "codex": {"totalTokens": 0, "savings": Value::Null},
+            "claude": {
+                "totalTokens": 90_000,
+                "savings": {"toModel": "claude-haiku-4.5", "estimatedUsd": 1.25, "percent": 42.0}
+            }
+        }});
+        let actions = recommendations(&limits_with("claude", 80.0), &costs, &json!({}));
+        let savings = actions
+            .iter()
+            .find(|item| item["reason"] == "model_savings")
+            .expect("model_savings 문구가 있어야 한다");
+        let action = savings["action"].as_str().unwrap();
+        assert_eq!(savings["provider"], "claude");
+        assert!(action.starts_with("Claude의 "), "실제 문구: {action}");
+        assert!(
+            !action.contains("gpt-"),
+            "다른 공급자 모델을 권하면 안 된다: {action}"
+        );
+    }
+
+    #[test]
+    fn every_recommendation_names_its_target_provider() {
+        let providers = json!({
+            "codex": {"limits": {"five_hour": {"remainingPercent": 6.0}}},
+            "claude": {"limits": {"five_hour": {"remainingPercent": 4.0}}}
+        });
+        let anomalies = json!({
+            "codex": {"detected": true, "multiplier": 2.1},
+            "claude": {"detected": true, "multiplier": 3.4}
+        });
+        let actions = recommendations(&providers, &costs_with(20_000, 80_000), &anomalies);
+        for action in &actions {
+            let provider = action["provider"].as_str().expect("provider가 있어야 한다");
+            let text = action["action"].as_str().unwrap();
+            assert!(
+                text.contains(provider_label(provider)),
+                "문구에 대상 공급자가 없다: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncation_keeps_each_provider_represented() {
+        // Codex가 더 위급해 상위를 채우더라도 Claude 문구가 최소 하나 남아야 한다.
+        let providers = json!({
+            "codex": {"limits": {
+                "five_hour": {"remainingPercent": 2.0},
+                "weekly": {"remainingPercent": 3.0},
+                "monthly": {"remainingPercent": 4.0}
+            }},
+            "claude": {"limits": {"five_hour": {"remainingPercent": 90.0}}}
+        });
+        let anomalies = json!({
+            "codex": {"detected": true, "multiplier": 2.1},
+            "claude": {"detected": true, "multiplier": 1.9}
+        });
+        let actions = recommendations(&providers, &costs_with(80_000, 10_000), &anomalies);
+        assert!(actions.len() <= RECOMMENDATION_LIMIT);
+        assert!(actions.iter().any(|item| item["provider"] == "claude"));
+        assert!(actions.iter().any(|item| item["provider"] == "codex"));
+    }
+
+    #[test]
+    fn healthy_recommendation_has_no_provider() {
+        let actions = recommendations(&json!({}), &costs_with(0, 0), &json!({}));
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["reason"], "healthy");
+        assert!(actions[0]["provider"].is_null());
     }
 }
