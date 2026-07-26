@@ -2,6 +2,7 @@
 
 // 설치, 로그인, 설정 변경은 모두 명시적인 사용자 동작으로만 실행한다.
 
+const { deriveSetupView } = window.usageSetupView;
 const codexDetail = document.getElementById("codex-detail");
 const claudeDetail = document.getElementById("claude-detail");
 const hookDetail = document.getElementById("hook-detail");
@@ -20,13 +21,24 @@ const hookButton = document.getElementById("install-hook");
 const actionMessage = document.getElementById("action-message");
 const checkUpdateButton = document.getElementById("check-update");
 const updateDetail = document.getElementById("update-detail");
+const codexCard = document.getElementById("codex-card");
+const claudeActions = document.getElementById("claude-actions");
+const claudeAddButton = document.getElementById("claude-add");
+const claudeOnlyButton = document.getElementById("claude-only");
+const claudeSection = document.getElementById("claude-section");
+const hookCard = document.getElementById("hook-card");
+const codexAddAction = document.getElementById("codex-add-action");
+const codexAddButton = document.getElementById("codex-add");
+const setupHeadline = document.getElementById("setup-headline");
+const setupSummary = document.getElementById("setup-summary");
+const providerSelectionStatus = document.getElementById("provider-selection-status");
 
 let latestSnapshot = null;
-
-function hasAuthenticatedProvider(setup) {
-  return setup.codexAuth.state === "authenticated"
-    || setup.claudeAuth.state === "authenticated";
-}
+let latestView = null;
+let windowIntent = {
+  setupMode: null,
+  claudeSectionExpanded: false,
+};
 
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
@@ -180,39 +192,99 @@ async function runProviderAction(button) {
 
 function render(snapshot) {
   latestSnapshot = snapshot;
-  const codexState = snapshot.setup.codexCommandState || (snapshot.setup.codexCommand ? "ready" : "missing");
-  const claudeState = snapshot.setup.claudeCommandState || (snapshot.setup.claudeCommand ? "ready" : "missing");
-  const codexAuth = snapshot.setup.codexAuth || { state: "error" };
-  const claudeAuth = snapshot.setup.claudeAuth || { state: "error" };
-  const codexStatus = providerStatus("codex", codexState, codexAuth, snapshot.codex.connected, snapshot.codex.ageMs);
-  const claudeStatus = providerStatus("claude", claudeState, claudeAuth, snapshot.claude.connected, snapshot.claude.ageMs);
+  latestView = deriveSetupView(snapshot, windowIntent);
+  const setup = snapshot.setup || {};
+  const codex = snapshot.codex || {};
+  const claude = snapshot.claude || {};
+  const codexState = setup.codexCommandState || (setup.codexCommand ? "ready" : "missing");
+  const claudeState = setup.claudeCommandState || (setup.claudeCommand ? "ready" : "missing");
+  const codexAuth = setup.codexAuth || { state: "error" };
+  const claudeAuth = setup.claudeAuth || { state: "error" };
+  const codexStatus = providerStatus("codex", codexState, codexAuth, codex.connected, codex.ageMs);
+  const claudeStatus = providerStatus("claude", claudeState, claudeAuth, claude.connected, claude.ageMs);
 
   setStatus(codexDetail, codexStatus.text, codexStatus.kind);
   setStatus(claudeDetail, claudeStatus.text, claudeStatus.kind);
-  configureProviderButton(codexButton, "codex", snapshot.setup.codexCommand, codexAuth.state);
-  configureProviderButton(claudeButton, "claude", snapshot.setup.claudeCommand, claudeAuth.state);
+  configureProviderButton(codexButton, "codex", codexState === "ready", codexAuth.state);
+  configureProviderButton(claudeButton, "claude", claudeState === "ready", claudeAuth.state);
 
-  hookDetail.textContent = snapshot.claude.hookInstalled
+  hookDetail.textContent = claude.hookInstalled
     ? "연결됨: Claude 사용 중 statusLine 이벤트로 최신 값이 로컬에 기록됩니다."
-    : snapshot.setup.claudeCommand
-      ? "권장: Claude를 사용할 때만 최신 사용량을 받는 로컬 이벤트 연결입니다."
-      : "Claude Code 설치 후 연결할 수 있습니다.";
-  hookButton.disabled = !snapshot.setup.claudeCommand;
+    : "선택: Claude Code 사용 중 최신 사용량을 받는 로컬 이벤트 연결입니다.";
+  hookButton.disabled = !latestView.showClaudeHook;
   detailsDetail.textContent = "정상: 별도 서버 없이 로컬 세션 파일에서 모델·날짜별 토큰을 표시합니다.";
   startupDetail.textContent = snapshot.launchAtLogin
     ? "켜짐: 앱만 시작하며 사용량 CLI는 상주시켜 두지 않습니다."
     : "꺼짐: 사용자가 직접 실행할 때만 앱이 시작됩니다.";
-  launchAtLogin.checked = snapshot.launchAtLogin;
-  monitoringDetail.textContent = snapshot.monitoring.enabled
+  launchAtLogin.checked = Boolean(snapshot.launchAtLogin);
+  monitoringDetail.textContent = snapshot.monitoring && snapshot.monitoring.enabled
     ? "켜짐: 로컬 세션 활동이 있을 때만, 최소 5분 간격으로 사용량을 확인합니다."
     : "꺼짐: 새로고침 버튼을 눌렀을 때만 사용량을 확인합니다.";
-  activityMonitoring.checked = snapshot.monitoring.enabled;
+  activityMonitoring.checked = Boolean(snapshot.monitoring && snapshot.monitoring.enabled);
 
-  const ready = hasAuthenticatedProvider(snapshot.setup);
-  completeButton.disabled = !ready;
-  completeButton.title = ready ? "첫 설정을 마치고 사용량 화면을 엽니다." : "Codex 또는 Claude 중 사용하는 도구 하나에 로그인하세요.";
-  completeButton.hidden = snapshot.setup.onboardingComplete;
-  laterButton.hidden = snapshot.setup.onboardingComplete;
+  setupHeadline.textContent = latestView.headline;
+  setupSummary.textContent = latestView.summary;
+  codexCard.hidden = !latestView.showCodexCard;
+  claudeSection.hidden = !latestView.claudeSectionExpanded;
+  hookCard.hidden = !latestView.showClaudeHook;
+  claudeAddButton.hidden = !latestView.showClaudeAddAction;
+  claudeOnlyButton.hidden = !latestView.showClaudeOnlyAction;
+  claudeActions.hidden = claudeAddButton.hidden && claudeOnlyButton.hidden;
+  codexAddAction.hidden = !latestView.showCodexAddAction;
+
+  completeButton.textContent = latestView.completionLabel;
+  completeButton.disabled = !latestView.canComplete;
+  completeButton.title = latestView.canComplete
+    ? "첫 설정을 마치고 사용량 화면을 엽니다."
+    : latestView.incompleteMessage;
+  completeButton.hidden = Boolean(setup.onboardingComplete);
+  laterButton.hidden = Boolean(setup.onboardingComplete);
+}
+
+function announceProviderChoice(message, headingId) {
+  providerSelectionStatus.textContent = message;
+  window.requestAnimationFrame(() => {
+    const heading = document.getElementById(headingId);
+    if (heading) {
+      heading.focus();
+    }
+  });
+}
+
+function chooseClaudeAdd() {
+  if (!latestSnapshot) {
+    return;
+  }
+  windowIntent = {
+    setupMode: "codex",
+    claudeSectionExpanded: true,
+  };
+  render(latestSnapshot);
+  announceProviderChoice("Claude Code 연결 옵션을 열었습니다. Codex 인증을 완료하면 Codex로 시작할 수 있습니다.", "claude-heading");
+}
+
+function chooseClaudeOnly() {
+  if (!latestSnapshot) {
+    return;
+  }
+  windowIntent = {
+    setupMode: "claudeOnly",
+    claudeSectionExpanded: true,
+  };
+  render(latestSnapshot);
+  announceProviderChoice("Claude Code 전용 경로를 선택했습니다. Claude 인증을 완료하면 시작할 수 있습니다.", "claude-heading");
+}
+
+function chooseCodex() {
+  if (!latestSnapshot) {
+    return;
+  }
+  windowIntent = {
+    setupMode: "codex",
+    claudeSectionExpanded: Boolean(latestView && latestView.claudeSectionExpanded),
+  };
+  render(latestSnapshot);
+  announceProviderChoice("Codex 기본 경로로 전환했습니다. Codex 인증을 완료하면 시작할 수 있습니다.", "codex-heading");
 }
 
 async function refresh(collectUsage = false) {
@@ -239,12 +311,8 @@ async function refresh(collectUsage = false) {
 }
 
 async function finishOnboarding(skipped) {
-  if (!skipped) {
-    const setup = latestSnapshot && latestSnapshot.setup;
-    const ready = setup && hasAuthenticatedProvider(setup);
-    if (!ready) {
-      return;
-    }
+  if (!skipped && (!latestView || !latestView.canComplete)) {
+    return;
   }
   await window.usageApp.completeOnboarding(skipped);
   await window.usageApp.openCompact();
@@ -277,7 +345,13 @@ async function checkForUpdate() {
 
 codexButton.addEventListener("click", () => runProviderAction(codexButton));
 claudeButton.addEventListener("click", () => runProviderAction(claudeButton));
+claudeAddButton.addEventListener("click", chooseClaudeAdd);
+claudeOnlyButton.addEventListener("click", chooseClaudeOnly);
+codexAddButton.addEventListener("click", chooseCodex);
 hookButton.addEventListener("click", async () => {
+  if (!latestView || !latestView.showClaudeHook) {
+    return;
+  }
   try {
     await window.usageApp.installClaudeHook();
     await refresh(false);

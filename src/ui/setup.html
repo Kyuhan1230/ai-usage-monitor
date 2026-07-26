@@ -11,34 +11,49 @@
     <header>
       <p class="eyebrow">Setup</p>
       <h1>Codex Claude Usage</h1>
-      <p class="summary">사용하는 도구 하나만 연결해도 시작할 수 있습니다. 계정 정보나 명령 출력은 저장하지 않으며, 필요한 단계만 실행할 수 있습니다.</p>
+      <h2 id="setup-headline" class="setup-headline">Codex 사용량을 확인하세요</h2>
+      <p id="setup-summary" class="summary">Claude Code 연결은 선택 사항입니다. Codex 사용량 확인부터 시작하세요.</p>
     </header>
 
-    <section class="checks">
-      <article class="check">
+    <section class="checks" aria-label="도구 연결">
+      <article id="codex-card" class="check">
         <div>
-          <h2>Codex CLI</h2>
+          <h2 id="codex-heading" tabindex="-1">Codex CLI</h2>
           <p id="codex-detail" class="status-message">확인 중</p>
         </div>
         <button id="codex-login" type="button">확인 중</button>
       </article>
 
-      <article class="check">
-        <div>
-          <h2>Claude Code</h2>
-          <p id="claude-detail" class="status-message">확인 중</p>
-        </div>
-        <button id="claude-auth" type="button">확인 중</button>
-      </article>
+      <div id="claude-actions" class="provider-actions">
+        <button id="claude-add" type="button">Claude Code도 연결하기</button>
+        <button id="claude-only" class="secondary-action" type="button">Claude Code만 사용하나요?</button>
+      </div>
 
-      <article class="check">
-        <div>
-          <h2>Claude statusLine 이벤트</h2>
-          <p id="hook-detail">확인 중</p>
-        </div>
-        <button id="install-hook" type="button">이벤트 연결</button>
-      </article>
+      <section id="claude-section" class="provider-section" aria-label="Claude Code 연결" hidden>
+        <article class="check">
+          <div>
+            <h2 id="claude-heading" tabindex="-1">Claude Code</h2>
+            <p id="claude-detail" class="status-message">확인 중</p>
+          </div>
+          <button id="claude-auth" type="button">확인 중</button>
+        </article>
 
+        <article id="hook-card" class="check" hidden>
+          <div>
+            <h2>Claude statusLine 이벤트</h2>
+            <p id="hook-detail">확인 중</p>
+          </div>
+          <button id="install-hook" type="button">이벤트 연결</button>
+        </article>
+      </section>
+
+      <div id="codex-add-action" class="provider-actions" hidden>
+        <button id="codex-add" type="button">Codex도 연결하기</button>
+      </div>
+      <p id="provider-selection-status" class="sr-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="checks common-checks" aria-label="앱 설정">
       <article class="check">
         <div>
           <h2>로컬 토큰 상세</h2>
@@ -83,7 +98,7 @@
     <footer>
       <div class="onboarding-actions">
         <button id="setup-later" type="button">나중에</button>
-        <button id="setup-complete" type="button" disabled>설정 완료</button>
+        <button id="setup-complete" type="button" disabled>Codex 시작하기</button>
       </div>
       <div class="status-actions">
         <button id="refresh" type="button">상태 다시 확인</button>
@@ -92,6 +107,7 @@
     </footer>
   </main>
   <script src="bridge.js"></script>
+  <script src="setup-view.js"></script>
   <script src="setup.js"></script>
 </body>
 </html>

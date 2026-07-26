@@ -26,8 +26,15 @@ struct RuntimeState {
     refresh_guard: Mutex<()>,
     refresh: Mutex<Value>,
     window: Mutex<WindowState>,
+    provider_auth: Mutex<ProviderAuthCache>,
     last_alert_signature: Mutex<String>,
     last_collection_ms: Mutex<i64>,
+}
+
+#[derive(Clone, Default)]
+struct ProviderAuthCache {
+    codex: Option<AuthProbe>,
+    claude: Option<AuthProbe>,
 }
 
 #[derive(Clone)]
@@ -45,6 +52,7 @@ impl Default for RuntimeState {
                 always_on_top: false,
                 opacity: 0.96,
             }),
+            provider_auth: Mutex::new(ProviderAuthCache::default()),
             last_alert_signature: Mutex::new(stored_notification_signature()),
             last_collection_ms: Mutex::new(0),
         }
@@ -56,6 +64,8 @@ const AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000;
 const UPDATE_MONITOR_MAX_SLEEP: Duration = Duration::from_secs(60 * 60);
 const UPDATE_MONITOR_BUSY_SLEEP: Duration = Duration::from_secs(60);
 const UPDATE_MONITOR_ERROR_SLEEP: Duration = Duration::from_secs(15 * 60);
+// 기존 설치본의 자동 실행 설정을 잃지 않기 위한 내부 레지스트리 값이다.
+const LAUNCH_AT_LOGIN_REGISTRY_VALUE: &str = "Codex Claude Usage";
 static UPDATE_MENU_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
 
 fn activity_monitoring_enabled() -> bool {
@@ -131,7 +141,10 @@ fn launch_at_login() -> bool {
     RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
         .ok()
-        .and_then(|key| key.get_value::<String, _>("Codex Claude Usage").ok())
+        .and_then(|key| {
+            key.get_value::<String, _>(LAUNCH_AT_LOGIN_REGISTRY_VALUE)
+                .ok()
+        })
         .is_some()
 }
 
@@ -151,12 +164,12 @@ fn update_launch_at_login(enabled: bool) -> Result<(), String> {
     if enabled {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         key.set_value(
-            "Codex Claude Usage",
+            LAUNCH_AT_LOGIN_REGISTRY_VALUE,
             &format!("\"{}\" --background", executable.display()),
         )
         .map_err(|error| error.to_string())
     } else {
-        match key.delete_value("Codex Claude Usage") {
+        match key.delete_value(LAUNCH_AT_LOGIN_REGISTRY_VALUE) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.to_string()),
@@ -177,6 +190,11 @@ fn snapshot_value(app: &AppHandle) -> Value {
     let analytics = read_json(&directory.join("analytics.json"));
     let window = state.window.lock().expect("window state lock").clone();
     let refresh = state.refresh.lock().expect("refresh state lock").clone();
+    let provider_auth = state
+        .provider_auth
+        .lock()
+        .expect("provider auth state lock")
+        .clone();
     json!({
         "capturedAt": chrono::Utc::now().to_rfc3339(),
         "details": {"running": app.get_webview_window("details").is_some(), "mode": "embedded"},
@@ -197,13 +215,16 @@ fn snapshot_value(app: &AppHandle) -> Value {
             "status": claude,
             "limits": limits_by_type(claude.as_ref())
         },
+        "providers": {
+            "codex": {"authState": cached_auth_state(&provider_auth.codex)},
+            "claude": {"authState": cached_auth_state(&provider_auth.claude)}
+        },
         "window": {"alwaysOnTop":window.always_on_top,"opacity":window.opacity},
         "launchAtLogin": launch_at_login()
     })
 }
 
 fn setup_snapshot_value(app: &AppHandle) -> Value {
-    let mut snapshot = snapshot_value(app);
     let codex_state = codex_cli_state();
     let claude_state = claude_cli_state();
     let (codex_auth, claude_auth) = std::thread::scope(|scope| {
@@ -220,6 +241,16 @@ fn setup_snapshot_value(app: &AppHandle) -> Value {
             }),
         )
     });
+    {
+        let state = app.state::<RuntimeState>();
+        let mut cached = state
+            .provider_auth
+            .lock()
+            .expect("provider auth state lock");
+        cached.codex = Some(codex_auth.clone());
+        cached.claude = Some(claude_auth.clone());
+    }
+    let mut snapshot = snapshot_value(app);
     snapshot.as_object_mut().expect("snapshot object").insert("setup".into(), json!({
         "codexCommand": codex_state == CliState::Ready,
         "codexCommandState": codex_state.as_str(),
@@ -238,6 +269,13 @@ fn auth_probe_value(probe: &AuthProbe) -> Value {
         "state": probe.state.as_str(),
         "error": probe.error,
     })
+}
+
+fn cached_auth_state(probe: &Option<AuthProbe>) -> &'static str {
+    probe
+        .as_ref()
+        .map(|value| value.state.as_str())
+        .unwrap_or("unknown")
 }
 
 fn onboarding_complete() -> bool {
@@ -982,10 +1020,10 @@ fn quit_app(app: AppHandle) {
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
-    let compact = MenuItem::with_id(app, "compact", "Compact window", true, None::<&str>)?;
-    let insights = MenuItem::with_id(app, "insights", "Usage insights", true, None::<&str>)?;
-    let details = MenuItem::with_id(app, "details", "Token details", true, None::<&str>)?;
-    let setup = MenuItem::with_id(app, "setup", "Setup", true, None::<&str>)?;
+    let compact = MenuItem::with_id(app, "compact", "사용량 요약", true, None::<&str>)?;
+    let insights = MenuItem::with_id(app, "insights", "사용량 인사이트", true, None::<&str>)?;
+    let details = MenuItem::with_id(app, "details", "토큰 상세", true, None::<&str>)?;
+    let setup = MenuItem::with_id(app, "setup", "설정", true, None::<&str>)?;
     let check_update = MenuItem::with_id(
         app,
         "check_update",
@@ -995,7 +1033,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     )?;
     let _ = UPDATE_MENU_ITEM.set(check_update.clone());
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[

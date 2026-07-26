@@ -17,11 +17,7 @@
       <button id="refresh" type="button">지금 다시 계산</button>
     </header>
 
-    <section class="toolbar" aria-label="제공자 필터">
-      <button class="filter is-active" data-provider="all" type="button">전체</button>
-      <button class="filter" data-provider="codex" type="button">Codex</button>
-      <button class="filter" data-provider="claude" type="button">Claude</button>
-    </section>
+    <section class="toolbar" aria-label="제공자 필터" hidden></section>
 
     <section class="table-shell">
       <table>
@@ -45,6 +41,7 @@
     <p class="fine-print">원본 프롬프트와 응답은 표시하거나 복사하지 않습니다. 비용은 구독 청구액이 아닌 공식 API 표준 정가 등가 추정입니다.</p>
   </main>
   <script src="bridge.js"></script>
+  <script src="provider-view.js"></script>
   <script src="details.js"></script>
 </body>
 </html>

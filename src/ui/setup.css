@@ -48,9 +48,36 @@ h1 {
   line-height: 1.45;
 }
 
+.setup-headline {
+  margin: 16px 0 0;
+  color: var(--text);
+  font-size: 20px;
+}
+
 .checks {
   display: grid;
   gap: 10px;
+}
+
+.common-checks {
+  margin-top: 10px;
+}
+
+.provider-section {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.secondary-action {
+  color: var(--muted);
+  border-style: dashed;
 }
 
 .check {
@@ -85,6 +112,10 @@ h1 {
 h2 {
   margin: 0 0 5px;
   font-size: 15px;
+}
+
+h2[tabindex="-1"] {
+  outline: none;
 }
 
 p {
@@ -176,6 +207,17 @@ footer {
   display: none !important;
 }
 
+.sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 620px) {
   footer {
     align-items: stretch;
@@ -185,6 +227,11 @@ footer {
   .onboarding-actions,
   .status-actions {
     justify-content: flex-end;
+  }
+
+  .provider-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
@@ -197,6 +244,10 @@ footer {
     margin-bottom: 16px;
   }
 
+  .setup-headline {
+    font-size: 18px;
+  }
+
   .check {
     grid-template-columns: 1fr;
     gap: 11px;
@@ -204,7 +255,8 @@ footer {
   }
 
   .check > button,
-  .check > .toggle {
+  .check > .toggle,
+  .provider-actions > button {
     width: 100%;
     justify-content: center;
   }
