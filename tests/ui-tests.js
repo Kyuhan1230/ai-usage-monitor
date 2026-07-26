@@ -26,8 +26,10 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.3");
+assert.strictEqual(packageJson.version, "1.2.5");
+assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
+assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.build.frontendDist, "../src/ui");
 assert.deepStrictEqual(tauriConfig.app.windows, [], "백그라운드 시작 시 WebView를 만들면 안 됩니다.");
 assert.strictEqual(tauriConfig.bundle.windows.webviewInstallMode.type, "skip");
@@ -35,6 +37,7 @@ assert.strictEqual(tauriConfig.bundle.windows.nsis.installerHooks, "./windows/ho
 assert(!JSON.stringify(packageJson).match(/electron|python|fastapi|node-pty/i));
 assert(!cargoToml.match(/reqwest|ureq|hyper|tauri-plugin-http/i));
 assert.strictEqual((cargoToml.match(/tauri-plugin-updater/g) || []).length, 1);
+assert.match(cargoToml, /ProductName = "Codex Claude Usage"/);
 assert.strictEqual(tauriConfig.bundle.createUpdaterArtifacts, true);
 assert.strictEqual(tauriCiConfig.bundle.createUpdaterArtifacts, false, "일반 CI는 공식 서명키 없이 updater artifact를 만들면 안 됩니다.");
 assert.deepStrictEqual(
@@ -49,14 +52,11 @@ assert(!capabilities.permissions.some((permission) => permission.startsWith("upd
 
 const nsisHooks = fs.readFileSync(path.join(root, "src-tauri", "windows", "hooks.nsh"), "utf8");
 assert(nsisHooks.includes("IfSilent cli_offer_done"), "무인 설치에서는 CLI 설치 질문을 건너뛰어야 합니다.");
-assert.strictEqual((nsisHooks.match(/MB_YESNO\|MB_DEFBUTTON2/g) || []).length, 2, "두 CLI 모두 기본값이 아니요인 명시적 동의를 받아야 합니다.");
+assert.strictEqual((nsisHooks.match(/MB_YESNO\|MB_DEFBUTTON2/g) || []).length, 1, "기본 설치는 Codex CLI만 선택적으로 제안해야 합니다.");
 assert(nsisHooks.includes("https://chatgpt.com/codex/install.ps1"), "OpenAI 공식 Windows 설치 스크립트만 사용해야 합니다.");
-assert(nsisHooks.includes("https://claude.ai/install.ps1"), "Anthropic 공식 Windows 설치 스크립트만 사용해야 합니다.");
+assert(!nsisHooks.includes("https://claude.ai/install.ps1"), "Claude 설치는 Setup에서 사용자가 명시적으로 선택해야 합니다.");
 assert(nsisHooks.includes("$LOCALAPPDATA\\Programs\\OpenAI\\Codex\\bin\\codex.exe"));
 assert(nsisHooks.includes("$APPDATA\\npm\\codex.cmd"));
-assert(nsisHooks.includes("$PROFILE\\.local\\bin\\claude.exe"));
-assert(nsisHooks.includes("$LOCALAPPDATA\\Microsoft\\WinGet\\Links\\claude.exe"));
-assert(nsisHooks.includes("$APPDATA\\npm\\claude.cmd"));
 assert(!/\bcodex(?:\.exe)?\s+login\b/i.test(nsisHooks), "설치 프로그램이 계정 로그인을 자동 실행하면 안 됩니다.");
 assert(!/\bclaude(?:\.exe)?\s+auth\s+login\b/i.test(nsisHooks), "설치 프로그램이 Claude 로그인을 자동 실행하면 안 됩니다.");
 assert(nsisHooks.indexOf("Push $0") < nsisHooks.indexOf("Pop $0"), "NSIS 훅은 본문이 쓰는 레지스터 값을 복원해야 합니다.");
@@ -119,6 +119,7 @@ const insightsCss = fs.readFileSync(path.join(ui, "insights.css"), "utf8");
 const detailsCss = fs.readFileSync(path.join(ui, "details.css"), "utf8");
 const updateCss = fs.readFileSync(path.join(ui, "update.css"), "utf8");
 const bridgeScript = fs.readFileSync(path.join(ui, "bridge.js"), "utf8");
+assert(setupHtml.includes("<title>Codex Claude Usage Setup</title>") && setupHtml.includes("<h1>Codex Claude Usage</h1>"), "Setup은 현재 제품명을 유지해야 합니다.");
 assert(
   insightsHtml.indexOf('id="decision"') < insightsHtml.indexOf('class="analysis-details"'),
   "핵심 고갈 판정은 상세 분석보다 먼저 보여야 합니다.",
@@ -138,12 +139,92 @@ assert(insightsScript.includes("수집 횟수보다 잔여량이 변한 기록�
 const compactHtml = fs.readFileSync(path.join(ui, "compact.html"), "utf8");
 const compactCss = fs.readFileSync(path.join(ui, "compact.css"), "utf8");
 const compactScript = fs.readFileSync(path.join(ui, "compact.js"), "utf8");
+const detailsHtml = fs.readFileSync(path.join(ui, "details.html"), "utf8");
+const detailsScript = fs.readFileSync(path.join(ui, "details.js"), "utf8");
+const { activeProviders, detailProviders, visibleRecommendations } = require(path.join(ui, "provider-view.js"));
 assert(compactHtml.includes('id="decision"'), "첫 Compact 창에서 고갈 판정을 바로 보여줘야 합니다.");
+assert(compactHtml.includes("<title>Usage Compact</title>"), "Compact는 현재 제품명을 유지해야 합니다.");
+assert(insightsHtml.includes("<title>Usage Insights</title>"), "Insights는 현재 제품명을 유지해야 합니다.");
+assert(detailsHtml.includes("<title>Token Details</title>"), "Token Details는 현재 제품명을 유지해야 합니다.");
 assert(compactScript.includes("function renderDecision"), "Compact 창은 분석 결과의 최우선 판정을 렌더링해야 합니다.");
 assert(compactScript.includes("소진 속도 계산 전"), "Compact 창은 속도를 계산하지 못한 상태를 명시해야 합니다.");
 assert(compactScript.includes("최신 사용량 확인 필요"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
 assert(insightsScript.includes("최신 사용량을 확인한 뒤 다시 판단하겠습니다"), "Insights는 오래된 데이터의 판정을 보류해야 합니다.");
 assert(compactScript.includes("el.decision.addEventListener"), "Compact 판정에서 상세 근거로 이동할 수 있어야 합니다.");
+assert(compactHtml.includes('id="no-provider"'), "연결된 공급자가 없을 때 Compact의 중립 상태가 필요합니다.");
+assert(compactScript.includes("activeProviders(snapshot)"), "Compact는 현재 인증된 공급자만 표시해야 합니다.");
+assert(insightsScript.includes("activeProviders(snapshot)"), "Insights는 현재 인증된 공급자만 판정해야 합니다.");
+assert(detailsScript.includes("detailProviders(snapshot)"), "Token Details는 현재 연결과 과거 이력을 함께 고려해야 합니다.");
+assert(detailsHtml.includes('class="toolbar"') && detailsHtml.includes("hidden"), "공급자 필터는 선택 가능한 공급자 수에 따라 숨길 수 있어야 합니다.");
+const activeOnlyCodex = {
+  providers: {
+    codex: { authState: "authenticated" },
+    claude: { authState: "unauthenticated" },
+  },
+  codex: { connected: true },
+  claude: { connected: true },
+  analytics: {
+    usage: {
+      rows: [{ provider: "claude", totalTokens: 10 }],
+    },
+  },
+};
+assert.deepStrictEqual(activeProviders(activeOnlyCodex), ["codex"]);
+assert.deepStrictEqual(detailProviders(activeOnlyCodex), ["codex", "claude"], "과거 Claude 토큰 행은 상세 화면에서 보존해야 합니다.");
+assert.deepStrictEqual(
+  activeProviders({
+    providers: { codex: { authState: "unknown" }, claude: { authState: "unavailable" } },
+    codex: { connected: true },
+    claude: { connected: true },
+  }),
+  ["codex"],
+  "인증 확인 전에는 성공적으로 수집한 기존 공급자만 안전하게 표시합니다.",
+);
+assert(compactScript.includes("visibleRecommendations(analytics, providers)"), "Compact 우선 문구는 인증된 공급자로 걸러야 합니다.");
+assert(insightsScript.includes("visibleRecommendations(analytics, providers)"), "Insights 권장 문구는 인증된 공급자로 걸러야 합니다.");
+assert(!/analytics\.recommendations\[0\]/.test(compactScript + insightsScript), "거르지 않은 권장 문구를 그대로 대표 문구로 쓰면 안 됩니다.");
+const mixedRecommendations = {
+  recommendations: [
+    { priority: "critical", provider: "codex", reason: "critical_limit", action: "Codex 5시간 한도가 4% 남았습니다." },
+    { priority: "warning", provider: "claude", reason: "token_spike", action: "Claude 오늘 토큰 사용량이 최근 중앙값의 3.4배입니다." },
+    { priority: "info", provider: "codex", reason: "model_savings", action: "Codex의 단순 작업을 gpt-5.6-luna로 보내면 절약할 수 있습니다." },
+  ],
+};
+const claudeOnlyVisible = visibleRecommendations(mixedRecommendations, ["claude"]);
+assert.deepStrictEqual(
+  claudeOnlyVisible.map((item) => item.provider),
+  ["claude"],
+  "Claude만 인증한 사용자에게 Codex 잔여 이력 문구를 보여주면 안 됩니다.",
+);
+assert(
+  !claudeOnlyVisible.some((item) => /gpt-/.test(item.action)),
+  "표시된 문구에 다른 공급자의 모델명이 나타나면 안 됩니다.",
+);
+assert.deepStrictEqual(
+  visibleRecommendations({ recommendations: [{ priority: "ok", provider: null, action: "현재 속도라면 유지 가능합니다." }] }, ["claude"]).length,
+  1,
+  "공급자가 없는 healthy 문구는 항상 통과해야 합니다.",
+);
+assert.deepStrictEqual(visibleRecommendations(null, ["codex"]), [], "분석 결과가 없으면 빈 목록이어야 합니다.");
+const hiddenClaude = {
+  hiddenProviders: ["claude"],
+  providers: { codex: { authState: "authenticated" }, claude: { authState: "authenticated" } },
+  codex: { connected: true },
+  claude: { connected: true },
+  analytics: { usage: { rows: [{ provider: "claude", totalTokens: 10 }] } },
+};
+assert.deepStrictEqual(activeProviders(hiddenClaude), ["codex"], "숨긴 공급자는 인증돼 있어도 표시하지 않습니다.");
+assert.deepStrictEqual(detailProviders(hiddenClaude), ["codex"], "숨긴 공급자는 과거 이력도 감춥니다.");
+assert(!setupScript.includes("auth logout"), "이 앱의 숨기기가 CLI 로그아웃을 실행하면 안 됩니다.");
+assert(setupScript.includes("setProviderHidden"), "Setup에서 공급자 표시를 끄고 켤 수 있어야 합니다.");
+assert(bridgeScript.includes('invoke("set_provider_hidden"'), "표시 설정은 전용 command를 사용해야 합니다.");
+assert(setupHtml.includes('id="claude-visibility"') && setupHtml.includes('id="codex-visibility"'), "두 공급자 모두 표시 설정이 필요합니다.");
+assert(rustEntry.includes("fn hidden_providers"), "숨긴 공급자는 로컬 설정으로 보존해야 합니다.");
+assert(rustEntry.includes('!is_hidden("codex")') && rustEntry.includes('!is_hidden("claude")'), "숨긴 공급자는 CLI 수집도 건너뛰어야 합니다.");
+assert(insightsScript.includes("if (visible.length)"), "걸러낸 뒤 남는 문구가 없으면 빈 목록을 남기지 않아야 합니다.");
+assert(compactScript.includes("el.meters.dataset.providerCount"), "Compact 그리드 열 수는 표시 대상 공급자 수에서 파생해야 합니다.");
+assert(/\.meters\[data-provider-count="1"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s.test(compactCss), "공급자가 하나면 카드가 가로 폭을 모두 써야 합니다.");
+assert(insightsScript.includes("singleProvider && singleProvider.comparison"), "단일 공급자 화면의 비교값에 미표시 공급자가 섞이면 안 됩니다.");
 assert(!compactHtml.includes('class="dial"'), "의미가 모호한 대표 원형 게이지를 사용하면 안 됩니다.");
 for (const id of ["codex-five-hour-bar", "codex-weekly-bar", "claude-five-hour-bar", "claude-seven-day-bar"]) {
   assert(compactHtml.includes(`id="${id}"`), `Compact 한도 막대 누락: ${id}`);
@@ -186,10 +267,58 @@ for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
 }
 assert(setupScript.includes("refresh(false);"), "Setup 첫 진입은 사용량 수집 없이 설치·인증 상태만 확인해야 합니다.");
 assert(setupScript.trimEnd().endsWith("loadUpdateState();"), "Setup 첫 진입은 마지막 업데이트 확인 상태도 불러와야 합니다.");
-assert(setupScript.includes('codexAuth.state === "authenticated"'), "설정 완료는 Codex 직접 인증 상태를 사용해야 합니다.");
-assert(setupScript.includes('claudeAuth.state === "authenticated"'), "설정 완료는 Claude 직접 인증 상태를 사용해야 합니다.");
-assert(setupScript.includes("function hasAuthenticatedProvider"), "한 공급자만 인증해도 온보딩을 완료할 수 있어야 합니다.");
-assert(setupScript.includes('|| setup.claudeAuth.state === "authenticated"'), "Codex와 Claude 인증은 선택 조건이어야 합니다.");
+assert(setupHtml.includes('src="setup-view.js"'), "Setup은 상태 전이를 순수 계산 모듈로 분리해야 합니다.");
+assert(setupHtml.includes('id="claude-section"') && setupHtml.includes('id="hook-card"'), "Claude 카드와 hook 카드는 별도 섹션으로 제어해야 합니다.");
+assert(setupHtml.includes('id="claude-add"') && setupHtml.includes('id="claude-only"') && setupHtml.includes('id="codex-add"'), "Codex·Claude 전용 경로 CTA가 필요합니다.");
+assert(setupScript.includes("deriveSetupView"), "Setup 렌더링은 상태 전이표를 사용해야 합니다.");
+assert(setupScript.includes("latestView.canComplete"), "완료 처리는 현재 Setup 경로의 인증 조건을 사용해야 합니다.");
+assert(!setupScript.includes("hasAuthenticatedProvider"), "어느 한 공급자 인증만으로 Codex 경로를 완료하면 안 됩니다.");
+assert(setupScript.includes("claudeSectionExpanded: true"), "Claude CTA는 CLI 실행 없이 화면 섹션만 열어야 합니다.");
+assert(setupScript.includes("providerSelectionStatus"), "경로 전환은 보조기술에 상태를 알려야 합니다.");
+assert(setupScript.includes("function runningVersionPrefix"), "업데이트 카드는 실행 중인 버전을 밝혀야 합니다.");
+assert(
+  !/updateDetail.textContent = `현재 최신 버전/.test(setupScript),
+  "최신 상태 문구에 버전이 빠지면 사용자가 자기 버전을 알 수 없습니다.",
+);
+const { deriveSetupView } = require(path.join(ui, "setup-view.js"));
+function setupFixture(codexState, claudeState) {
+  return {
+    setup: {
+      codexAuth: { state: codexState },
+      claudeAuth: { state: claudeState },
+    },
+  };
+}
+const codexFirst = deriveSetupView(setupFixture("unauthenticated", "unauthenticated"));
+assert.strictEqual(codexFirst.setupMode, "codex");
+assert.strictEqual(codexFirst.claudeSectionExpanded, false, "Claude 설치 여부만으로 기본 섹션을 열면 안 됩니다.");
+assert.strictEqual(codexFirst.canComplete, false);
+const codexOnly = deriveSetupView(setupFixture("authenticated", "unauthenticated"));
+assert.deepStrictEqual(
+  [codexOnly.setupMode, codexOnly.claudeSectionExpanded, codexOnly.canComplete, codexOnly.completionLabel],
+  ["codex", false, true, "Codex 시작하기"],
+);
+const claudeOnly = deriveSetupView(setupFixture("unauthenticated", "authenticated"));
+assert.deepStrictEqual(
+  [claudeOnly.setupMode, claudeOnly.claudeSectionExpanded, claudeOnly.canComplete, claudeOnly.completionLabel],
+  ["claudeOnly", true, true, "Claude 시작하기"],
+);
+const both = deriveSetupView(setupFixture("authenticated", "authenticated"));
+assert.deepStrictEqual(
+  [both.setupMode, both.claudeSectionExpanded, both.canComplete, both.connectedProviders],
+  ["codex", true, true, "both"],
+);
+const claudeAddedToCodex = deriveSetupView(
+  setupFixture("unauthenticated", "authenticated"),
+  { setupMode: "codex", claudeSectionExpanded: true },
+);
+assert.strictEqual(claudeAddedToCodex.canComplete, false, "Codex 경로에서는 Claude 인증만으로 완료할 수 없습니다.");
+assert.strictEqual(claudeAddedToCodex.showClaudeOnlyAction, true, "Claude 인증 뒤에도 사용자가 명시적으로 전용 경로로 전환할 수 있어야 합니다.");
+const selectedClaudeOnly = deriveSetupView(
+  setupFixture("unauthenticated", "authenticated"),
+  { setupMode: "claudeOnly", claudeSectionExpanded: true },
+);
+assert.strictEqual(selectedClaudeOnly.canComplete, true);
 assert(rustEntry.includes("let codex_ready = codex_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
 assert(rustEntry.includes("let claude_ready = claude_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
 assert(setupHtml.includes('id="activity-monitoring"'), "활동 기반 자동 확인은 사용자가 켜고 끌 수 있어야 합니다.");

@@ -3,8 +3,11 @@
 // 백엔드 구현과 무관하게 동일한 snapshot 계약만 사용한다.
 
 const { stateText } = window.usageStatusHealth;
+const { activeProviders, visibleRecommendations } = window.usageProviderView;
 
 const ids = [
+  "meters",
+  "no-provider",
   "codex-state",
   "codex-five-hour",
   "codex-five-hour-bar",
@@ -122,28 +125,35 @@ function renderLimitRate(id, limit, stale) {
     : "속도 계산 전";
 }
 
-function staleProviders(snapshot) {
-  return new Set(["codex", "claude"].filter((provider) => {
+function staleProviders(snapshot, providers) {
+  return new Set(providers.filter((provider) => {
     const state = snapshot[provider];
     const freshness = snapshot.capture[`${provider}FreshnessMs`];
     return state.connected && Number.isFinite(state.ageMs) && state.ageMs > freshness;
   }));
 }
 
-function renderDecision(analytics, snapshot) {
+function renderDecision(analytics, snapshot, providers) {
+  if (!providers.length) {
+    el.decision.dataset.tone = "neutral";
+    el["decision-status"].textContent = "연결된 도구 없음";
+    el["decision-action"].textContent = "Setup에서 사용할 도구에 로그인한 뒤 사용량을 확인하세요.";
+    return;
+  }
   if (!analytics) {
     el.decision.dataset.tone = "neutral";
     el["decision-status"].textContent = "사용 흐름 확인 전";
     el["decision-action"].textContent = "새로고침하면 최근 사용 속도와 고갈 시점을 계산합니다.";
     return;
   }
-  const critical = analytics.alerts.find((alert) => alert.severity === "critical");
-  const warning = analytics.alerts.find((alert) => alert.severity === "warning");
-  const action = analytics.recommendations && analytics.recommendations[0];
-  const limits = ["codex", "claude"].flatMap((provider) =>
+  const alerts = (analytics.alerts || []).filter((alert) => providers.includes(alert.provider));
+  const critical = alerts.find((alert) => alert.severity === "critical");
+  const warning = alerts.find((alert) => alert.severity === "warning");
+  const action = visibleRecommendations(analytics, providers)[0];
+  const limits = providers.flatMap((provider) =>
     Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {}).filter(Boolean));
   const hasKnownForecast = limits.some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk");
-  const stale = staleProviders(snapshot);
+  const stale = staleProviders(snapshot, providers);
   const priority = critical || warning;
   if ((priority && stale.has(priority.provider)) || (!priority && stale.size)) {
     el.decision.dataset.tone = "neutral";
@@ -176,6 +186,16 @@ function renderDecision(analytics, snapshot) {
 }
 
 function render(snapshot) {
+  const providers = activeProviders(snapshot);
+  const hasCodex = providers.includes("codex");
+  const hasClaude = providers.includes("claude");
+  document.querySelector('[data-tool="codex"]').hidden = !hasCodex;
+  document.querySelector('[data-tool="claude"]').hidden = !hasClaude;
+  el.meters.hidden = !providers.length;
+  el["no-provider"].hidden = providers.length > 0;
+  // 열 수는 표시 대상 공급자 수에서 파생한다. 한쪽이 빈 2열 그리드를 남기지 않는다.
+  el.meters.dataset.providerCount = String(providers.length);
+
   const codexFiveHour = snapshot.codex.limits.five_hour;
   const codexWeekly = snapshot.codex.limits.weekly;
   const codexLimit = codexFiveHour || codexWeekly || snapshot.codex.limits.monthly;
@@ -183,7 +203,7 @@ function render(snapshot) {
   const claudeSevenDay = snapshot.claude.limits.seven_day;
   const claudeLimit = claudeFiveHour || claudeSevenDay;
   const analytics = snapshot.analytics;
-  const stale = staleProviders(snapshot);
+  const stale = staleProviders(snapshot, providers);
   const codexAnalytics = analytics && analytics.providers && analytics.providers.codex
     ? analytics.providers.codex.limits
     : {};
@@ -191,38 +211,42 @@ function render(snapshot) {
     ? analytics.providers.claude.limits
     : {};
 
-  renderLimitBar("codex-five-hour", codexFiveHour);
-  renderLimitBar("codex-weekly", codexWeekly);
-  renderLimitRate("codex-five-hour-rate", codexAnalytics.five_hour, stale.has("codex"));
-  renderLimitRate("codex-weekly-rate", codexAnalytics.weekly, stale.has("codex"));
-  el["codex-state"].textContent = stateText({
-    connected: snapshot.codex.connected,
-    ageMs: snapshot.codex.ageMs,
-    staleText: "지연",
-    captureState: snapshot.codex.status && snapshot.codex.status.capture
-      ? snapshot.codex.status.capture.state
-      : null,
-    freshnessMs: snapshot.capture.codexFreshnessMs,
-  });
-  el["codex-reset"].textContent = resetText(codexLimit);
-  el["codex-stamp"].textContent = ageText(snapshot.codex.ageMs);
+  if (hasCodex) {
+    renderLimitBar("codex-five-hour", codexFiveHour);
+    renderLimitBar("codex-weekly", codexWeekly);
+    renderLimitRate("codex-five-hour-rate", codexAnalytics.five_hour, stale.has("codex"));
+    renderLimitRate("codex-weekly-rate", codexAnalytics.weekly, stale.has("codex"));
+    el["codex-state"].textContent = stateText({
+      connected: snapshot.codex.connected,
+      ageMs: snapshot.codex.ageMs,
+      staleText: "지연",
+      captureState: snapshot.codex.status && snapshot.codex.status.capture
+        ? snapshot.codex.status.capture.state
+        : null,
+      freshnessMs: snapshot.capture.codexFreshnessMs,
+    });
+    el["codex-reset"].textContent = resetText(codexLimit);
+    el["codex-stamp"].textContent = ageText(snapshot.codex.ageMs);
+  }
 
-  renderLimitBar("claude-five-hour", claudeFiveHour);
-  renderLimitBar("claude-seven-day", claudeSevenDay);
-  renderLimitRate("claude-five-hour-rate", claudeAnalytics.five_hour, stale.has("claude"));
-  renderLimitRate("claude-seven-day-rate", claudeAnalytics.seven_day, stale.has("claude"));
-  el["claude-state"].textContent = stateText({
-    connected: snapshot.claude.connected,
-    ageMs: snapshot.claude.ageMs,
-    staleText: "오래됨",
-    captureState: snapshot.claude.status && snapshot.claude.status.capture
-      ? snapshot.claude.status.capture.state
-      : null,
-    freshnessMs: snapshot.capture.claudeFreshnessMs,
-  });
-  el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
-  el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
-  renderDecision(snapshot.analytics, snapshot);
+  if (hasClaude) {
+    renderLimitBar("claude-five-hour", claudeFiveHour);
+    renderLimitBar("claude-seven-day", claudeSevenDay);
+    renderLimitRate("claude-five-hour-rate", claudeAnalytics.five_hour, stale.has("claude"));
+    renderLimitRate("claude-seven-day-rate", claudeAnalytics.seven_day, stale.has("claude"));
+    el["claude-state"].textContent = stateText({
+      connected: snapshot.claude.connected,
+      ageMs: snapshot.claude.ageMs,
+      staleText: "오래됨",
+      captureState: snapshot.claude.status && snapshot.claude.status.capture
+        ? snapshot.claude.status.capture.state
+        : null,
+      freshnessMs: snapshot.capture.claudeFreshnessMs,
+    });
+    el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
+    el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
+  }
+  renderDecision(snapshot.analytics, snapshot, providers);
 
   el["always-on-top"].checked = Boolean(snapshot.window.alwaysOnTop);
   el.opacity.value = Math.round((snapshot.window.opacity || 0.96) * 100);

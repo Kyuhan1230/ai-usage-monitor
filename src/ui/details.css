@@ -20,6 +20,7 @@ h1 { margin: 0; font-size: 26px; }
 button { min-height: 34px; border: 1px solid var(--line); border-radius: 7px; padding: 0 13px; background: var(--panel-2); color: var(--text); cursor: pointer; }
 button:hover, .filter.is-active { border-color: var(--accent); color: var(--accent); }
 button:disabled { opacity: .6; cursor: wait; }
+[hidden] { display: none !important; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
 .table-shell { max-height: calc(100vh - 190px); overflow: auto; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
 table { width: 100%; border-collapse: collapse; min-width: 980px; }

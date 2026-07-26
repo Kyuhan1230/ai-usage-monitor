@@ -26,8 +26,15 @@ struct RuntimeState {
     refresh_guard: Mutex<()>,
     refresh: Mutex<Value>,
     window: Mutex<WindowState>,
+    provider_auth: Mutex<ProviderAuthCache>,
     last_alert_signature: Mutex<String>,
     last_collection_ms: Mutex<i64>,
+}
+
+#[derive(Clone, Default)]
+struct ProviderAuthCache {
+    codex: Option<AuthProbe>,
+    claude: Option<AuthProbe>,
 }
 
 #[derive(Clone)]
@@ -45,6 +52,7 @@ impl Default for RuntimeState {
                 always_on_top: false,
                 opacity: 0.96,
             }),
+            provider_auth: Mutex::new(ProviderAuthCache::default()),
             last_alert_signature: Mutex::new(stored_notification_signature()),
             last_collection_ms: Mutex::new(0),
         }
@@ -56,6 +64,8 @@ const AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000;
 const UPDATE_MONITOR_MAX_SLEEP: Duration = Duration::from_secs(60 * 60);
 const UPDATE_MONITOR_BUSY_SLEEP: Duration = Duration::from_secs(60);
 const UPDATE_MONITOR_ERROR_SLEEP: Duration = Duration::from_secs(15 * 60);
+// 기존 설치본의 자동 실행 설정을 잃지 않기 위한 내부 레지스트리 값이다.
+const LAUNCH_AT_LOGIN_REGISTRY_VALUE: &str = "Codex Claude Usage";
 static UPDATE_MENU_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
 
 fn activity_monitoring_enabled() -> bool {
@@ -131,7 +141,10 @@ fn launch_at_login() -> bool {
     RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
         .ok()
-        .and_then(|key| key.get_value::<String, _>("Codex Claude Usage").ok())
+        .and_then(|key| {
+            key.get_value::<String, _>(LAUNCH_AT_LOGIN_REGISTRY_VALUE)
+                .ok()
+        })
         .is_some()
 }
 
@@ -151,12 +164,12 @@ fn update_launch_at_login(enabled: bool) -> Result<(), String> {
     if enabled {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         key.set_value(
-            "Codex Claude Usage",
+            LAUNCH_AT_LOGIN_REGISTRY_VALUE,
             &format!("\"{}\" --background", executable.display()),
         )
         .map_err(|error| error.to_string())
     } else {
-        match key.delete_value("Codex Claude Usage") {
+        match key.delete_value(LAUNCH_AT_LOGIN_REGISTRY_VALUE) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.to_string()),
@@ -169,6 +182,47 @@ fn update_launch_at_login(_enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// 이 앱에서만 공급자를 숨긴다. CLI 인증은 건드리지 않으므로 다른 작업에 영향이 없다.
+fn hidden_providers() -> Vec<String> {
+    read_json(&data_dir().join("preferences.json"))
+        .and_then(|value| {
+            value
+                .get("hiddenProviders")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .filter(|name| *name == "codex" || *name == "claude")
+                        .map(str::to_string)
+                        .collect()
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn is_hidden(provider: &str) -> bool {
+    hidden_providers().iter().any(|name| name == provider)
+}
+
+fn update_hidden_provider(provider: &str, hidden: bool) -> Result<Vec<String>, String> {
+    if provider != "codex" && provider != "claude" {
+        return Err(format!("알 수 없는 공급자입니다: {provider}"));
+    }
+    let path = data_dir().join("preferences.json");
+    let mut preferences = read_json(&path).unwrap_or_else(|| json!({}));
+    let mut list = hidden_providers();
+    list.retain(|name| name != provider);
+    if hidden {
+        list.push(provider.to_string());
+    }
+    if !preferences.is_object() {
+        preferences = json!({});
+    }
+    preferences["hiddenProviders"] = json!(list);
+    write_json(&path, &preferences)?;
+    Ok(list)
+}
+
 fn snapshot_value(app: &AppHandle) -> Value {
     let state = app.state::<RuntimeState>();
     let directory = data_dir();
@@ -177,6 +231,11 @@ fn snapshot_value(app: &AppHandle) -> Value {
     let analytics = read_json(&directory.join("analytics.json"));
     let window = state.window.lock().expect("window state lock").clone();
     let refresh = state.refresh.lock().expect("refresh state lock").clone();
+    let provider_auth = state
+        .provider_auth
+        .lock()
+        .expect("provider auth state lock")
+        .clone();
     json!({
         "capturedAt": chrono::Utc::now().to_rfc3339(),
         "details": {"running": app.get_webview_window("details").is_some(), "mode": "embedded"},
@@ -197,13 +256,17 @@ fn snapshot_value(app: &AppHandle) -> Value {
             "status": claude,
             "limits": limits_by_type(claude.as_ref())
         },
+        "providers": {
+            "codex": {"authState": cached_auth_state(&provider_auth.codex), "hidden": is_hidden("codex")},
+            "claude": {"authState": cached_auth_state(&provider_auth.claude), "hidden": is_hidden("claude")}
+        },
+        "hiddenProviders": hidden_providers(),
         "window": {"alwaysOnTop":window.always_on_top,"opacity":window.opacity},
         "launchAtLogin": launch_at_login()
     })
 }
 
 fn setup_snapshot_value(app: &AppHandle) -> Value {
-    let mut snapshot = snapshot_value(app);
     let codex_state = codex_cli_state();
     let claude_state = claude_cli_state();
     let (codex_auth, claude_auth) = std::thread::scope(|scope| {
@@ -220,6 +283,16 @@ fn setup_snapshot_value(app: &AppHandle) -> Value {
             }),
         )
     });
+    {
+        let state = app.state::<RuntimeState>();
+        let mut cached = state
+            .provider_auth
+            .lock()
+            .expect("provider auth state lock");
+        cached.codex = Some(codex_auth.clone());
+        cached.claude = Some(claude_auth.clone());
+    }
+    let mut snapshot = snapshot_value(app);
     snapshot.as_object_mut().expect("snapshot object").insert("setup".into(), json!({
         "codexCommand": codex_state == CliState::Ready,
         "codexCommandState": codex_state.as_str(),
@@ -228,6 +301,7 @@ fn setup_snapshot_value(app: &AppHandle) -> Value {
         "claudeCommandState": claude_state.as_str(),
         "claudeAuth": auth_probe_value(&claude_auth),
         "onboardingComplete": onboarding_complete(),
+        "hiddenProviders": hidden_providers(),
         "hookCommand": format!("\"{}\" --claude-status-hook", std::env::current_exe().map(|path| path.display().to_string()).unwrap_or_default())
     }));
     snapshot
@@ -238,6 +312,13 @@ fn auth_probe_value(probe: &AuthProbe) -> Value {
         "state": probe.state.as_str(),
         "error": probe.error,
     })
+}
+
+fn cached_auth_state(probe: &Option<AuthProbe>) -> &'static str {
+    probe
+        .as_ref()
+        .map(|value| value.state.as_str())
+        .unwrap_or("unknown")
 }
 
 fn onboarding_complete() -> bool {
@@ -419,8 +500,9 @@ fn refresh_all(app: &AppHandle) -> Value {
     let history_dir = directory.join("history");
     let codex_status = directory.join("status.json");
     let claude_status = directory.join("claude-status.json");
-    let codex_ready = codex_cli_state() == CliState::Ready;
-    let claude_ready = claude_cli_state() == CliState::Ready;
+    // 이 앱에서 숨긴 공급자는 CLI를 아예 실행하지 않는다.
+    let codex_ready = codex_cli_state() == CliState::Ready && !is_hidden("codex");
+    let claude_ready = claude_cli_state() == CliState::Ready && !is_hidden("claude");
     let (codex_result, claude_result) = std::thread::scope(|scope| {
         let codex = codex_ready.then(|| {
             scope.spawn(|| capture_codex(&codex_status, &history_dir, Duration::from_secs(20)))
@@ -449,10 +531,12 @@ fn refresh_all(app: &AppHandle) -> Value {
         errors.insert("claude".into(), Value::String(error));
     }
     if !codex_ready && !claude_ready {
-        errors.insert(
-            "providers".into(),
-            Value::String("사용량을 확인할 Codex 또는 Claude CLI가 필요합니다.".into()),
-        );
+        let message = if is_hidden("codex") && is_hidden("claude") {
+            "표시할 도구를 모두 숨겼습니다. Setup에서 하나 이상 다시 표시하세요."
+        } else {
+            "사용량을 확인할 Codex 또는 Claude CLI가 필요합니다."
+        };
+        errors.insert("providers".into(), Value::String(message.into()));
     }
     let rows = usage::scan_token_usage();
     let history = read_history(&history_dir, 30);
@@ -976,16 +1060,22 @@ fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
     Ok(launch_at_login())
 }
 
+/// 이 앱의 표시에서만 공급자를 빼거나 되돌린다. CLI 로그아웃은 하지 않는다.
+#[tauri::command]
+fn set_provider_hidden(provider: String, hidden: bool) -> Result<Vec<String>, String> {
+    update_hidden_provider(&provider, hidden)
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
-    let compact = MenuItem::with_id(app, "compact", "Compact window", true, None::<&str>)?;
-    let insights = MenuItem::with_id(app, "insights", "Usage insights", true, None::<&str>)?;
-    let details = MenuItem::with_id(app, "details", "Token details", true, None::<&str>)?;
-    let setup = MenuItem::with_id(app, "setup", "Setup", true, None::<&str>)?;
+    let compact = MenuItem::with_id(app, "compact", "사용량 요약", true, None::<&str>)?;
+    let insights = MenuItem::with_id(app, "insights", "사용량 인사이트", true, None::<&str>)?;
+    let details = MenuItem::with_id(app, "details", "토큰 상세", true, None::<&str>)?;
+    let setup = MenuItem::with_id(app, "setup", "설정", true, None::<&str>)?;
     let check_update = MenuItem::with_id(
         app,
         "check_update",
@@ -995,7 +1085,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     )?;
     let _ = UPDATE_MENU_ITEM.set(check_update.clone());
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -1107,6 +1197,7 @@ pub fn run() {
             open_install_terminal,
             open_official_guide,
             set_launch_at_login,
+            set_provider_hidden,
             quit_app
         ])
         .build(tauri::generate_context!())

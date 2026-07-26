@@ -3,6 +3,7 @@
 // Rust 분석기가 만든 결정용 snapshot을 렌더링한다.
 
 const PROVIDER_LABELS = { codex: "Codex", claude: "Claude" };
+const { activeProviders, visibleRecommendations } = window.usageProviderView;
 const LIMIT_LABELS = {
   five_hour: "5시간",
   weekly: "주간",
@@ -85,8 +86,8 @@ function formatDuration(milliseconds) {
   return parts.slice(0, 2).join(" ");
 }
 
-function allLimits(analytics) {
-  return ["codex", "claude"].flatMap((provider) =>
+function allLimits(analytics, providers) {
+  return providers.flatMap((provider) =>
     Object.entries((analytics.providers[provider] && analytics.providers[provider].limits) || {})
       .filter(([, limit]) => Boolean(limit))
       .map(([type, limit]) => ({ provider, type, limit })));
@@ -103,8 +104,8 @@ function limitPriority(candidate) {
   return score;
 }
 
-function primaryLimit(analytics) {
-  return allLimits(analytics).sort((left, right) => limitPriority(right) - limitPriority(left))[0] || null;
+function primaryLimit(analytics, providers) {
+  return allLimits(analytics, providers).sort((left, right) => limitPriority(right) - limitPriority(left))[0] || null;
 }
 
 function limitIsStale(snapshot, candidate) {
@@ -254,8 +255,8 @@ function renderSlowdownBullet(candidate, snapshot) {
   }
 }
 
-function renderDecisionVisuals(analytics, snapshot) {
-  const candidate = primaryLimit(analytics);
+function renderDecisionVisuals(analytics, snapshot, providers) {
+  const candidate = primaryLimit(analytics, providers);
   const source = document.getElementById("decision-visual-source");
   if (!candidate) {
     source.textContent = "표시할 한도 없음";
@@ -277,10 +278,10 @@ function appendListItem(list, text, className = "") {
   list.appendChild(item);
 }
 
-function renderForecasts(analytics) {
+function renderForecasts(analytics, providers) {
   const container = document.getElementById("forecasts");
   container.replaceChildren();
-  for (const provider of ["codex", "claude"]) {
+  for (const provider of providers) {
     for (const [type, limit] of Object.entries(analytics.providers[provider].limits)) {
       if (!limit) {
         continue;
@@ -322,17 +323,17 @@ function renderForecasts(analytics) {
   }
 }
 
-function renderDetections(analytics) {
+function renderDetections(analytics, providers) {
   const list = document.getElementById("detections");
   list.replaceChildren();
-  for (const alert of analytics.alerts) {
+  for (const alert of analytics.alerts.filter((item) => providers.includes(item.provider))) {
     appendListItem(
       list,
       `${PROVIDER_LABELS[alert.provider]} ${LIMIT_LABELS[alert.limitType] || alert.limitType}: ${alert.remainingPercent}% 남음 · ${ALERT_REASON_LABELS[alert.reason] || alert.reason}`,
       alert.severity,
     );
   }
-  for (const provider of ["codex", "claude"]) {
+  for (const provider of providers) {
     const anomaly = analytics.anomalies[provider];
     if (anomaly.detected) {
       appendListItem(list, `${PROVIDER_LABELS[provider]} 오늘 토큰이 최근 기준의 ${anomaly.multiplier}배입니다.`, "warning");
@@ -343,10 +344,10 @@ function renderDetections(analytics) {
   }
 }
 
-function renderCosts(analytics) {
+function renderCosts(analytics, providers) {
   const container = document.getElementById("costs");
   container.replaceChildren();
-  for (const provider of ["codex", "claude"]) {
+  for (const provider of providers) {
     const cost = analytics.costs.providers[provider];
     const row = document.createElement("div");
     row.className = "cost-row";
@@ -371,28 +372,29 @@ function renderCosts(analytics) {
   }
 }
 
-function staleProviders(snapshot) {
-  return new Set(["codex", "claude"].filter((provider) => {
+function staleProviders(snapshot, providers) {
+  return new Set(providers.filter((provider) => {
     const state = snapshot[provider];
     const freshness = snapshot.capture[`${provider}FreshnessMs`];
     return state.connected && Number.isFinite(state.ageMs) && state.ageMs > freshness;
   }));
 }
 
-function renderDecision(analytics, snapshot) {
+function renderDecision(analytics, snapshot, providers) {
   const panel = document.getElementById("decision");
   const badge = document.getElementById("decision-badge");
   const title = document.getElementById("decision-title");
   const detail = document.getElementById("decision-detail");
   const primaryAction = document.getElementById("primary-action");
-  const critical = analytics.alerts.find((alert) => alert.severity === "critical");
-  const warning = analytics.alerts.find((alert) => alert.severity === "warning");
+  const alerts = analytics.alerts.filter((alert) => providers.includes(alert.provider));
+  const critical = alerts.find((alert) => alert.severity === "critical");
+  const warning = alerts.find((alert) => alert.severity === "warning");
   const priority = critical || warning;
-  const recommendation = analytics.recommendations[0];
-  const limits = ["codex", "claude"].flatMap((provider) =>
+  const recommendation = visibleRecommendations(analytics, providers)[0];
+  const limits = providers.flatMap((provider) =>
     Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {}).filter(Boolean));
   const hasKnownForecast = limits.some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk");
-  const stale = staleProviders(snapshot);
+  const stale = staleProviders(snapshot, providers);
   const stalePriority = priority && stale.has(priority.provider);
   const priorityLimit = priority
     ? analytics.providers[priority.provider].limits[priority.limitType]
@@ -442,7 +444,15 @@ function render(snapshot) {
   const analytics = snapshot.analytics;
   const empty = document.getElementById("empty");
   const content = document.getElementById("content");
+  const providers = activeProviders(snapshot);
+  if (!providers.length) {
+    empty.textContent = "연결된 도구가 없습니다. Setup에서 Codex 또는 Claude Code에 로그인한 뒤 다시 확인하세요.";
+    empty.hidden = false;
+    content.hidden = true;
+    return;
+  }
   if (!analytics) {
+    empty.textContent = "분석할 기록이 아직 없습니다. 컴팩트 창에서 새로고침한 뒤 다시 확인하세요.";
     empty.hidden = false;
     content.hidden = true;
     return;
@@ -450,28 +460,41 @@ function render(snapshot) {
   empty.hidden = true;
   content.hidden = false;
   document.getElementById("generated-at").textContent = `${formatDateTime(analytics.generatedAt)} 계산 · 한도 기록 ${analytics.historySampleCount}개 · 토큰 기록 ${analytics.usageRowCount}개`;
-  document.getElementById("alert-count").textContent = String(analytics.alerts.length);
-  const hasKnownForecast = ["codex", "claude"].some((provider) =>
+  const alerts = analytics.alerts.filter((alert) => providers.includes(alert.provider));
+  document.getElementById("alert-count").textContent = String(alerts.length);
+  const hasKnownForecast = providers.some((provider) =>
     Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {})
       .filter(Boolean)
       .some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk"));
-  document.getElementById("alert-detail").textContent = analytics.alerts.length
+  document.getElementById("alert-detail").textContent = alerts.length
     ? "확인 필요"
     : hasKnownForecast ? "위험 알림 없음" : "소진 속도 계산 전";
-  document.getElementById("total-cost").textContent = `$${analytics.costs.estimatedUsd.toFixed(2)}`;
-  document.getElementById("day-change").textContent = formatPercent(analytics.comparison.dayOverDayPercent, true);
-  document.getElementById("day-tokens").textContent = `${formatNumber(analytics.comparison.todayTokens)} vs ${formatNumber(analytics.comparison.yesterdayTokens)} tokens`;
-  document.getElementById("week-change").textContent = formatPercent(analytics.comparison.weekOverWeekPercent, true);
-  document.getElementById("week-tokens").textContent = `${formatNumber(analytics.comparison.currentSevenDaysTokens)} vs ${formatNumber(analytics.comparison.previousSevenDaysTokens)} tokens`;
-  renderDecision(analytics, snapshot);
-  renderDecisionVisuals(analytics, snapshot);
-  renderForecasts(analytics);
-  renderDetections(analytics);
-  renderCosts(analytics);
+  const totalCost = providers.reduce(
+    (total, provider) => total + Number((analytics.costs.providers[provider] && analytics.costs.providers[provider].estimatedUsd) || 0),
+    0,
+  );
+  document.getElementById("total-cost").textContent = `$${totalCost.toFixed(2)}`;
+  // 표시 대상 공급자가 하나면 그 공급자의 비교값만 쓴다. 미표시 공급자가 합계에 섞이면 안 된다.
+  const singleProvider = providers.length === 1 ? analytics.providers[providers[0]] : null;
+  const comparison = (singleProvider && singleProvider.comparison) || analytics.comparison;
+  document.getElementById("day-change").textContent = formatPercent(comparison.dayOverDayPercent, true);
+  document.getElementById("day-tokens").textContent = `${formatNumber(comparison.todayTokens)} vs ${formatNumber(comparison.yesterdayTokens)} tokens`;
+  document.getElementById("week-change").textContent = formatPercent(comparison.weekOverWeekPercent, true);
+  document.getElementById("week-tokens").textContent = `${formatNumber(comparison.currentSevenDaysTokens)} vs ${formatNumber(comparison.previousSevenDaysTokens)} tokens`;
+  renderDecision(analytics, snapshot, providers);
+  renderDecisionVisuals(analytics, snapshot, providers);
+  renderForecasts(analytics, providers);
+  renderDetections(analytics, providers);
+  renderCosts(analytics, providers);
   const recommendations = document.getElementById("recommendations");
   recommendations.replaceChildren();
-  for (const recommendation of analytics.recommendations) {
-    appendListItem(recommendations, recommendation.action, recommendation.priority);
+  const visible = visibleRecommendations(analytics, providers);
+  if (visible.length) {
+    for (const recommendation of visible) {
+      appendListItem(recommendations, recommendation.action, recommendation.priority);
+    }
+  } else {
+    appendListItem(recommendations, "현재 속도를 유지해도 됩니다. 작업량이 달라지면 다시 확인하세요.", "ok");
   }
 }
 
