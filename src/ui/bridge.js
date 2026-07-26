@@ -40,4 +40,5 @@ window.usageApp = {
   completeOnboarding: (skipped) => invoke("complete_onboarding", { skipped }),
   setActivityMonitoring: (enabled) => invoke("set_activity_monitoring", { enabled }),
   setLaunchAtLogin: (enabled) => invoke("set_launch_at_login", { enabled }),
+  setProviderHidden: (provider, hidden) => invoke("set_provider_hidden", { provider, hidden }),
 };

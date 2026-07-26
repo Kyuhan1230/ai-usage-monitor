@@ -45,7 +45,23 @@
           </div>
           <button id="install-hook" type="button">이벤트 연결</button>
         </article>
+
+        <article id="claude-visibility-card" class="check">
+          <div>
+            <h2>이 앱에서 표시</h2>
+            <p id="claude-visibility-detail" class="status-message">확인 중</p>
+          </div>
+          <button id="claude-visibility" class="secondary-action" type="button">확인 중</button>
+        </article>
       </section>
+
+      <article id="codex-visibility-card" class="check" hidden>
+        <div>
+          <h2>Codex를 이 앱에서 표시</h2>
+          <p id="codex-visibility-detail" class="status-message">확인 중</p>
+        </div>
+        <button id="codex-visibility" class="secondary-action" type="button">확인 중</button>
+      </article>
 
       <div id="codex-add-action" class="provider-actions" hidden>
         <button id="codex-add" type="button">Codex도 연결하기</button>

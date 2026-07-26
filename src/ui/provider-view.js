@@ -16,7 +16,20 @@
     return typeof state === "string" ? state : "unknown";
   }
 
+  // 이 앱에서만 숨긴 공급자다. CLI 인증은 그대로이므로 다시 표시하면 즉시 복귀한다.
+  function isHiddenProvider(snapshot, provider) {
+    const list = snapshot && snapshot.hiddenProviders;
+    if (Array.isArray(list)) {
+      return list.includes(provider);
+    }
+    const providers = snapshot && snapshot.providers;
+    return Boolean(providers && providers[provider] && providers[provider].hidden);
+  }
+
   function isActiveProvider(snapshot, provider) {
+    if (isHiddenProvider(snapshot, provider)) {
+      return false;
+    }
     const authState = providerAuthState(snapshot, provider);
     if (authState === "authenticated") {
       return true;
@@ -41,9 +54,10 @@
     return PROVIDERS.filter((provider) => rows.some((row) => row && row.provider === provider));
   }
 
+  // 숨긴 공급자는 과거 이력까지 감춘다. 데이터는 지우지 않으므로 다시 표시하면 그대로 돌아온다.
   function detailProviders(snapshot) {
     const providers = new Set([...activeProviders(snapshot), ...providersWithUsageRows(snapshot)]);
-    return PROVIDERS.filter((provider) => providers.has(provider));
+    return PROVIDERS.filter((provider) => providers.has(provider) && !isHiddenProvider(snapshot, provider));
   }
 
   // 권장 문구도 경고와 같은 기준으로 거른다. 공급자가 없는 healthy 문구는 항상 통과시킨다.
@@ -56,6 +70,7 @@
   return {
     PROVIDERS,
     providerAuthState,
+    isHiddenProvider,
     isActiveProvider,
     activeProviders,
     providersWithUsageRows,

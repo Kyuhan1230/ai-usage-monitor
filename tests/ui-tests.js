@@ -206,6 +206,21 @@ assert.deepStrictEqual(
   "공급자가 없는 healthy 문구는 항상 통과해야 합니다.",
 );
 assert.deepStrictEqual(visibleRecommendations(null, ["codex"]), [], "분석 결과가 없으면 빈 목록이어야 합니다.");
+const hiddenClaude = {
+  hiddenProviders: ["claude"],
+  providers: { codex: { authState: "authenticated" }, claude: { authState: "authenticated" } },
+  codex: { connected: true },
+  claude: { connected: true },
+  analytics: { usage: { rows: [{ provider: "claude", totalTokens: 10 }] } },
+};
+assert.deepStrictEqual(activeProviders(hiddenClaude), ["codex"], "숨긴 공급자는 인증돼 있어도 표시하지 않습니다.");
+assert.deepStrictEqual(detailProviders(hiddenClaude), ["codex"], "숨긴 공급자는 과거 이력도 감춥니다.");
+assert(!setupScript.includes("auth logout"), "이 앱의 숨기기가 CLI 로그아웃을 실행하면 안 됩니다.");
+assert(setupScript.includes("setProviderHidden"), "Setup에서 공급자 표시를 끄고 켤 수 있어야 합니다.");
+assert(bridgeScript.includes('invoke("set_provider_hidden"'), "표시 설정은 전용 command를 사용해야 합니다.");
+assert(setupHtml.includes('id="claude-visibility"') && setupHtml.includes('id="codex-visibility"'), "두 공급자 모두 표시 설정이 필요합니다.");
+assert(rustEntry.includes("fn hidden_providers"), "숨긴 공급자는 로컬 설정으로 보존해야 합니다.");
+assert(rustEntry.includes('!is_hidden("codex")') && rustEntry.includes('!is_hidden("claude")'), "숨긴 공급자는 CLI 수집도 건너뛰어야 합니다.");
 assert(insightsScript.includes("if (visible.length)"), "걸러낸 뒤 남는 문구가 없으면 빈 목록을 남기지 않아야 합니다.");
 assert(compactScript.includes("el.meters.dataset.providerCount"), "Compact 그리드 열 수는 표시 대상 공급자 수에서 파생해야 합니다.");
 assert(/\.meters\[data-provider-count="1"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s.test(compactCss), "공급자가 하나면 카드가 가로 폭을 모두 써야 합니다.");

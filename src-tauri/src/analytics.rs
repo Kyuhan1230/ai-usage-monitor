@@ -115,7 +115,9 @@ fn price(provider: &str, model: &str) -> Option<Price> {
             cache_write: 1.5,
             output: 6.0,
         },
-        "claude" if model.contains("opus-4") || model.contains("opus_4") => Price {
+        // 세대 표기가 바뀌어도 같은 등급이면 그 등급 단가로 계산한다.
+        // `opus-4`만 보던 탓에 `claude-opus-5` 사용량이 비용에서 통째로 빠졌다.
+        "claude" if model.contains("opus") => Price {
             input: 5.0,
             cached: 0.5,
             cache_write: 6.25,
@@ -145,6 +147,20 @@ fn price(provider: &str, model: &str) -> Option<Price> {
             cache_write: 1.0,
             output: 4.0,
         },
+        // 등급은 알지만 세대가 새로 나온 경우 가장 최근에 확인된 같은 등급 단가로 계산한다.
+        "claude" if model.contains("sonnet") => Price {
+            input: 2.0,
+            cached: 0.2,
+            cache_write: 2.5,
+            output: 10.0,
+        },
+        "claude" if model.contains("haiku") => Price {
+            input: 1.0,
+            cached: 0.1,
+            cache_write: 1.25,
+            output: 5.0,
+        },
+        // 단가를 확인하지 못한 등급은 추정하지 않는다. 대신 미집계 모델로 노출한다.
         _ => return None,
     };
     Some(value)
@@ -543,11 +559,23 @@ fn provider_cost(rows: &[UsageRow], provider: &str, today: &str) -> Value {
         .iter()
         .map(|row| row.total_tokens)
         .sum::<u64>();
+    // 가격표에 없는 모델도 감속 안내의 기준이 되어야 하므로 토큰 기준 주력 모델을 따로 고른다.
+    let mut heaviest: Option<(&str, u64)> = None;
+    for row in &provider_rows {
+        if heaviest.is_none_or(|(_, tokens)| row.total_tokens > tokens) {
+            heaviest = Some((row.model.as_str(), row.total_tokens));
+        }
+    }
     let mut priced_tokens = 0_u64;
     let mut cost = 0.0;
     let mut primary: Option<(&UsageRow, f64)> = None;
+    // 단가를 모르는 모델은 비용에서 조용히 사라지므로 이름을 남겨 화면이 알릴 수 있게 한다.
+    let mut unpriced = Vec::<String>::new();
     for row in provider_rows {
         let Some(price) = price(provider, &row.model) else {
+            if row.total_tokens > 0 && !unpriced.iter().any(|name| name == &row.model) {
+                unpriced.push(row.model.clone());
+            }
             continue;
         };
         let value = row_cost(row, price);
@@ -575,8 +603,89 @@ fn provider_cost(rows: &[UsageRow], provider: &str, today: &str) -> Value {
         "totalTokens": total_tokens,
         "pricedTokens": priced_tokens,
         "coveragePercent": (total_tokens > 0).then(|| round(priced_tokens as f64 / total_tokens as f64 * 100.0, 1)),
+        "primaryModel": heaviest.map(|(model, _)| model),
+        "unpricedModels": unpriced,
         "savings": savings
     })
+}
+
+/// 한도가 빠듯할 때 권할 한 단계 아래 모델 등급이다.
+/// 한 번에 최저가로 내리지 않고 Fable → Opus → Sonnet → Haiku 순으로 한 칸씩 낮춘다.
+fn lower_tier_model(provider: &str, model: &str) -> Option<&'static str> {
+    let model = model.to_ascii_lowercase();
+    if provider == "claude" {
+        return if model.contains("fable") {
+            Some("Opus")
+        } else if model.contains("opus") {
+            Some("Sonnet")
+        } else if model.contains("sonnet") {
+            Some("Haiku")
+        } else {
+            None
+        };
+    }
+    // Codex는 등급 이름이 일정하지 않으므로 가격표의 출력 단가로 한 칸 아래를 고른다.
+    let output = price(provider, &model)?.output;
+    if output >= 30.0 {
+        Some("GPT-5.6 Terra")
+    } else if output >= 14.0 {
+        Some("GPT-5.6 Luna")
+    } else if output >= 6.0 {
+        Some("GPT-5.4 mini")
+    } else if output > 1.25 {
+        Some("GPT-5.4 nano")
+    } else {
+        None
+    }
+}
+
+/// 다른 공급자로 작업을 나누라고 권해도 되는지 본다.
+/// 연결돼 있고 모든 한도에 절반 이상 여유가 있을 때만 참이다.
+fn has_headroom(providers: &Value, provider: &str) -> bool {
+    let Some(limits) = providers
+        .get(provider)
+        .and_then(|value| value.get("limits"))
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let mut seen = false;
+    for limit in limits.values() {
+        let Some(remaining) = limit.get("remainingPercent").and_then(Value::as_f64) else {
+            continue;
+        };
+        seen = true;
+        if remaining <= 50.0 {
+            return false;
+        }
+    }
+    seen
+}
+
+/// 한도 압박 상황에서 실제로 할 수 있는 행동을 문장으로 만든다.
+fn relief_advice(providers: &Value, costs: &Value, provider: &str) -> String {
+    let other = if provider == "codex" {
+        "claude"
+    } else {
+        "codex"
+    };
+    let tier = costs
+        .get("providers")
+        .and_then(|value| value.get(provider))
+        .and_then(|value| value.get("primaryModel"))
+        .and_then(Value::as_str)
+        .and_then(|model| lower_tier_model(provider, model));
+    let mut advice = match tier {
+        Some(tier) => format!("모델을 {tier}로 낮추고 reasoning effort도 한 단계 내리세요."),
+        None => "reasoning effort를 한 단계 내리고 큰 작업은 나눠서 진행하세요.".to_string(),
+    };
+    if has_headroom(providers, other) {
+        advice.push_str(&format!(
+            " 남은 큰 작업은 여유가 있는 {}로 나누세요.",
+            provider_label(other)
+        ));
+    }
+    advice
 }
 
 fn provider_label(provider: &str) -> &'static str {
@@ -670,7 +779,20 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                         provider,
                         value: json!({
                             "priority": "critical", "provider": provider, "reason": "critical_limit",
-                            "action": format!("{} {} 한도가 {}% 남았습니다. 큰 작업은 다음 리셋 뒤로 미루고, 지금은 짧은 작업만 진행하세요.", provider_label(provider), limit_label(kind), remaining as i64)
+                            "action": format!("{} {} 한도가 {}% 남았습니다. {}", provider_label(provider), limit_label(kind), remaining as i64, relief_advice(providers, costs, provider))
+                        }),
+                    });
+                } else if remaining <= 25.0 {
+                    // 경고 임계값(25%)에는 대응하는 권장 문구가 없어 다른 공급자의 info 문구가
+                    // 우선 문구 자리를 차지했다. 경고가 뜨는 조건에는 항상 할 일이 있어야 한다.
+                    result.push(Suggestion {
+                        priority: 1,
+                        remaining,
+                        today_tokens,
+                        provider,
+                        value: json!({
+                            "priority": "warning", "provider": provider, "reason": "threshold_warning",
+                            "action": format!("{} {} 한도가 {}% 남았습니다. {}", provider_label(provider), limit_label(kind), remaining as i64, relief_advice(providers, costs, provider))
                         }),
                     });
                 } else if limit.get("forecastStatus").and_then(Value::as_str) == Some("risk")
@@ -1157,6 +1279,96 @@ mod tests {
         assert!(actions.len() <= RECOMMENDATION_LIMIT);
         assert!(actions.iter().any(|item| item["provider"] == "claude"));
         assert!(actions.iter().any(|item| item["provider"] == "codex"));
+    }
+
+    #[test]
+    fn warning_threshold_produces_its_own_recommendation() {
+        // 25% 경고가 뜨는데 권장 문구가 없어 다른 공급자의 info 문구가 대표로 올라오던 회귀.
+        let providers = json!({
+            "claude": {"limits": {"five_hour": {"remainingPercent": 25.0}}},
+            "codex": {"limits": {"five_hour": {"remainingPercent": 80.0}}}
+        });
+        let costs = json!({"providers": {
+            "codex": {
+                "totalTokens": 500_000, "primaryModel": "gpt-5.5",
+                "savings": {"toModel": "gpt-5.6-luna", "estimatedUsd": 0.11, "percent": 60.0}
+            },
+            "claude": {"totalTokens": 90_000, "primaryModel": "claude-opus-5", "savings": Value::Null}
+        }});
+        let actions = recommendations(&providers, &costs, &json!({}));
+        assert_eq!(actions[0]["provider"], "claude");
+        assert_eq!(actions[0]["reason"], "threshold_warning");
+        assert_eq!(actions[0]["priority"], "warning");
+        let text = actions[0]["action"].as_str().unwrap();
+        assert!(
+            text.contains("Sonnet"),
+            "Opus 사용자에게는 Sonnet을 권해야 한다: {text}"
+        );
+        assert!(
+            text.contains("reasoning effort"),
+            "effort 안내가 있어야 한다: {text}"
+        );
+    }
+
+    #[test]
+    fn model_ladder_steps_down_one_tier() {
+        assert_eq!(lower_tier_model("claude", "claude-fable-5"), Some("Opus"));
+        assert_eq!(lower_tier_model("claude", "claude-opus-5"), Some("Sonnet"));
+        assert_eq!(
+            lower_tier_model("claude", "claude-sonnet-4-6"),
+            Some("Haiku")
+        );
+        assert_eq!(
+            lower_tier_model("claude", "claude-haiku-4-5-20251001"),
+            None
+        );
+        assert_eq!(
+            lower_tier_model("codex", "gpt-5.6-sol"),
+            Some("GPT-5.6 Terra")
+        );
+        assert_eq!(lower_tier_model("codex", "gpt-5.4"), Some("GPT-5.6 Luna"));
+        assert_eq!(lower_tier_model("codex", "unknown"), None);
+    }
+
+    #[test]
+    fn offload_is_suggested_only_when_the_other_provider_has_room() {
+        let costs = json!({"providers": {
+            "codex": {"totalTokens": 0, "primaryModel": Value::Null, "savings": Value::Null},
+            "claude": {"totalTokens": 90_000, "primaryModel": "claude-opus-5", "savings": Value::Null}
+        }});
+        let roomy = json!({
+            "claude": {"limits": {"five_hour": {"remainingPercent": 20.0}}},
+            "codex": {"limits": {"five_hour": {"remainingPercent": 90.0}}}
+        });
+        let actions = recommendations(&roomy, &costs, &json!({}));
+        assert!(
+            actions[0]["action"]
+                .as_str()
+                .unwrap()
+                .contains("Codex로 나누세요")
+        );
+
+        // Codex도 빠듯하면 그쪽으로 넘기라고 말하지 않는다.
+        let tight = json!({
+            "claude": {"limits": {"five_hour": {"remainingPercent": 20.0}}},
+            "codex": {"limits": {"five_hour": {"remainingPercent": 30.0}}}
+        });
+        let actions = recommendations(&tight, &costs, &json!({}));
+        let claude = actions
+            .iter()
+            .find(|item| item["provider"] == "claude")
+            .unwrap();
+        assert!(
+            !claude["action"]
+                .as_str()
+                .unwrap()
+                .contains("Codex로 나누세요")
+        );
+
+        // 연결되지 않은 공급자로 나누라고 말하지 않는다.
+        let alone = json!({"claude": {"limits": {"five_hour": {"remainingPercent": 20.0}}}});
+        let actions = recommendations(&alone, &costs, &json!({}));
+        assert!(!actions[0]["action"].as_str().unwrap().contains("나누세요"));
     }
 
     #[test]

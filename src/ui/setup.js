@@ -18,6 +18,11 @@ const laterButton = document.getElementById("setup-later");
 const codexButton = document.getElementById("codex-login");
 const claudeButton = document.getElementById("claude-auth");
 const hookButton = document.getElementById("install-hook");
+const claudeVisibilityButton = document.getElementById("claude-visibility");
+const claudeVisibilityDetail = document.getElementById("claude-visibility-detail");
+const codexVisibilityCard = document.getElementById("codex-visibility-card");
+const codexVisibilityButton = document.getElementById("codex-visibility");
+const codexVisibilityDetail = document.getElementById("codex-visibility-detail");
 const actionMessage = document.getElementById("action-message");
 const checkUpdateButton = document.getElementById("check-update");
 const updateDetail = document.getElementById("update-detail");
@@ -244,8 +249,54 @@ function render(snapshot) {
   completeButton.title = latestView.canComplete
     ? "첫 설정을 마치고 사용량 화면을 엽니다."
     : latestView.incompleteMessage;
+  renderVisibility(snapshot);
   completeButton.hidden = Boolean(setup.onboardingComplete);
   laterButton.hidden = Boolean(setup.onboardingComplete);
+}
+
+// 이 앱의 표시에서만 빼는 설정이다. CLI 로그아웃이 아니라는 점을 문구로 분명히 한다.
+function renderVisibility(snapshot) {
+  const hidden = Array.isArray(snapshot.hiddenProviders) ? snapshot.hiddenProviders : [];
+  const claudeHidden = hidden.includes("claude");
+  claudeVisibilityButton.textContent = claudeHidden ? "다시 표시" : "이 앱에서 숨기기";
+  setStatus(
+    claudeVisibilityDetail,
+    claudeHidden
+      ? "숨김: 이 앱에서만 가립니다. Claude Code 로그인은 그대로이며 기록도 지우지 않습니다."
+      : "표시 중: 숨기면 이 앱에서만 가려집니다. Claude Code 로그인은 유지됩니다.",
+    claudeHidden ? "warning" : "ok",
+  );
+
+  const codexHidden = hidden.includes("codex");
+  codexVisibilityCard.hidden = !codexHidden && !latestView.claudeSectionExpanded;
+  codexVisibilityButton.textContent = codexHidden ? "다시 표시" : "이 앱에서 숨기기";
+  setStatus(
+    codexVisibilityDetail,
+    codexHidden
+      ? "숨김: 이 앱에서만 가립니다. Codex 로그인은 그대로이며 기록도 지우지 않습니다."
+      : "표시 중: 숨기면 이 앱에서만 가려집니다. Codex 로그인은 유지됩니다.",
+    codexHidden ? "warning" : "ok",
+  );
+}
+
+async function toggleProviderVisibility(provider, button) {
+  const hidden = button.textContent !== "다시 표시";
+  button.disabled = true;
+  actionMessage.dataset.kind = "progress";
+  try {
+    await window.usageApp.setProviderHidden(provider, hidden);
+    await refresh(false);
+    actionMessage.dataset.kind = "ok";
+    const name = provider === "codex" ? "Codex" : "Claude Code";
+    actionMessage.textContent = hidden
+      ? `${name}를 이 앱에서 숨겼습니다. CLI 로그인은 그대로입니다.`
+      : `${name}를 다시 표시합니다.`;
+  } catch (error) {
+    actionMessage.dataset.kind = "error";
+    actionMessage.textContent = `표시 설정 변경 실패: ${String(error)}`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function announceProviderChoice(message, headingId) {
@@ -358,6 +409,8 @@ claudeButton.addEventListener("click", () => runProviderAction(claudeButton));
 claudeAddButton.addEventListener("click", chooseClaudeAdd);
 claudeOnlyButton.addEventListener("click", chooseClaudeOnly);
 codexAddButton.addEventListener("click", chooseCodex);
+claudeVisibilityButton.addEventListener("click", () => toggleProviderVisibility("claude", claudeVisibilityButton));
+codexVisibilityButton.addEventListener("click", () => toggleProviderVisibility("codex", codexVisibilityButton));
 hookButton.addEventListener("click", async () => {
   if (!latestView || !latestView.showClaudeHook) {
     return;
