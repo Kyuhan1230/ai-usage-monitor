@@ -78,24 +78,31 @@ function updateCheckTime(value) {
   });
 }
 
+// 지금 실행 중인 버전을 항상 먼저 밝힌다. 어떤 상태든 사용자가 자기 버전을 알 수 있어야 한다.
+function runningVersionPrefix(state) {
+  const current = state.currentVersion ? String(state.currentVersion).replace(/^v/, "") : "";
+  return current ? `v${current} 사용 중` : "현재 버전 확인 불가";
+}
+
 function renderUpdateState(state) {
   const availableVersion = (state.available && state.available.version) || state.availableVersion;
   const checkedAt = updateCheckTime(state.lastSuccessfulCheckAt);
+  const running = runningVersionPrefix(state);
   if (availableVersion) {
     const version = String(availableVersion).replace(/^v/, "");
     updateDetail.textContent = state.lastCheckError
-      ? `v${version} 업데이트 가능 · 마지막 확인 실패: ${state.lastCheckError}`
-      : `v${version} 업데이트 가능 · 마지막 확인 ${checkedAt}`;
+      ? `${running} · v${version} 업데이트 가능 · 마지막 확인 실패: ${state.lastCheckError}`
+      : `${running} · v${version} 업데이트 가능 · 마지막 확인 ${checkedAt}`;
     checkUpdateButton.textContent = `v${version} 업데이트 열기`;
     return;
   }
   checkUpdateButton.textContent = state.lastCheckError ? "다시 확인" : "업데이트 확인";
   if (state.lastCheckError) {
-    updateDetail.textContent = `마지막 업데이트 확인 실패 · ${state.lastCheckError}`;
+    updateDetail.textContent = `${running} · 마지막 업데이트 확인 실패 · ${state.lastCheckError}`;
   } else if (state.lastSuccessfulCheckAt) {
-    updateDetail.textContent = `현재 최신 버전 · 마지막 확인 ${checkedAt}`;
+    updateDetail.textContent = `${running} · 최신 버전입니다 · 마지막 확인 ${checkedAt}`;
   } else {
-    updateDetail.textContent = "아직 업데이트 확인을 완료하지 못했습니다.";
+    updateDetail.textContent = `${running} · 아직 업데이트 확인을 완료하지 못했습니다.`;
   }
 }
 
@@ -327,7 +334,10 @@ async function checkForUpdate() {
     const result = await window.usageApp.checkForUpdate(true);
     await loadUpdateState();
     if (result.status === "up_to_date") {
-      actionMessage.textContent = "현재 최신 버전을 사용하고 있습니다.";
+      const current = result.currentVersion ? String(result.currentVersion).replace(/^v/, "") : "";
+      actionMessage.textContent = current
+        ? `v${current}이 최신 버전입니다.`
+        : "현재 최신 버전을 사용하고 있습니다.";
     } else if (result.status === "available") {
       actionMessage.textContent = "업데이트 안내 창을 열었습니다.";
     } else {

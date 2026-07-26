@@ -260,6 +260,11 @@ assert(setupScript.includes("latestView.canComplete"), "완료 처리는 현재 
 assert(!setupScript.includes("hasAuthenticatedProvider"), "어느 한 공급자 인증만으로 Codex 경로를 완료하면 안 됩니다.");
 assert(setupScript.includes("claudeSectionExpanded: true"), "Claude CTA는 CLI 실행 없이 화면 섹션만 열어야 합니다.");
 assert(setupScript.includes("providerSelectionStatus"), "경로 전환은 보조기술에 상태를 알려야 합니다.");
+assert(setupScript.includes("function runningVersionPrefix"), "업데이트 카드는 실행 중인 버전을 밝혀야 합니다.");
+assert(
+  !/updateDetail.textContent = `현재 최신 버전/.test(setupScript),
+  "최신 상태 문구에 버전이 빠지면 사용자가 자기 버전을 알 수 없습니다.",
+);
 const { deriveSetupView } = require(path.join(ui, "setup-view.js"));
 function setupFixture(codexState, claudeState) {
   return {
