@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Usage Insights</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="insights.css">
+  <link rel="stylesheet" href="theme.css">
 </head>
 <body>
   <main class="page">
@@ -25,28 +27,17 @@
       <section id="decision" class="decision-panel">
         <div class="decision-head">
           <div>
-            <p class="eyebrow">Decision</p>
             <p id="decision-label" class="decision-label">우선 확인할 한도</p>
             <h2 id="decision-title">가장 먼저 소진될 한도를 찾고 있습니다</h2>
           </div>
           <span id="decision-badge" class="decision-badge">확인 중</span>
         </div>
         <p id="decision-detail" class="decision-detail">최근 사용 속도와 다음 리셋 시각을 비교하고 있습니다.</p>
-        <div class="primary-action">
-          <span>지금 할 일</span>
-          <strong id="primary-action">새로고침해 최신 상태를 확인하세요.</strong>
-        </div>
-      </section>
-
-      <section class="panel decision-visuals" aria-labelledby="survival-heading">
-        <div class="panel-head">
-          <div><p class="eyebrow">Survival</p><h2 id="survival-heading">이 속도로 리셋까지 버틸까?</h2></div>
-          <span id="decision-visual-source" class="legend">최우선 한도를 찾는 중</span>
-        </div>
-        <div class="decision-viz-grid">
+        <span id="decision-visual-source" class="legend">최우선 한도를 찾는 중</span>
+        <div class="decision-viz-stack" aria-label="리셋 생존 분석">
           <article class="decision-viz-block" aria-labelledby="timeline-heading">
             <div class="viz-title-row">
-              <h3 id="timeline-heading">고갈 예상과 리셋 시점</h3>
+              <h3 id="timeline-heading">예상 소진과 리셋</h3>
               <span id="timeline-state" class="viz-state">계산 중</span>
             </div>
             <div id="survival-timeline" class="survival-timeline"></div>
@@ -54,12 +45,16 @@
           </article>
           <article class="decision-viz-block" aria-labelledby="slowdown-heading">
             <div class="viz-title-row">
-              <h3 id="slowdown-heading">리셋까지 필요한 속도</h3>
+              <h3 id="slowdown-heading">시간당 사용 속도</h3>
               <span id="slowdown-state" class="viz-state">계산 중</span>
             </div>
             <div id="slowdown-bullet" class="slowdown-bullet"></div>
             <p id="slowdown-summary" class="viz-summary">현재 속도를 리셋까지 유지 가능한 수준과 비교합니다.</p>
           </article>
+        </div>
+        <div class="primary-action">
+          <span>지금 할 일</span>
+          <strong id="primary-action">새로고침해 최신 상태를 확인하세요.</strong>
         </div>
       </section>
 

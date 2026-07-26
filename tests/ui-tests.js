@@ -19,6 +19,9 @@ for (const name of ["compact", "insights", "details", "setup", "update"]) {
   const html = fs.readFileSync(path.join(ui, `${name}.html`), "utf8");
   assert(html.includes('<script src="bridge.js"></script>'));
   assert(html.indexOf('src="bridge.js"') < html.indexOf(`src="${name}.js"`));
+  assert(html.includes('<script src="theme.js"></script>'), `${name} 화면에 공통 테마 초기화가 필요합니다.`);
+  assert(html.includes('<link rel="stylesheet" href="theme.css">'), `${name} 화면에 공통 테마 토큰이 필요합니다.`);
+  assert(html.indexOf('src="theme.js"') < html.indexOf(`href="${name}.css"`), `${name} 테마는 첫 페인트 전에 적용해야 합니다.`);
 }
 
 const packageJson = require("../package.json");
@@ -132,8 +135,10 @@ assert(insightsScript.includes("depletionEventCount"), "원시 표본 수와 실
 assert(insightsScript.includes('limit.forecastStatus === "safe"'), "예측 불가 상태를 안전으로 표시하면 안 됩니다.");
 assert(insightsHtml.includes('id="survival-timeline"'), "리셋 생존 타임라인 영역이 필요합니다.");
 assert(insightsHtml.includes('id="slowdown-bullet"'), "필요 감속률 불릿 차트 영역이 필요합니다.");
+assert(insightsHtml.includes('class="decision-viz-stack"'), "생존 분석 시각화는 하나의 컴팩트한 카드 안에 배치해야 합니다.");
 assert(insightsScript.includes("function renderSurvivalTimeline"), "예상 고갈 범위와 리셋을 같은 축에서 비교해야 합니다.");
 assert(insightsScript.includes("function renderSlowdownBullet"), "현재 속도와 허용 속도를 구조화된 값으로 비교해야 합니다.");
+assert(insightsScript.includes("bullet-current-fill"), "시간당 사용 속도는 하나의 막대그래프로 표시해야 합니다.");
 assert(insightsScript.includes("관찰 기간이 짧아 정확한 감속률은 아직 제시하지 않습니다"), "짧은 관찰 결과를 정확한 처방처럼 표시하면 안 됩니다.");
 assert(insightsScript.includes("수집 횟수보다 잔여량이 변한 기록이 필요합니다"), "표본 수가 충분한 사용자에게 막연히 기록을 더 모으라고 안내하면 안 됩니다.");
 const compactHtml = fs.readFileSync(path.join(ui, "compact.html"), "utf8");
@@ -142,15 +147,15 @@ const compactScript = fs.readFileSync(path.join(ui, "compact.js"), "utf8");
 const detailsHtml = fs.readFileSync(path.join(ui, "details.html"), "utf8");
 const detailsScript = fs.readFileSync(path.join(ui, "details.js"), "utf8");
 const { activeProviders, detailProviders, visibleRecommendations } = require(path.join(ui, "provider-view.js"));
-assert(compactHtml.includes('id="decision"'), "첫 Compact 창에서 고갈 판정을 바로 보여줘야 합니다.");
+assert(compactHtml.includes('id="codex-decision"') && compactHtml.includes('id="claude-decision"'), "각 공급자 카드에서 고갈 판정을 바로 보여줘야 합니다.");
 assert(compactHtml.includes("<title>Usage Compact</title>"), "Compact는 현재 제품명을 유지해야 합니다.");
 assert(insightsHtml.includes("<title>Usage Insights</title>"), "Insights는 현재 제품명을 유지해야 합니다.");
 assert(detailsHtml.includes("<title>Token Details</title>"), "Token Details는 현재 제품명을 유지해야 합니다.");
-assert(compactScript.includes("function renderDecision"), "Compact 창은 분석 결과의 최우선 판정을 렌더링해야 합니다.");
+assert(compactScript.includes("function renderProviderDecision"), "Compact 창은 공급자별 최우선 판정을 렌더링해야 합니다.");
 assert(compactScript.includes("소진 속도 계산 전"), "Compact 창은 속도를 계산하지 못한 상태를 명시해야 합니다.");
 assert(compactScript.includes("최신 사용량 확인 필요"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
 assert(insightsScript.includes("최신 사용량을 확인한 뒤 다시 판단하겠습니다"), "Insights는 오래된 데이터의 판정을 보류해야 합니다.");
-assert(compactScript.includes("el.decision.addEventListener"), "Compact 판정에서 상세 근거로 이동할 수 있어야 합니다.");
+assert(compactScript.includes('el[`${provider}-decision`]'), "공급자별 판정에서 상세 근거로 이동할 수 있어야 합니다.");
 assert(compactHtml.includes('id="no-provider"'), "연결된 공급자가 없을 때 Compact의 중립 상태가 필요합니다.");
 assert(compactScript.includes("activeProviders(snapshot)"), "Compact는 현재 인증된 공급자만 표시해야 합니다.");
 assert(insightsScript.includes("activeProviders(snapshot)"), "Insights는 현재 인증된 공급자만 판정해야 합니다.");
@@ -180,7 +185,7 @@ assert.deepStrictEqual(
   ["codex"],
   "인증 확인 전에는 성공적으로 수집한 기존 공급자만 안전하게 표시합니다.",
 );
-assert(compactScript.includes("visibleRecommendations(analytics, providers)"), "Compact 우선 문구는 인증된 공급자로 걸러야 합니다.");
+assert(compactScript.includes("visibleRecommendations(analytics, [provider])"), "Compact 우선 문구는 현재 공급자로 걸러야 합니다.");
 assert(insightsScript.includes("visibleRecommendations(analytics, providers)"), "Insights 권장 문구는 인증된 공급자로 걸러야 합니다.");
 assert(!/analytics\.recommendations\[0\]/.test(compactScript + insightsScript), "거르지 않은 권장 문구를 그대로 대표 문구로 쓰면 안 됩니다.");
 const mixedRecommendations = {
@@ -240,17 +245,46 @@ assert(/\.meters\s*\{[^}]*overflow:\s*visible/s.test(compactCss), "확대 시 �
 assert(compactCss.includes("--compact-font-body: 13px"), "Compact 기본 본문 글꼴 토큰이 필요합니다.");
 assert(compactCss.includes("--compact-font-title: 18px"), "Compact 기본 제목 글꼴 토큰이 필요합니다.");
 assert(compactCss.includes("--compact-font-meta: 12px"), "Compact 기본 보조 글꼴 토큰이 필요합니다.");
-assert(compactCss.includes("@media (max-width: 679px) and (max-height: 560px)"), "세로 카드의 중간 높이 밀도 단계가 필요합니다.");
+assert(compactCss.includes("@media (max-width: 499px) and (max-height: 560px)"), "세로 카드의 중간 높이 밀도 단계가 필요합니다.");
 assert(compactCss.includes("@media (max-height: 520px)"), "Compact 기본 높이를 포함하는 밀도 단계가 필요합니다.");
 assert(compactCss.includes("--compact-font-body: 12px"), "낮은 Compact 창은 본문 글꼴을 단계적으로 줄여야 합니다.");
 assert(compactCss.includes("--compact-font-title: 16px"), "낮은 Compact 창은 제목 글꼴을 단계적으로 줄여야 합니다.");
 assert(compactCss.includes("--compact-font-meta: 11px"), "Compact 보조 글꼴은 11px 아래로 줄이면 안 됩니다.");
 assert(compactCss.includes("--compact-control-height: 28px"), "낮은 Compact 창에서도 조작 높이는 28px 이상이어야 합니다.");
-assert(/\.decision-strip strong\s*\{[^}]*overflow:\s*hidden/s.test(compactCss), "결정 안내에 중첩 스크롤이 생기면 안 됩니다.");
+assert(!/\.provider-decision\s*\{[^}]*(?:overflow:\s*(?:auto|scroll))/s.test(compactCss), "공급자 결정 안내에 중첩 스크롤이 생기면 안 됩니다.");
 assert(!/\bzoom\s*:|transform\s*:\s*scale/i.test(compactCss), "Compact 화면 전체를 강제로 축소하면 안 됩니다.");
 assert(compactHtml.includes('id="resize-grip"'), "프레임 없는 Compact 창에 크기 조절 손잡이가 필요합니다.");
 assert(bridgeScript.includes('startResizeDragging("SouthEast")'), "Compact 크기 조절은 Tauri 창 API를 사용해야 합니다.");
 assert(compactCss.includes("@media (max-width: 340px)"), "Compact 창에 최소 폭 레이아웃이 필요합니다.");
+assert(compactCss.includes("@media (min-width: 500px)"), "Compact 기본 화면은 공급자 카드를 좌우로 배치해야 합니다.");
+assert(compactCss.includes("@media (max-width: 499px)"), "좁은 Compact 화면은 공급자 카드를 한 열로 전환해야 합니다.");
+for (const id of ["codex-decision", "claude-decision"]) {
+  assert(compactHtml.includes(`id="${id}"`) && compactHtml.includes('aria-live="polite"'), `공급자별 메시지 누락: ${id}`);
+}
+assert(compactHtml.includes('class="provider-icon"'), "각 공급자 카드에 단색 아이콘이 필요합니다.");
+assert.strictEqual((compactHtml.match(/class="scope-visual"/g) || []).length, 4, "각 한도의 포함 범위를 미니 스케일로 표시해야 합니다.");
+assert.strictEqual((compactHtml.match(/class="limit-meta"/g) || []).length, 2, "리셋과 갱신 시각은 카드마다 한 줄로 묶어야 합니다.");
+assert(compactCss.includes('.limit-name[data-scope="long"] .scope-visual i'), "단기와 장기 한도의 시각적 범위를 구분해야 합니다.");
+assert(compactScript.includes('dataset.level = level(percent)'), "잔여 퍼센트 숫자에 임계값 상태를 표시해야 합니다.");
+assert(compactScript.includes("alert.provider === provider"), "공급자 메시지는 해당 공급자의 판정만 사용해야 합니다.");
+assert(compactCss.includes('background: var(--bar-fill)'), "막대 채움은 중성 명암 토큰을 사용해야 합니다.");
+assert(!compactScript.includes('setProperty("--tone"'), "막대에 상태색을 직접 적용하면 안 됩니다.");
+const themeScript = fs.readFileSync(path.join(ui, "theme.js"), "utf8");
+const themeCss = fs.readFileSync(path.join(ui, "theme.css"), "utf8");
+assert(themeScript.includes("ai-usage-monitor-theme"), "테마 선택은 로컬에 보존해야 합니다.");
+assert(themeScript.includes('new Set(["dark", "light"])'), "테마 값은 dark와 light만 허용해야 합니다.");
+assert(themeScript.includes('window.addEventListener("storage"'), "열린 창 사이에서 테마 변경을 동기화해야 합니다.");
+assert(themeCss.includes(':root[data-theme="light"]'), "라이트 테마 토큰이 필요합니다.");
+assert(themeCss.includes("--claude: #d97757"), "Claude 식별색은 브랜드의 주황 계열이어야 합니다.");
+assert(compactCss.includes("color: var(--provider)"), "공급자 메시지 헤더는 아이콘과 같은 식별색을 사용해야 합니다.");
+for (const stylesheet of [setupCss, insightsCss, detailsCss, updateCss]) {
+  assert(stylesheet.includes("var(--page-padding)") || stylesheet.includes("var(--card-padding)"), "내부 화면은 공통 간격 토큰을 사용해야 합니다.");
+}
+assert(setupHtml.includes('id="theme-select"'), "설정 화면에 테마 선택 컨트롤이 필요합니다.");
+assert(setupScript.includes("window.usageTheme.setTheme"), "설정에서 선택한 테마를 즉시 적용해야 합니다.");
+assert(/\.checks\[aria-label="도구 연결"\]\s*\{[^}]*grid-template-columns:\s*repeat\(2/s.test(setupCss), "Setup의 Codex와 Claude 연결 영역은 좌우 2열이어야 합니다.");
+assert(!setupHtml.includes('id="hook-card"') && !setupHtml.includes('id="install-hook"'), "자동 연결되는 Claude statusLine 설정을 Setup UI에 노출하면 안 됩니다.");
+assert(setupScript.includes("ensureClaudeUsageHook") && bridgeScript.includes("ensureClaudeHook"), "Claude statusLine은 기존 설정을 덮어쓰지 않는 방식으로 자동 연결해야 합니다.");
 for (const [name, stylesheet] of [
   ["Insights", insightsCss],
   ["Details", detailsCss],
@@ -268,7 +302,7 @@ for (const id of ["setup-later", "setup-complete", "refresh", "collect"]) {
 assert(setupScript.includes("refresh(false);"), "Setup 첫 진입은 사용량 수집 없이 설치·인증 상태만 확인해야 합니다.");
 assert(setupScript.trimEnd().endsWith("loadUpdateState();"), "Setup 첫 진입은 마지막 업데이트 확인 상태도 불러와야 합니다.");
 assert(setupHtml.includes('src="setup-view.js"'), "Setup은 상태 전이를 순수 계산 모듈로 분리해야 합니다.");
-assert(setupHtml.includes('id="claude-section"') && setupHtml.includes('id="hook-card"'), "Claude 카드와 hook 카드는 별도 섹션으로 제어해야 합니다.");
+assert(setupHtml.includes('id="claude-section"'), "Claude 연결 카드는 독립 섹션으로 제어해야 합니다.");
 assert(setupHtml.includes('id="claude-add"') && setupHtml.includes('id="claude-only"') && setupHtml.includes('id="codex-add"'), "Codex·Claude 전용 경로 CTA가 필요합니다.");
 assert(setupScript.includes("deriveSetupView"), "Setup 렌더링은 상태 전이표를 사용해야 합니다.");
 assert(setupScript.includes("latestView.canComplete"), "완료 처리는 현재 Setup 경로의 인증 조건을 사용해야 합니다.");
@@ -296,12 +330,12 @@ assert.strictEqual(codexFirst.canComplete, false);
 const codexOnly = deriveSetupView(setupFixture("authenticated", "unauthenticated"));
 assert.deepStrictEqual(
   [codexOnly.setupMode, codexOnly.claudeSectionExpanded, codexOnly.canComplete, codexOnly.completionLabel],
-  ["codex", false, true, "Codex 시작하기"],
+  ["codex", false, true, "사용량 화면 열기"],
 );
 const claudeOnly = deriveSetupView(setupFixture("unauthenticated", "authenticated"));
 assert.deepStrictEqual(
   [claudeOnly.setupMode, claudeOnly.claudeSectionExpanded, claudeOnly.canComplete, claudeOnly.completionLabel],
-  ["claudeOnly", true, true, "Claude 시작하기"],
+  ["claudeOnly", true, true, "사용량 화면 열기"],
 );
 const both = deriveSetupView(setupFixture("authenticated", "authenticated"));
 assert.deepStrictEqual(

@@ -23,7 +23,7 @@ body {
 
 .update-card {
   min-height: 100vh;
-  padding: clamp(16px, 5vw, 28px);
+  padding: var(--page-padding);
 }
 
 .eyebrow {
@@ -57,9 +57,9 @@ h1 {
 .progress-section,
 .error-message {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   background: var(--panel);
-  padding: 12px 14px;
+  padding: var(--card-padding);
 }
 
 .release-details summary {
@@ -101,14 +101,14 @@ footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 12px;
 }
 
 button {
   min-width: 92px;
   min-height: 36px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--control-radius);
   background: #242d3a;
   color: var(--text);
   padding: 0 16px;

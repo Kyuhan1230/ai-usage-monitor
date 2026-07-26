@@ -24,9 +24,9 @@ body {
 }
 
 .setup {
-  max-width: 720px;
+  max-width: 680px;
   margin: 0 auto;
-  padding: clamp(14px, 4vw, 28px);
+  padding: var(--page-padding);
 }
 
 .eyebrow {
@@ -43,7 +43,7 @@ h1 {
 }
 
 .summary {
-  margin: 8px 0 22px;
+  margin: 6px 0 18px;
   color: var(--muted);
   line-height: 1.45;
 }
@@ -56,16 +56,45 @@ h1 {
 
 .checks {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+}
+
+.checks[aria-label="도구 연결"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.checks[aria-label="도구 연결"] #codex-card,
+.checks[aria-label="도구 연결"] #codex-visibility-card,
+.checks[aria-label="도구 연결"] #codex-add-action {
+  grid-column: 1;
+}
+
+.checks[aria-label="도구 연결"] #codex-card {
+  grid-row: 1;
+}
+
+.checks[aria-label="도구 연결"] #claude-actions,
+.checks[aria-label="도구 연결"] #claude-section {
+  grid-column: 2;
+}
+
+.checks[aria-label="도구 연결"] #claude-actions,
+.checks[aria-label="도구 연결"] #claude-section {
+  grid-row: 1 / span 4;
+}
+
+.checks[aria-label="도구 연결"] .provider-actions {
+  align-self: start;
 }
 
 .common-checks {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .provider-section {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .provider-actions {
@@ -83,12 +112,12 @@ h1 {
 .check {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   background: var(--panel);
-  padding: 14px;
+  padding: var(--card-padding);
 }
 
 .check > div {
@@ -118,6 +147,9 @@ h2[tabindex="-1"] {
   outline: none;
 }
 
+#codex-heading { color: var(--codex); }
+#claude-heading { color: var(--claude); }
+
 p {
   margin: 0;
   color: var(--muted);
@@ -139,9 +171,10 @@ p {
 
 button,
 .badge,
-.toggle {
+.toggle,
+select {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: var(--panel-2);
   color: var(--text);
   min-height: 32px;
@@ -151,6 +184,22 @@ button,
 
 button {
   cursor: pointer;
+}
+
+.select-control select {
+  min-width: 112px;
+  cursor: pointer;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 button:hover {
@@ -187,14 +236,14 @@ button:focus-visible {
 footer {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 16px;
+  gap: 8px;
+  margin-top: 12px;
   position: sticky;
   bottom: 0;
   z-index: 2;
   border-top: 1px solid var(--line);
   background: var(--bg);
-  padding: 12px 0 4px;
+  padding: 8px 0 0;
 }
 
 .onboarding-actions,
@@ -219,6 +268,19 @@ footer {
 }
 
 @media (max-width: 620px) {
+  .checks[aria-label="도구 연결"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checks[aria-label="도구 연결"] #codex-card,
+  .checks[aria-label="도구 연결"] #codex-visibility-card,
+  .checks[aria-label="도구 연결"] #codex-add-action,
+  .checks[aria-label="도구 연결"] #claude-actions,
+  .checks[aria-label="도구 연결"] #claude-section {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
   footer {
     align-items: stretch;
     flex-direction: column;

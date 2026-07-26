@@ -1,11 +1,10 @@
 "use strict";
 
-// 설치, 로그인, 설정 변경은 모두 명시적인 사용자 동작으로만 실행한다.
+// 설치와 로그인은 사용자 동작으로 실행하고, 앱 전용 Claude hook은 기존 사용자 설정을 덮어쓰지 않는 범위에서 자동 연결한다.
 
 const { deriveSetupView } = window.usageSetupView;
 const codexDetail = document.getElementById("codex-detail");
 const claudeDetail = document.getElementById("claude-detail");
-const hookDetail = document.getElementById("hook-detail");
 const detailsDetail = document.getElementById("details-detail");
 const startupDetail = document.getElementById("startup-detail");
 const monitoringDetail = document.getElementById("monitoring-detail");
@@ -17,7 +16,6 @@ const completeButton = document.getElementById("setup-complete");
 const laterButton = document.getElementById("setup-later");
 const codexButton = document.getElementById("codex-login");
 const claudeButton = document.getElementById("claude-auth");
-const hookButton = document.getElementById("install-hook");
 const claudeVisibilityButton = document.getElementById("claude-visibility");
 const claudeVisibilityDetail = document.getElementById("claude-visibility-detail");
 const codexVisibilityCard = document.getElementById("codex-visibility-card");
@@ -31,19 +29,25 @@ const claudeActions = document.getElementById("claude-actions");
 const claudeAddButton = document.getElementById("claude-add");
 const claudeOnlyButton = document.getElementById("claude-only");
 const claudeSection = document.getElementById("claude-section");
-const hookCard = document.getElementById("hook-card");
 const codexAddAction = document.getElementById("codex-add-action");
 const codexAddButton = document.getElementById("codex-add");
 const setupHeadline = document.getElementById("setup-headline");
 const setupSummary = document.getElementById("setup-summary");
 const providerSelectionStatus = document.getElementById("provider-selection-status");
+const themeSelect = document.getElementById("theme-select");
 
 let latestSnapshot = null;
 let latestView = null;
+let hookEnsureAttempted = false;
 let windowIntent = {
   setupMode: null,
   claudeSectionExpanded: false,
 };
+
+themeSelect.value = window.usageTheme.readTheme();
+themeSelect.addEventListener("change", () => {
+  themeSelect.value = window.usageTheme.setTheme(themeSelect.value);
+});
 
 function isFresh(ageMs) {
   return Number.isFinite(ageMs) && ageMs <= 10 * 60 * 1000;
@@ -220,10 +224,6 @@ function render(snapshot) {
   configureProviderButton(codexButton, "codex", codexState === "ready", codexAuth.state);
   configureProviderButton(claudeButton, "claude", claudeState === "ready", claudeAuth.state);
 
-  hookDetail.textContent = claude.hookInstalled
-    ? "연결됨: Claude 사용 중 statusLine 이벤트로 최신 값이 로컬에 기록됩니다."
-    : "선택: Claude Code 사용 중 최신 사용량을 받는 로컬 이벤트 연결입니다.";
-  hookButton.disabled = !latestView.showClaudeHook;
   detailsDetail.textContent = "정상: 별도 서버 없이 로컬 세션 파일에서 모델·날짜별 토큰을 표시합니다.";
   startupDetail.textContent = snapshot.launchAtLogin
     ? "켜짐: 앱만 시작하며 사용량 CLI는 상주시켜 두지 않습니다."
@@ -238,7 +238,6 @@ function render(snapshot) {
   setupSummary.textContent = latestView.summary;
   codexCard.hidden = !latestView.showCodexCard;
   claudeSection.hidden = !latestView.claudeSectionExpanded;
-  hookCard.hidden = !latestView.showClaudeHook;
   claudeAddButton.hidden = !latestView.showClaudeAddAction;
   claudeOnlyButton.hidden = !latestView.showClaudeOnlyAction;
   claudeActions.hidden = claudeAddButton.hidden && claudeOnlyButton.hidden;
@@ -318,7 +317,7 @@ function chooseClaudeAdd() {
     claudeSectionExpanded: true,
   };
   render(latestSnapshot);
-  announceProviderChoice("Claude Code 연결 옵션을 열었습니다. Codex 인증을 완료하면 Codex로 시작할 수 있습니다.", "claude-heading");
+  announceProviderChoice("Claude Code 연결 영역을 열었습니다.", "claude-heading");
 }
 
 function chooseClaudeOnly() {
@@ -330,7 +329,7 @@ function chooseClaudeOnly() {
     claudeSectionExpanded: true,
   };
   render(latestSnapshot);
-  announceProviderChoice("Claude Code 전용 경로를 선택했습니다. Claude 인증을 완료하면 시작할 수 있습니다.", "claude-heading");
+  announceProviderChoice("Claude Code를 사용할 도구로 선택했습니다.", "claude-heading");
 }
 
 function chooseCodex() {
@@ -342,7 +341,24 @@ function chooseCodex() {
     claudeSectionExpanded: Boolean(latestView && latestView.claudeSectionExpanded),
   };
   render(latestSnapshot);
-  announceProviderChoice("Codex 기본 경로로 전환했습니다. Codex 인증을 완료하면 시작할 수 있습니다.", "codex-heading");
+  announceProviderChoice("Codex CLI를 사용할 도구로 선택했습니다.", "codex-heading");
+}
+
+async function ensureClaudeUsageHook(snapshot) {
+  const setup = snapshot.setup || {};
+  const authenticated = setup.claudeAuth && setup.claudeAuth.state === "authenticated";
+  if (hookEnsureAttempted || !authenticated || (snapshot.claude && snapshot.claude.hookInstalled)) {
+    return snapshot;
+  }
+  hookEnsureAttempted = true;
+  try {
+    const result = await window.usageApp.ensureClaudeHook();
+    return result && result.status !== "replacement_required"
+      ? await window.usageApp.setupSnapshot()
+      : snapshot;
+  } catch (_error) {
+    return snapshot;
+  }
 }
 
 async function refresh(collectUsage = false) {
@@ -353,9 +369,10 @@ async function refresh(collectUsage = false) {
     ? "연결된 도구의 사용량을 한 번씩 확인하는 중입니다."
     : "설치 및 로그인 상태를 확인하는 중입니다.";
   try {
-    const snapshot = collectUsage
+    let snapshot = collectUsage
       ? await window.usageApp.refreshSetupSnapshot()
       : await window.usageApp.setupSnapshot();
+    snapshot = await ensureClaudeUsageHook(snapshot);
     render(snapshot);
     actionMessage.dataset.kind = "ok";
     actionMessage.textContent = collectUsage ? "사용량 확인을 마쳤습니다." : "설치 및 로그인 상태를 확인했습니다.";
@@ -411,18 +428,6 @@ claudeOnlyButton.addEventListener("click", chooseClaudeOnly);
 codexAddButton.addEventListener("click", chooseCodex);
 claudeVisibilityButton.addEventListener("click", () => toggleProviderVisibility("claude", claudeVisibilityButton));
 codexVisibilityButton.addEventListener("click", () => toggleProviderVisibility("codex", codexVisibilityButton));
-hookButton.addEventListener("click", async () => {
-  if (!latestView || !latestView.showClaudeHook) {
-    return;
-  }
-  try {
-    await window.usageApp.installClaudeHook();
-    await refresh(false);
-  } catch (error) {
-    actionMessage.dataset.kind = "error";
-    actionMessage.textContent = `이벤트 연결 실패: ${String(error)}`;
-  }
-});
 document.getElementById("open-details").addEventListener("click", () => window.usageApp.openDetails());
 launchAtLogin.addEventListener("change", async () => {
   await window.usageApp.setLaunchAtLogin(launchAtLogin.checked);
