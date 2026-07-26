@@ -26,7 +26,7 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.4");
+assert.strictEqual(packageJson.version, "1.2.5");
 assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
