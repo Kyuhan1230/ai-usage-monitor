@@ -35,6 +35,7 @@ const setupHeadline = document.getElementById("setup-headline");
 const setupSummary = document.getElementById("setup-summary");
 const providerSelectionStatus = document.getElementById("provider-selection-status");
 const themeSelect = document.getElementById("theme-select");
+const languageSelect = document.getElementById("language-select");
 
 let latestSnapshot = null;
 let latestView = null;
@@ -47,6 +48,10 @@ let windowIntent = {
 themeSelect.value = window.usageTheme.readTheme();
 themeSelect.addEventListener("change", () => {
   themeSelect.value = window.usageTheme.setTheme(themeSelect.value);
+});
+languageSelect.value = window.usageLanguage.readLanguage();
+languageSelect.addEventListener("change", () => {
+  languageSelect.value = window.usageLanguage.setLanguage(languageSelect.value);
 });
 
 function isFresh(ageMs) {
@@ -79,7 +84,7 @@ function updateCheckTime(value) {
   if (!checkedAt || Number.isNaN(checkedAt.getTime())) {
     return "확인 기록 없음";
   }
-  return checkedAt.toLocaleString("ko-KR", {
+  return checkedAt.toLocaleString(window.usageLanguage.locale(), {
     month: "numeric",
     day: "numeric",
     hour: "numeric",

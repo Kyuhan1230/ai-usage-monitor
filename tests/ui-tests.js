@@ -20,6 +20,7 @@ for (const name of ["compact", "insights", "details", "setup", "update"]) {
   assert(html.includes('<script src="bridge.js"></script>'));
   assert(html.indexOf('src="bridge.js"') < html.indexOf(`src="${name}.js"`));
   assert(html.includes('<script src="theme.js"></script>'), `${name} 화면에 공통 테마 초기화가 필요합니다.`);
+  assert(html.includes('<script src="language.js"></script>'), `${name} 화면에 공통 언어 초기화가 필요합니다.`);
   assert(html.includes('<link rel="stylesheet" href="theme.css">'), `${name} 화면에 공통 테마 토큰이 필요합니다.`);
   assert(html.indexOf('src="theme.js"') < html.indexOf(`href="${name}.css"`), `${name} 테마는 첫 페인트 전에 적용해야 합니다.`);
 }
@@ -270,12 +271,18 @@ assert(compactScript.includes("alert.provider === provider"), "공급자 메시�
 assert(compactCss.includes('background: var(--bar-fill)'), "막대 채움은 중성 명암 토큰을 사용해야 합니다.");
 assert(!compactScript.includes('setProperty("--tone"'), "막대에 상태색을 직접 적용하면 안 됩니다.");
 const themeScript = fs.readFileSync(path.join(ui, "theme.js"), "utf8");
+const languageScript = fs.readFileSync(path.join(ui, "language.js"), "utf8");
 const themeCss = fs.readFileSync(path.join(ui, "theme.css"), "utf8");
 assert(themeScript.includes("ai-usage-monitor-theme"), "테마 선택은 로컬에 보존해야 합니다.");
 assert(themeScript.includes('new Set(["dark", "light"])'), "테마 값은 dark와 light만 허용해야 합니다.");
 assert(themeScript.includes('window.addEventListener("storage"'), "열린 창 사이에서 테마 변경을 동기화해야 합니다.");
 assert(themeCss.includes(':root[data-theme="light"]'), "라이트 테마 토큰이 필요합니다.");
 assert(themeCss.includes("--claude: #d97757"), "Claude 식별색은 브랜드의 주황 계열이어야 합니다.");
+assert(languageScript.includes("ai-usage-monitor-language"), "언어 선택은 로컬에 보존해야 합니다.");
+assert(languageScript.includes('new Set(["ko", "en"])'), "지원 언어는 한국어와 영어로 제한해야 합니다.");
+assert(languageScript.includes("MutationObserver"), "동적으로 갱신되는 상태 문구에도 선택 언어를 적용해야 합니다.");
+assert(setupHtml.includes('id="language-select"'), "설정 화면에 언어 선택 컨트롤이 필요합니다.");
+assert(setupScript.includes("window.usageLanguage.setLanguage"), "설정에서 선택한 언어를 즉시 적용해야 합니다.");
 assert(compactCss.includes("color: var(--provider)"), "공급자 메시지 헤더는 아이콘과 같은 식별색을 사용해야 합니다.");
 for (const stylesheet of [setupCss, insightsCss, detailsCss, updateCss]) {
   assert(stylesheet.includes("var(--page-padding)") || stylesheet.includes("var(--card-padding)"), "내부 화면은 공통 간격 토큰을 사용해야 합니다.");

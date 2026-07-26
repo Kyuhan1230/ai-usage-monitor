@@ -18,7 +18,7 @@ const ALERT_REASON_LABELS = {
 };
 
 function formatNumber(value) {
-  return Number.isFinite(value) ? new Intl.NumberFormat("ko-KR").format(value) : "--";
+  return Number.isFinite(value) ? new Intl.NumberFormat(window.usageLanguage.locale()).format(value) : "--";
 }
 
 function formatPercent(value, signed = false) {
@@ -38,7 +38,7 @@ function formatDateTime(value) {
   if (!Number.isFinite(timestamp)) {
     return "예측 불가";
   }
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat(window.usageLanguage.locale(), {
     timeZone: "Asia/Seoul",
     month: "numeric",
     day: "numeric",
