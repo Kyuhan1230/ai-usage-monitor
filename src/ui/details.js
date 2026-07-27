@@ -9,7 +9,7 @@ let allRows = [];
 let selectedProvider = "all";
 
 function formatNumber(value) {
-  return new Intl.NumberFormat("ko-KR").format(Number(value || 0));
+  return new Intl.NumberFormat(window.usageLanguage.locale()).format(Number(value || 0));
 }
 
 function cell(text, className = "") {

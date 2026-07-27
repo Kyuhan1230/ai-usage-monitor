@@ -25,14 +25,7 @@ window.usageApp = {
     channel.onmessage = onProgress;
     return invoke("install_update", { expectedVersion, onProgress: channel });
   },
-  installClaudeHook: async () => {
-    const first = await invoke("install_claude_hook", { force: false });
-    if (first.status !== "replacement_required") {
-      return first;
-    }
-    const approved = window.confirm(`기존 Claude statusLine 명령을 백업하고 교체할까요?\n\n${first.existingCommand}`);
-    return approved ? invoke("install_claude_hook", { force: true }) : first;
-  },
+  ensureClaudeHook: () => invoke("install_claude_hook", { force: false }),
   openCodexLogin: () => invoke("open_login_terminal", { provider: "codex" }),
   openClaudeAuth: () => invoke("open_login_terminal", { provider: "claude" }),
   installProvider: (provider) => invoke("open_install_terminal", { provider }),

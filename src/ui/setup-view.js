@@ -58,18 +58,15 @@
       claudeSectionExpanded,
       canComplete,
       showCodexCard: mode === "codex",
-      showClaudeHook: claudeSectionExpanded && claudeAuthenticated,
       showClaudeAddAction: mode === "codex" && !claudeSectionExpanded,
       showClaudeOnlyAction: mode === "codex" && !canComplete,
       showCodexAddAction: mode === "claudeOnly",
-      headline: mode === "claudeOnly" ? "Claude Code 사용량을 확인하세요" : "Codex 사용량을 확인하세요",
-      summary: mode === "claudeOnly"
-        ? "Claude Code만 사용한다면 여기서 시작할 수 있습니다. 필요하면 Codex도 나중에 연결할 수 있습니다."
-        : "Claude Code 연결은 선택 사항입니다. Codex 사용량 확인부터 시작하세요.",
-      completionLabel: mode === "claudeOnly" ? "Claude 시작하기" : "Codex 시작하기",
+      headline: "사용할 도구를 연결하세요",
+      summary: "Codex CLI와 Claude Code 중 사용하는 도구 하나만 연결해도 시작할 수 있습니다.",
+      completionLabel: "사용량 화면 열기",
       incompleteMessage: mode === "claudeOnly"
-        ? "Claude Code에 로그인해 시작하세요."
-        : "Codex에 로그인해 시작하세요. Claude Code만 사용한다면 아래에서 선택할 수 있습니다.",
+        ? "사용할 Claude Code에 로그인하세요."
+        : "Codex CLI에 로그인하거나 Claude Code를 사용할 도구로 선택하세요.",
     };
   }
 

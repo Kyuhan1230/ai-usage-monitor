@@ -18,7 +18,7 @@ const ALERT_REASON_LABELS = {
 };
 
 function formatNumber(value) {
-  return Number.isFinite(value) ? new Intl.NumberFormat("ko-KR").format(value) : "--";
+  return Number.isFinite(value) ? new Intl.NumberFormat(window.usageLanguage.locale()).format(value) : "--";
 }
 
 function formatPercent(value, signed = false) {
@@ -38,7 +38,7 @@ function formatDateTime(value) {
   if (!Number.isFinite(timestamp)) {
     return "예측 불가";
   }
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat(window.usageLanguage.locale(), {
     timeZone: "Asia/Seoul",
     month: "numeric",
     day: "numeric",
@@ -222,16 +222,16 @@ function renderSlowdownBullet(candidate, snapshot) {
   const currentPosition = Math.min(100, current / maximum * 100);
   const track = document.createElement("div");
   track.className = "bullet-track";
-  const safeZone = document.createElement("div");
-  safeZone.className = "bullet-safe-zone";
-  safeZone.style.width = `${safePosition}%`;
+  const currentFill = document.createElement("div");
+  currentFill.className = `bullet-current-fill ${current > safe ? "risk" : ""}`.trim();
+  currentFill.style.width = `${currentPosition}%`;
   const targetMarker = document.createElement("div");
   targetMarker.className = "bullet-marker target";
   targetMarker.style.left = `${safePosition}%`;
   const currentMarker = document.createElement("div");
   currentMarker.className = `bullet-marker current ${current > safe ? "risk" : ""}`.trim();
   currentMarker.style.left = `${currentPosition}%`;
-  track.append(safeZone, targetMarker, currentMarker);
+  track.append(currentFill, targetMarker, currentMarker);
   const labels = document.createElement("div");
   labels.className = "bullet-labels";
   const targetLabel = document.createElement("span");
@@ -247,8 +247,8 @@ function renderSlowdownBullet(candidate, snapshot) {
     setVizState("slowdown-state", "참고용 비교", "unknown");
     summary.textContent = `최근 평균은 ${formatRate(current)}입니다. 관찰 기간이 짧아 정확한 감속률은 아직 제시하지 않습니다.`;
   } else if (reduction > 0) {
-    setVizState("slowdown-state", `최소 약 ${Math.ceil(reduction / 5) * 5}% 감속`, "risk");
-    summary.textContent = `최근 속도를 약 ${Math.ceil(reduction / 5) * 5}% 낮추면 다음 리셋까지 한도를 유지할 가능성이 커집니다.`;
+    setVizState("slowdown-state", `현재가 허용 속도의 ${(current / safe).toFixed(1)}배`, "risk");
+    summary.textContent = `현재 막대를 허용선 아래로 낮추세요 · 약 ${Math.ceil(reduction / 5) * 5}% 감속 필요`;
   } else {
     setVizState("slowdown-state", "감속 불필요", "safe");
     summary.textContent = "현재 속도라면 다음 리셋까지 한도를 유지할 가능성이 큽니다.";
@@ -288,6 +288,7 @@ function renderForecasts(analytics, providers) {
       }
       const card = document.createElement("article");
       card.className = "forecast";
+      card.dataset.provider = provider;
       const head = document.createElement("div");
       head.className = "forecast-head";
       const title = document.createElement("strong");
@@ -401,6 +402,11 @@ function renderDecision(analytics, snapshot, providers) {
     : null;
 
   panel.className = "decision-panel";
+  const exhaustionLatest = priorityLimit ? Date.parse(priorityLimit.expectedExhaustionLatestAt) : NaN;
+  const resetAt = priorityLimit ? Date.parse(priorityLimit.resetAt) : NaN;
+  const reduction = priorityLimit && Number.isFinite(priorityLimit.requiredReductionPercent)
+    ? Math.ceil(priorityLimit.requiredReductionPercent / 5) * 5
+    : null;
   if (stalePriority || (!priority && stale.size)) {
     badge.textContent = "판정 보류";
     title.textContent = "최신 사용량을 확인한 뒤 다시 판단하겠습니다";
@@ -410,9 +416,13 @@ function renderDecision(analytics, snapshot, providers) {
     title.textContent = `${PROVIDER_LABELS[critical.provider]} ${LIMIT_LABELS[critical.limitType] || critical.limitType} 한도가 거의 소진됐습니다`;
   } else if (warning) {
     panel.classList.add("warning");
-    badge.textContent = warning.reason === "forecast_before_reset" ? "리셋 전 소진" : "주의";
+    badge.textContent = warning.reason === "forecast_before_reset" && reduction !== null
+      ? `${reduction}% 감속 필요`
+      : "주의";
     title.textContent = warning.reason === "forecast_before_reset"
-      ? `현재 사용 흐름이면 ${PROVIDER_LABELS[warning.provider]} ${LIMIT_LABELS[warning.limitType] || warning.limitType} 한도가 리셋 전에 소진될 가능성이 큽니다`
+      ? Number.isFinite(exhaustionLatest) && Number.isFinite(resetAt) && resetAt > exhaustionLatest
+        ? `현재 속도면 리셋보다 ${formatDuration(resetAt - exhaustionLatest)} 먼저 소진`
+        : "현재 속도면 리셋 전에 소진될 가능성이 큽니다"
       : `${PROVIDER_LABELS[warning.provider]} ${LIMIT_LABELS[warning.limitType] || warning.limitType} 한도를 확인하세요`;
   } else if (!hasKnownForecast) {
     badge.textContent = "속도 계산 전";
@@ -422,10 +432,13 @@ function renderDecision(analytics, snapshot, providers) {
     title.textContent = "현재 사용 흐름이면 다음 리셋까지 한도를 유지할 가능성이 큽니다";
   }
 
+  document.getElementById("decision-label").textContent = priority
+    ? `${PROVIDER_LABELS[priority.provider]} · ${LIMIT_LABELS[priority.limitType] || priority.limitType}`
+    : "가장 먼저 확인할 한도";
   detail.textContent = stalePriority || (!priority && stale.size)
     ? "마지막 수집 후 10분이 지났습니다. 이전 값 대신 최신 사용량으로 다시 계산하세요."
     : priority
-    ? `${PROVIDER_LABELS[priority.provider]} ${LIMIT_LABELS[priority.limitType] || priority.limitType} ${priority.remainingPercent}% 남음${priorityLimit && Number.isFinite(priorityLimit.depletionRatePercentPerHour) ? ` · 최근 평균 ${formatRate(priorityLimit.depletionRatePercentPerHour)}` : ""}${priorityLimit && Date.parse(priorityLimit.resetAt) ? ` · ${formatDateTime(priorityLimit.resetAt)} 리셋` : ""}`
+    ? `${priority.remainingPercent}% 남음${priorityLimit && Number.isFinite(priorityLimit.depletionRatePercentPerHour) ? ` · 현재 ${formatRate(priorityLimit.depletionRatePercentPerHour)}` : ""}${priorityLimit && Number.isFinite(priorityLimit.safeRatePercentPerHour) ? ` · 허용 ${formatRate(priorityLimit.safeRatePercentPerHour)}` : ""}`
     : hasKnownForecast
       ? "최근 평균 사용 속도를 기준으로 한 결과입니다. 작업량이 크게 달라지면 다시 계산하세요."
       : "수집 횟수가 아니라 실제 잔여량 변화가 있어야 소진 속도를 계산할 수 있습니다.";
@@ -435,6 +448,8 @@ function renderDecision(analytics, snapshot, providers) {
     ? "고갈 시점의 오차가 큽니다. 큰 작업을 나누고 사용량을 줄이세요."
     : !hasKnownForecast && !priority
     ? "잔여량이 줄어든 뒤 다시 계산하거나 활동 기반 자동 확인을 켜세요."
+    : warning && warning.reason === "forecast_before_reset" && reduction !== null
+    ? `앞으로 사용량을 약 ${reduction}% 줄이세요.`
     : recommendation
     ? recommendation.action
     : "현재 속도를 유지해도 됩니다. 작업량이 달라지면 다시 확인하세요.";
