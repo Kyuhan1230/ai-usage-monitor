@@ -5,13 +5,14 @@
 <h1 align="center">Codex Claude Usage</h1>
 
 <p align="center">
-  <strong>Know whether your Codex or Claude Code limit will run out before it resets.</strong><br>
-  A local Windows tray app that forecasts quota exhaustion, detects unusual usage spikes, and recommends what to change next.
+  <strong>Keep Codex CLI and Claude Code usage limits visible on Windows.</strong><br>
+  See remaining quota and reset times at a glance, then get a cautious exhaustion forecast after enough local history exists.
 </p>
 
 <p align="center">
   <a href="https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest"><strong>Download for Windows</strong></a>
   · <a href="docs/README.ko.md">한국어 문서</a>
+  · <a href="docs/CODEX_USAGE_LIMIT_WINDOWS.md">Codex usage-limit guide</a>
   · <a href="#installation-and-trust">Installation & trust</a>
   · <a href="https://github.com/Kyuhan1230/ai-usage-monitor/discussions">Give feedback</a>
 </p>
@@ -31,20 +32,28 @@
   <a href="docs/images/walkthrough-45s.mp4">Watch the 45-second walkthrough</a>
 </p>
 
-This is not another generic token dashboard. It is built for heavy Windows users of **Codex CLI** and **Claude Code** who need to decide:
+Codex already provides `/usage`, `/status`, and `/statusline` for checking limits inside the terminal. Use those official commands if occasional checks are enough.
 
-- Will this quota run out before its reset?
-- Is today's usage unusually high?
-- How much should I slow down?
-- Would switching models help?
+This app is for heavy Windows users of **Codex CLI**, **Claude Code**, or both who want to know:
+
+- How much quota remains, and when does it reset?
+- Can I keep both providers visible outside the active terminal?
+- If the recent pace continues, could the limit run out before reset?
+- Is today's usage unusually high compared with my own recent history?
 
 The app processes usage locally. There is no developer-operated analytics server, advertising, or remote usage telemetry.
 
+## Guides
+
+- [How to check Codex usage limits on Windows](docs/CODEX_USAGE_LIMIT_WINDOWS.md) — official `/usage`, `/status`, and `/statusline` options, plus an always-visible Windows alternative.
+- [Korean installation and usage guide](docs/README.ko.md)
+- [Privacy and local data inventory](docs/PRIVACY.md)
+
 ## What you get
 
-| Forecast | Detect | Act |
+| See now | Learn over time | Keep local |
 | --- | --- | --- |
-| Estimated exhaustion time, reset comparison, and confidence | Quota and token spikes relative to your own recent baseline | Required slowdown, repetitive-work checks, and lower-cost model suggestions |
+| Remaining quota, reset time, provider status, and a compact Windows view | Forecast range, confidence, and usage-spike detection after local history builds | No prompt or response storage, no product telemetry server, and no listening port |
 
 <p align="center">
   <img src="docs/images/app-insights.png" alt="Usage Insights with exhaustion forecasts, thresholds, comparisons, usage spikes, cost estimates, and recommendations" width="100%">
@@ -70,6 +79,14 @@ Before running an unsigned beta:
 - If you prefer not to run an unsigned binary, [build from source](#build-from-source) or wait for a future signed release.
 
 The installer does not bundle Codex CLI or Claude Code. In interactive mode it can offer to run each provider's official installer only after separate opt-in confirmation. It does not download WebView2 automatically.
+
+### What portable distribution would mean
+
+A portable release would be a ZIP archive containing an executable that can be run without an installer. It would reduce installation steps and would not require the NSIS setup wizard. It would still use the installed Microsoft Edge WebView2 Runtime and store local app data under `~/.codex-usage-wrapper`.
+
+Portable does **not** mean signed or automatically trusted. An unsigned portable executable can trigger the same Windows SmartScreen **Unknown publisher** warning as an unsigned installer.
+
+The project does **not currently publish a portable release**. Current release automation produces the NSIS `*-setup.exe` installer only. If a portable artifact is added later, it should be published on the same GitHub Release with its own SHA-256 digest and the same unsigned-binary disclosure.
 
 ## Privacy boundary
 
