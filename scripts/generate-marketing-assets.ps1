@@ -113,6 +113,25 @@ function Draw-CroppedImage {
     )
 }
 
+function Draw-FittedImage {
+    param(
+        [System.Drawing.Graphics]$Graphics,
+        [System.Drawing.Image]$Image,
+        [System.Drawing.RectangleF]$Bounds
+    )
+
+    $scale = [Math]::Min($Bounds.Width / $Image.Width, $Bounds.Height / $Image.Height)
+    $width = [float]($Image.Width * $scale)
+    $height = [float]($Image.Height * $scale)
+    $destination = [System.Drawing.RectangleF]::new(
+        [float]($Bounds.X + ($Bounds.Width - $width) / 2),
+        [float]($Bounds.Y + ($Bounds.Height - $height) / 2),
+        $width,
+        $height
+    )
+    $Graphics.DrawImage($Image, $destination)
+}
+
 function Save-Png {
     param(
         [System.Drawing.Bitmap]$Bitmap,
@@ -140,28 +159,28 @@ function New-DemoFrame {
             Draw-Text $graphics 'Two AI coding limits.' 48 92 43 $white ([System.Drawing.FontStyle]::Bold)
             Draw-Text $graphics 'One small Windows tray view.' 48 146 28 $muted
             Draw-Text $graphics 'Codex CLI + Claude Code' 48 458 23 $green ([System.Drawing.FontStyle]::Bold)
-            Draw-Panel $graphics 560 25 350 490
-            Draw-CroppedImage $graphics $Compact ([System.Drawing.RectangleF]::new(582, 43, 306, 454)) ([System.Drawing.RectangleF]::new(0, 0, $Compact.Width, $Compact.Height))
+            Draw-Panel $graphics 500 205 412 270
+            Draw-FittedImage $graphics $Compact ([System.Drawing.RectangleF]::new(516, 221, 380, 238))
         }
         2 {
             Draw-Text $graphics 'Will it run out before reset?' 48 78 42 $white ([System.Drawing.FontStyle]::Bold)
             Draw-Text $graphics 'Forecast the exhaustion window and confidence.' 48 132 24 $muted
             Draw-Panel $graphics 48 190 864 302
-            Draw-CroppedImage $graphics $Insights ([System.Drawing.RectangleF]::new(66, 208, 828, 266)) ([System.Drawing.RectangleF]::new(30, 345, 1168, 620))
+            Draw-CroppedImage $graphics $Insights ([System.Drawing.RectangleF]::new(66, 208, 828, 266)) ([System.Drawing.RectangleF]::new(0, 120, 822, 264))
             Draw-Text $graphics 'FORECAST' 765 45 18 $amber ([System.Drawing.FontStyle]::Bold)
         }
         3 {
             Draw-Text $graphics 'Catch unusual usage spikes.' 48 78 42 $white ([System.Drawing.FontStyle]::Bold)
             Draw-Text $graphics 'Compare today with your own recent baseline.' 48 132 24 $muted
             Draw-Panel $graphics 48 190 864 302
-            Draw-CroppedImage $graphics $Insights ([System.Drawing.RectangleF]::new(66, 208, 828, 266)) ([System.Drawing.RectangleF]::new(28, 1010, 1172, 520))
+            Draw-CroppedImage $graphics $Insights ([System.Drawing.RectangleF]::new(66, 208, 828, 266)) ([System.Drawing.RectangleF]::new(0, 120, 822, 264))
             Draw-Text $graphics 'DETECT' 785 45 18 $amber ([System.Drawing.FontStyle]::Bold)
         }
         4 {
             Draw-Text $graphics 'Know what to change next.' 48 78 42 $white ([System.Drawing.FontStyle]::Bold)
             Draw-Text $graphics 'Slow down, review repetition, or switch models.' 48 132 24 $muted
             Draw-Panel $graphics 48 190 864 302
-            Draw-CroppedImage $graphics $Insights ([System.Drawing.RectangleF]::new(66, 228, 828, 226)) ([System.Drawing.RectangleF]::new(28, 1550, 1172, 335))
+            Draw-CroppedImage $graphics $Insights ([System.Drawing.RectangleF]::new(66, 228, 828, 226)) ([System.Drawing.RectangleF]::new(0, 150, 822, 224))
             Draw-Text $graphics 'ACT' 820 45 18 $amber ([System.Drawing.FontStyle]::Bold)
         }
         5 {
@@ -170,8 +189,8 @@ function New-DemoFrame {
             Draw-Text $graphics 'No local server.' 48 218 27 $green ([System.Drawing.FontStyle]::Bold)
             Draw-Text $graphics 'No always-on collection CLI.' 48 260 27 $green ([System.Drawing.FontStyle]::Bold)
             Draw-Text $graphics 'Windows beta on GitHub' 48 440 25 $cyan ([System.Drawing.FontStyle]::Bold)
-            Draw-Panel $graphics 610 74 250 360
-            Draw-CroppedImage $graphics $Compact ([System.Drawing.RectangleF]::new(626, 90, 218, 328)) ([System.Drawing.RectangleF]::new(0, 0, $Compact.Width, $Compact.Height))
+            Draw-Panel $graphics 500 150 412 270
+            Draw-FittedImage $graphics $Compact ([System.Drawing.RectangleF]::new(516, 166, 380, 238))
         }
     }
 
@@ -341,8 +360,8 @@ try {
         Draw-Text $previewGraphics 'Codex CLI + Claude Code' 76 492 25 $green ([System.Drawing.FontStyle]::Bold)
         Draw-Text $previewGraphics 'Local Windows tray app' 76 532 23 $muted
 
-        Draw-Panel $previewGraphics 886 35 332 570
-        Draw-CroppedImage $previewGraphics $Compact ([System.Drawing.RectangleF]::new(910, 56, 284, 526)) ([System.Drawing.RectangleF]::new(0, 0, $compact.Width, $compact.Height))
+        Draw-Panel $previewGraphics 860 205 358 310
+        Draw-FittedImage $previewGraphics $Compact ([System.Drawing.RectangleF]::new(880, 225, 318, 270))
         Save-Png $preview $previewPath
     }
     finally {

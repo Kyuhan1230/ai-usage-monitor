@@ -108,8 +108,8 @@ See [PRIVACY.md](docs/PRIVACY.md) for the complete data and network inventory.
     <th width="60%">Setup and health</th>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/app-compact.png" alt="Compact window showing Codex and Claude remaining quota"></td>
-    <td align="center"><img src="docs/images/app-setup.png" alt="Setup screen showing CLI, login, hook, and startup status"></td>
+    <td align="center"><img src="docs/images/app-compact.png" alt="Compact side-by-side Codex and Claude usage dashboard" width="100%"></td>
+    <td align="center"><img src="docs/images/app-setup.png" alt="Setup screen with provider connections, theme, and language controls" width="100%"></td>
   </tr>
   <tr>
     <td>See remaining quota, reset time, and connection status in a small window.</td>
