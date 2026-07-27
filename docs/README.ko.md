@@ -85,8 +85,8 @@
     <th width="60%">초기 설정과 상태 확인</th>
   </tr>
   <tr>
-    <td align="center"><img src="images/app-compact.png" alt="Codex Claude Usage 간단 보기 화면"></td>
-    <td align="center"><img src="images/app-setup.png" alt="Codex Claude Usage 설정 화면"></td>
+    <td align="center"><img src="images/app-compact.png" alt="Codex와 Claude를 좌우로 비교하는 사용량 요약 화면" width="100%"></td>
+    <td align="center"><img src="images/app-setup.png" alt="도구 연결, 테마, 언어를 설정하는 화면" width="100%"></td>
   </tr>
   <tr>
     <td>남은 한도, 리셋 시각과 연결 상태를 작은 창에서 확인합니다.</td>
