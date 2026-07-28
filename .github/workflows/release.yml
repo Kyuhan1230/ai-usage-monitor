@@ -73,6 +73,8 @@ jobs:
           if (-not (Test-Path -LiteralPath $sourceSignature)) { throw "Updater signature is missing: $sourceSignature" }
           New-Item -ItemType Directory -Force release-assets | Out-Null
           Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup-$version.exe"
+          # README convenience alias only; latest.json keeps the versioned installer URL.
+          Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup.exe"
           Copy-Item -LiteralPath $sourceSignature -Destination "release-assets/Codex-Claude-Usage-Setup-$version.exe.sig"
 
       - name: Create and verify updater manifest
@@ -95,6 +97,7 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $installer = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe").Path
+          $directInstaller = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup.exe").Path
           $signature = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe.sig").Path
           $manifest = (Resolve-Path "release-assets/latest.json").Path
           $releaseNotice = @(
@@ -107,9 +110,9 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             $release = gh release view $env:RELEASE_TAG --json isDraft | ConvertFrom-Json
             if (-not $release.isDraft) { throw "Refusing to replace an already published release" }
-            gh release upload $env:RELEASE_TAG $installer $signature $manifest --clobber
+            gh release upload $env:RELEASE_TAG $installer $directInstaller $signature $manifest --clobber
           } else {
-            gh release create $env:RELEASE_TAG $installer $signature $manifest --draft --title "Codex Claude Usage $version" --notes $releaseNotice --generate-notes
+            gh release create $env:RELEASE_TAG $installer $directInstaller $signature $manifest --draft --title "Codex Claude Usage $version" --notes $releaseNotice --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { throw "Uploading release asset failed" }
         env:
@@ -121,6 +124,7 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $expected = @(
             "Codex-Claude-Usage-Setup-$version.exe",
+            "Codex-Claude-Usage-Setup.exe",
             "Codex-Claude-Usage-Setup-$version.exe.sig",
             "latest.json"
           )
@@ -156,6 +160,48 @@ jobs:
       - name: Publish completed GitHub Release
         shell: pwsh
         run: gh release edit $env:RELEASE_TAG --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post-publish canary for direct Windows download
+        shell: pwsh
+        run: |
+          $assetName = 'Codex-Claude-Usage-Setup.exe'
+          $localInstaller = "release-assets/$assetName"
+          $localSize = (Get-Item -LiteralPath $localInstaller).Length
+          $expectedHash = (Get-FileHash -LiteralPath $localInstaller -Algorithm SHA256).Hash
+          $url = "https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/$assetName"
+          $download = Join-Path $env:RUNNER_TEMP 'latest-Codex-Claude-Usage-Setup.exe'
+          $verified = $false
+          $lastFailure = 'No response'
+          for ($attempt = 1; $attempt -le 6; $attempt++) {
+            try {
+              $latestRelease = gh api "repos/${{ github.repository }}/releases/latest" | ConvertFrom-Json
+              if ($LASTEXITCODE -ne 0) { throw "Reading the latest release failed" }
+              if ($latestRelease.tag_name -ne $env:RELEASE_TAG) {
+                throw "Latest release tag mismatch: expected $env:RELEASE_TAG, received $($latestRelease.tag_name)"
+              }
+              $directAssets = @($latestRelease.assets | Where-Object { $_.name -eq $assetName })
+              if ($directAssets.Count -ne 1) { throw "Latest release is missing direct installer asset: $assetName" }
+              if ($directAssets[0].size -ne $localSize) {
+                throw "Latest release direct installer size mismatch: $($directAssets[0].size)"
+              }
+
+              if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -Force }
+              $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+              Invoke-WebRequest -Uri "${url}?cachebust=$cacheBust" -OutFile $download -Headers @{ "Cache-Control" = "no-cache" }
+              $actualHash = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
+              if ($actualHash -eq $expectedHash) {
+                $verified = $true
+                break
+              }
+              $lastFailure = "SHA-256 mismatch: expected $expectedHash, received $actualHash"
+            } catch {
+              $lastFailure = $_.Exception.Message
+            }
+            if ($attempt -lt 6) { Start-Sleep -Seconds 10 }
+          }
+          if (-not $verified) { throw "Published direct installer was not ready after retries: $lastFailure" }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

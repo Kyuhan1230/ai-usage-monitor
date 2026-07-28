@@ -77,8 +77,8 @@ input:focus-visible {
 .shell {
   min-width: 0;
   min-height: 100vh;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: var(--compact-shell-gap);
   padding: var(--compact-shell-padding);
 }
@@ -302,12 +302,12 @@ h1 {
 
 .provider-decision {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   width: 100%;
-  margin-top: 8px;
-  padding: 7px 8px;
+  margin-top: 6px;
+  padding: 5px 6px;
   border-left: 2px solid var(--line);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--panel-2);
   text-align: left;
   cursor: pointer;
@@ -333,16 +333,17 @@ h1 {
 .provider-decision strong {
   color: var(--provider);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.25;
 }
 
 .provider-decision span {
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.25;
 }
 
 .controls {
+  margin-top: auto;
   gap: var(--compact-controls-gap);
   flex-wrap: wrap;
   min-height: 24px;

@@ -431,6 +431,7 @@ fn notification_payload(report: &Value) -> Option<(String, String)> {
             };
             let reason = match alert.get("reason").and_then(Value::as_str) {
                 Some("forecast_before_reset") => "리셋 전 고갈 예상",
+                Some("limit_exhausted") => "한도 소진",
                 Some("threshold_critical") => "위험 임계치",
                 _ => "주의 임계치",
             };
@@ -894,7 +895,7 @@ fn create_secondary_window(app: &AppHandle, label: &str) -> Result<WebviewWindow
             "compact.html",
             "Codex Claude Usage",
             560.0,
-            340.0,
+            320.0,
             340.0,
             320.0,
             false,
@@ -1265,14 +1266,24 @@ mod tests {
     #[test]
     fn notification_payload_includes_limit_reason_and_token_spike() {
         let report = json!({
-            "alerts": [{
-                "provider": "codex",
-                "limitType": "five_hour",
-                "remainingPercent": 22,
-                "reason": "forecast_before_reset",
-                "severity": "warning",
-                "resetAt": "2026-07-19T09:00:00Z"
-            }],
+            "alerts": [
+                {
+                    "provider": "codex",
+                    "limitType": "five_hour",
+                    "remainingPercent": 22,
+                    "reason": "forecast_before_reset",
+                    "severity": "warning",
+                    "resetAt": "2026-07-19T09:00:00Z"
+                },
+                {
+                    "provider": "claude",
+                    "limitType": "five_hour",
+                    "remainingPercent": 0,
+                    "reason": "limit_exhausted",
+                    "severity": "critical",
+                    "resetAt": "2026-07-19T10:00:00Z"
+                }
+            ],
             "anomalies": {
                 "codex": {"detected": true, "date": "2026-07-19", "multiplier": 2.4},
                 "claude": {"detected": false}
@@ -1282,6 +1293,7 @@ mod tests {
         assert!(signature.contains("forecast_before_reset"));
         assert!(!signature.contains("multiplier"));
         assert!(body.contains("Codex 5시간: 22% 남음 · 리셋 전 고갈 예상"));
+        assert!(body.contains("Claude 5시간: 0% 남음 · 한도 소진"));
         assert!(body.contains("Codex 오늘 토큰 2.4배 급증"));
     }
 

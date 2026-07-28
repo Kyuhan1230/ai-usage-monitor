@@ -4,6 +4,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 const { execFileSync } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
@@ -30,7 +31,7 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.6");
+assert.strictEqual(packageJson.version, "1.2.7");
 assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
@@ -101,6 +102,16 @@ assert(
   rustEntry.includes("show_window_on_worker(app.clone(), label.to_string())"),
   "트레이 메뉴의 보조 창 생성도 이벤트 handler 밖에서 실행해야 합니다.",
 );
+assert(
+  /fn close_window\([^)]*\)[\s\S]*?window\.destroy\(\)/.test(rustEntry)
+    && !/fn close_window\([^)]*\)[\s\S]*?window\.hide\(\)/.test(rustEntry),
+  "창 닫기는 숨기기가 아니라 WebView 파기로 메모리를 반환해야 합니다.",
+);
+assert(
+  /\.on_window_event\([\s\S]*?CloseRequested[\s\S]*?window\.destroy\(\)/.test(rustEntry)
+    && !/\.on_window_event\([\s\S]*?CloseRequested[\s\S]*?window\.hide\(\)/.test(rustEntry),
+  "네이티브 닫기 요청도 WebView를 숨기지 말고 파기해야 합니다.",
+);
 assert(rustEntry.includes('"claude auth login"'), "Claude 로그인 버튼은 실제 로그인 하위 명령을 실행해야 합니다.");
 assert(trackedSource.includes('&["login", "status"]'), "Setup은 Codex 로그인 상태를 직접 확인해야 합니다.");
 assert(trackedSource.includes('&["auth", "status"]'), "Setup은 Claude 로그인 상태를 직접 확인해야 합니다.");
@@ -145,18 +156,32 @@ assert(insightsScript.includes("수집 횟수보다 잔여량이 변한 기록�
 const compactHtml = fs.readFileSync(path.join(ui, "compact.html"), "utf8");
 const compactCss = fs.readFileSync(path.join(ui, "compact.css"), "utf8");
 const compactScript = fs.readFileSync(path.join(ui, "compact.js"), "utf8");
+const providerViewScript = fs.readFileSync(path.join(ui, "provider-view.js"), "utf8");
 const detailsHtml = fs.readFileSync(path.join(ui, "details.html"), "utf8");
 const detailsScript = fs.readFileSync(path.join(ui, "details.js"), "utf8");
-const { activeProviders, detailProviders, visibleRecommendations } = require(path.join(ui, "provider-view.js"));
+const {
+  activeProviders,
+  detailProviders,
+  visibleRecommendations,
+  providerDecisionCopy,
+} = require(path.join(ui, "provider-view.js"));
+assert.doesNotThrow(
+  () => new vm.Script([bridgeScript, providerViewScript, insightsScript].join("\n")),
+  "Insights에서 함께 로드되는 classic script의 전역 const 이름이 충돌하면 안 됩니다.",
+);
 assert(compactHtml.includes('id="codex-decision"') && compactHtml.includes('id="claude-decision"'), "각 공급자 카드에서 고갈 판정을 바로 보여줘야 합니다.");
 assert(compactHtml.includes("<title>Usage Compact</title>"), "Compact는 현재 제품명을 유지해야 합니다.");
 assert(insightsHtml.includes("<title>Usage Insights</title>"), "Insights는 현재 제품명을 유지해야 합니다.");
 assert(detailsHtml.includes("<title>Token Details</title>"), "Token Details는 현재 제품명을 유지해야 합니다.");
 assert(compactScript.includes("function renderProviderDecision"), "Compact 창은 공급자별 최우선 판정을 렌더링해야 합니다.");
-assert(compactScript.includes("소진 속도 계산 전"), "Compact 창은 속도를 계산하지 못한 상태를 명시해야 합니다.");
-assert(compactScript.includes("최신 사용량 확인 필요"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
+assert(providerViewScript.includes("소진 속도 계산 전"), "Compact 창은 속도를 계산하지 못한 상태를 명시해야 합니다.");
+assert(providerViewScript.includes("최신 사용량 확인 필요"), "Compact 창은 오래된 데이터로 안전 판정을 내리면 안 됩니다.");
 assert(insightsScript.includes("최신 사용량을 확인한 뒤 다시 판단하겠습니다"), "Insights는 오래된 데이터의 판정을 보류해야 합니다.");
+assert(insightsScript.includes('badge.textContent = "소진"'), "0% 한도는 거의 소진이 아니라 소진으로 표시해야 합니다.");
 assert(compactScript.includes('el[`${provider}-decision`]'), "공급자별 판정에서 상세 근거로 이동할 수 있어야 합니다.");
+assert(compactScript.includes("openInsights(provider)"), "공급자 박스는 클릭한 공급자를 Insights에 전달해야 합니다.");
+assert(bridgeScript.includes("INSIGHTS_PROVIDER_KEY"), "Insights 공급자 요청을 창 사이에서 전달해야 합니다.");
+assert(insightsScript.includes("insightsProviders(snapshot)"), "Insights는 요청받은 공급자로 분석 범위를 좁혀야 합니다.");
 assert(compactHtml.includes('id="no-provider"'), "연결된 공급자가 없을 때 Compact의 중립 상태가 필요합니다.");
 assert(compactScript.includes("activeProviders(snapshot)"), "Compact는 현재 인증된 공급자만 표시해야 합니다.");
 assert(insightsScript.includes("activeProviders(snapshot)"), "Insights는 현재 인증된 공급자만 판정해야 합니다.");
@@ -186,7 +211,7 @@ assert.deepStrictEqual(
   ["codex"],
   "인증 확인 전에는 성공적으로 수집한 기존 공급자만 안전하게 표시합니다.",
 );
-assert(compactScript.includes("visibleRecommendations(analytics, [provider])"), "Compact 우선 문구는 현재 공급자로 걸러야 합니다.");
+assert(providerViewScript.includes("visibleRecommendations(analytics, [provider])"), "Compact 우선 문구는 현재 공급자로 걸러야 합니다.");
 assert(insightsScript.includes("visibleRecommendations(analytics, providers)"), "Insights 권장 문구는 인증된 공급자로 걸러야 합니다.");
 assert(!/analytics\.recommendations\[0\]/.test(compactScript + insightsScript), "거르지 않은 권장 문구를 그대로 대표 문구로 쓰면 안 됩니다.");
 const mixedRecommendations = {
@@ -212,6 +237,57 @@ assert.deepStrictEqual(
   "공급자가 없는 healthy 문구는 항상 통과해야 합니다.",
 );
 assert.deepStrictEqual(visibleRecommendations(null, ["codex"]), [], "분석 결과가 없으면 빈 목록이어야 합니다.");
+assert(
+  insightsScript.includes("providers.includes(preferredInsightsProvider)")
+    && insightsScript.includes("? [preferredInsightsProvider]"),
+  "Claude 박스에서 연 Insights는 Claude 데이터만 표시해야 합니다.",
+);
+const exhaustedCopy = providerDecisionCopy("claude", {
+  alerts: [{
+    provider: "claude",
+    limitType: "five_hour",
+    severity: "critical",
+    reason: "limit_exhausted",
+    remainingPercent: 0,
+  }],
+  providers: { claude: { limits: { five_hour: { forecastStatus: "unknown" } } } },
+  recommendations: [{
+    provider: "claude",
+    priority: "critical",
+    reason: "limit_exhausted",
+    action: "Claude 5시간 한도를 모두 사용했습니다.",
+  }],
+}, false);
+assert.strictEqual(exhaustedCopy.status, "Claude 세션 한도 소진", "0%는 별도 소진 상태여야 합니다.");
+assert.strictEqual(exhaustedCopy.action, "리셋 전까지 Claude의 새 작업을 멈추세요.");
+assert(!/거의|줄이세요/.test(`${exhaustedCopy.status} ${exhaustedCopy.action}`), "소진 뒤에 감속을 권하면 안 됩니다.");
+
+const healthyAnalytics = {
+  alerts: [],
+  providers: {
+    codex: { limits: { weekly: { forecastStatus: "safe" } } },
+    claude: { limits: { seven_day: { forecastStatus: "safe" } } },
+  },
+  recommendations: [{ provider: null, priority: "ok", reason: "healthy", action: "현재 속도를 유지해도 됩니다." }],
+};
+const codexHealthyCopy = providerDecisionCopy("codex", healthyAnalytics, false);
+const claudeHealthyCopy = providerDecisionCopy("claude", healthyAnalytics, false);
+assert.notStrictEqual(codexHealthyCopy.action, claudeHealthyCopy.action, "공급자별 정상 문구가 같으면 안 됩니다.");
+assert(codexHealthyCopy.action.includes("Codex") && claudeHealthyCopy.action.includes("Claude"), "정상 문구에도 대상 공급자를 밝혀야 합니다.");
+
+const forecastCopy = providerDecisionCopy("codex", {
+  alerts: [{
+    provider: "codex",
+    limitType: "weekly",
+    severity: "warning",
+    reason: "forecast_before_reset",
+    remainingPercent: 59,
+    confidence: "high",
+  }],
+  providers: { codex: { limits: { weekly: { forecastStatus: "risk", requiredReductionPercent: 61 } } } },
+  recommendations: [],
+}, false);
+assert.strictEqual(forecastCopy.action, "Codex 주간 사용량을 약 65% 줄이세요.", "Compact 감속 문구는 짧고 직접적이어야 합니다.");
 const hiddenClaude = {
   hiddenProviders: ["claude"],
   providers: { codex: { authState: "authenticated" }, claude: { authState: "authenticated" } },
@@ -243,6 +319,9 @@ assert(compactScript.includes("시간당 ${rate}%p"), "Compact 소진 속도는 
 assert(/body\s*\{[^}]*overflow-x:\s*hidden/s.test(compactCss), "Compact 창은 가로 스크롤을 만들면 안 됩니다.");
 assert(/body\s*\{[^}]*overflow-y:\s*auto/s.test(compactCss), "작은 Compact 창은 전체 세로 스크롤로 기능에 접근할 수 있어야 합니다.");
 assert(/\.meters\s*\{[^}]*overflow:\s*visible/s.test(compactCss), "확대 시 공급자 한도 카드가 잘리면 안 됩니다.");
+assert(/\.shell\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s.test(compactCss), "Compact shell은 내용이 넘칠 때 자연스럽게 늘어나는 세로 흐름이어야 합니다.");
+assert(/\.controls\s*\{[^}]*margin-top:\s*auto/s.test(compactCss), "Compact 하단 조작부는 남는 높이를 흡수해 액션 바와 함께 바닥에 정렬해야 합니다.");
+assert(/"compact"\s*=>\s*\(\s*"compact\.html",\s*"Codex Claude Usage",\s*560\.0,\s*320\.0,\s*340\.0,\s*320\.0,/s.test(rustEntry), "Compact 기본 높이는 불필요한 하단 공백 없이 320px이어야 합니다.");
 assert(compactCss.includes("--compact-font-body: 13px"), "Compact 기본 본문 글꼴 토큰이 필요합니다.");
 assert(compactCss.includes("--compact-font-title: 18px"), "Compact 기본 제목 글꼴 토큰이 필요합니다.");
 assert(compactCss.includes("--compact-font-meta: 12px"), "Compact 기본 보조 글꼴 토큰이 필요합니다.");
@@ -253,6 +332,8 @@ assert(compactCss.includes("--compact-font-title: 16px"), "낮은 Compact 창은
 assert(compactCss.includes("--compact-font-meta: 11px"), "Compact 보조 글꼴은 11px 아래로 줄이면 안 됩니다.");
 assert(compactCss.includes("--compact-control-height: 28px"), "낮은 Compact 창에서도 조작 높이는 28px 이상이어야 합니다.");
 assert(!/\.provider-decision\s*\{[^}]*(?:overflow:\s*(?:auto|scroll))/s.test(compactCss), "공급자 결정 안내에 중첩 스크롤이 생기면 안 됩니다.");
+assert(/\.provider-decision\s*\{[^}]*padding:\s*5px 6px/s.test(compactCss), "공급자 결정 안내의 안쪽 여백을 작게 유지해야 합니다.");
+assert.strictEqual((compactCss.match(/\.provider-decision (?:strong|span)\s*\{[^}]*font-size:\s*11px/gs) || []).length, 2, "공급자 결정 문구는 최소 11px를 유지해야 합니다.");
 assert(!/\bzoom\s*:|transform\s*:\s*scale/i.test(compactCss), "Compact 화면 전체를 강제로 축소하면 안 됩니다.");
 assert(compactHtml.includes('id="resize-grip"'), "프레임 없는 Compact 창에 크기 조절 손잡이가 필요합니다.");
 assert(bridgeScript.includes('startResizeDragging("SouthEast")'), "Compact 크기 조절은 Tauri 창 API를 사용해야 합니다.");
@@ -267,7 +348,7 @@ assert.strictEqual((compactHtml.match(/class="scope-visual"/g) || []).length, 4,
 assert.strictEqual((compactHtml.match(/class="limit-meta"/g) || []).length, 2, "리셋과 갱신 시각은 카드마다 한 줄로 묶어야 합니다.");
 assert(compactCss.includes('.limit-name[data-scope="long"] .scope-visual i'), "단기와 장기 한도의 시각적 범위를 구분해야 합니다.");
 assert(compactScript.includes('dataset.level = level(percent)'), "잔여 퍼센트 숫자에 임계값 상태를 표시해야 합니다.");
-assert(compactScript.includes("alert.provider === provider"), "공급자 메시지는 해당 공급자의 판정만 사용해야 합니다.");
+assert(providerViewScript.includes("alert.provider === provider"), "공급자 메시지는 해당 공급자의 판정만 사용해야 합니다.");
 assert(compactCss.includes('background: var(--bar-fill)'), "막대 채움은 중성 명암 토큰을 사용해야 합니다.");
 assert(!compactScript.includes('setProperty("--tone"'), "막대에 상태색을 직접 적용하면 안 됩니다.");
 const themeScript = fs.readFileSync(path.join(ui, "theme.js"), "utf8");
