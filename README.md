@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest"><strong>Download for Windows</strong></a>
+  <a href="https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/Codex-Claude-Usage-Setup.exe"><strong>Download for Windows</strong></a>
   · <a href="docs/README.ko.md">한국어 문서</a>
   · <a href="docs/CODEX_USAGE_LIMIT_WINDOWS.md">Codex usage-limit guide</a>
   · <a href="#installation-and-trust">Installation & trust</a>

@@ -688,6 +688,26 @@ fn relief_advice(providers: &Value, costs: &Value, provider: &str) -> String {
     advice
 }
 
+/// 한도를 모두 쓴 뒤에는 감속이 아니라 중단과 리셋 대기를 안내한다.
+fn exhausted_advice(providers: &Value, provider: &str) -> String {
+    let other = if provider == "codex" {
+        "claude"
+    } else {
+        "codex"
+    };
+    let mut advice = format!(
+        "리셋 전까지 {}의 새 작업을 멈추세요.",
+        provider_label(provider)
+    );
+    if has_headroom(providers, other) {
+        advice.push_str(&format!(
+            " 남은 작업은 여유가 있는 {}로 나누세요.",
+            provider_label(other)
+        ));
+    }
+    advice
+}
+
 fn provider_label(provider: &str) -> &'static str {
     if provider == "codex" {
         "Codex"
@@ -771,7 +791,18 @@ fn recommendations(providers: &Value, costs: &Value, anomalies: &Value) -> Vec<V
                     .get("remainingPercent")
                     .and_then(Value::as_f64)
                     .unwrap_or(100.0);
-                if remaining <= 10.0 {
+                if remaining <= 0.0 {
+                    result.push(Suggestion {
+                        priority: 0,
+                        remaining,
+                        today_tokens,
+                        provider,
+                        value: json!({
+                            "priority": "critical", "provider": provider, "reason": "limit_exhausted",
+                            "action": format!("{} {} 한도를 모두 사용했습니다. {}", provider_label(provider), limit_label(kind), exhausted_advice(providers, provider))
+                        }),
+                    });
+                } else if remaining <= 10.0 {
                     result.push(Suggestion {
                         priority: 0,
                         remaining,
@@ -894,7 +925,9 @@ pub fn build_analytics(history: &[Value], rows: &[UsageRow], now_ms: i64) -> Val
                     .unwrap_or(100.0);
                 let forecast =
                     analysis.get("forecastStatus").and_then(Value::as_str) == Some("risk");
-                let (severity, reason) = if remaining <= 10.0 {
+                let (severity, reason) = if remaining <= 0.0 {
+                    ("critical", "limit_exhausted")
+                } else if remaining <= 10.0 {
                     ("critical", "threshold_critical")
                 } else if remaining <= 25.0 {
                     ("warning", "threshold_warning")
@@ -1169,6 +1202,47 @@ mod tests {
             "codex": {"totalTokens": codex_tokens, "savings": Value::Null},
             "claude": {"totalTokens": claude_tokens, "savings": Value::Null}
         }})
+    }
+
+    #[test]
+    fn zero_remaining_is_exhausted_instead_of_nearly_depleted() {
+        let now_ms = chrono::DateTime::parse_from_rfc3339("2026-07-27T08:25:00Z")
+            .unwrap()
+            .timestamp_millis();
+        let history = vec![json!({
+            "source": "claude_statusline_hook",
+            "captured_at": iso(now_ms),
+            "parse_status": "ok",
+            "limits": [{
+                "type": "five_hour",
+                "remaining_percent": 0,
+                "resets_at": (now_ms + HOUR_MS) / 1000
+            }]
+        })];
+        let report = build_analytics(&history, &[], now_ms);
+        let alert = report["alerts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["provider"] == "claude")
+            .expect("Claude 소진 알림이 있어야 한다");
+        assert_eq!(alert["severity"], "critical");
+        assert_eq!(alert["reason"], "limit_exhausted");
+
+        let recommendation = report["recommendations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["provider"] == "claude")
+            .expect("Claude 소진 행동이 있어야 한다");
+        assert_eq!(recommendation["reason"], "limit_exhausted");
+        let action = recommendation["action"].as_str().unwrap();
+        assert!(action.contains("모두 사용했습니다"), "실제 문구: {action}");
+        assert!(action.contains("새 작업을 멈추세요"), "실제 문구: {action}");
+        assert!(
+            !action.contains("줄이세요"),
+            "소진 뒤에 감속을 권하면 안 된다: {action}"
+        );
     }
 
     #[test]

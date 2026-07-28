@@ -20,6 +20,7 @@ const ciWorkflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "ci.yml"),
   "utf8",
 );
+const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
 const tauriConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src-tauri", "tauri.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(__dirname, "..", "src-tauri", "Cargo.toml"), "utf8");
@@ -28,6 +29,23 @@ assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
 assert.match(cargoToml, /ProductName = "Codex Claude Usage"/);
 assert.match(releaseWorkflow, /Codex Claude Usage \$version/);
 assert.match(releaseWorkflow, /Codex-Claude-Usage-Setup-\$version\.exe/);
+assert.match(releaseWorkflow, /release-assets\/Codex-Claude-Usage-Setup\.exe/);
+assert.match(
+  releaseWorkflow,
+  /gh release upload \$env:RELEASE_TAG \$installer \$directInstaller \$signature \$manifest --clobber/,
+);
+assert.match(
+  releaseWorkflow,
+  /gh release create \$env:RELEASE_TAG \$installer \$directInstaller \$signature \$manifest --draft/,
+);
+assert.match(releaseWorkflow, /"Codex-Claude-Usage-Setup\.exe",/);
+assert.match(releaseWorkflow, /releases\/latest\/download\/\$assetName/);
+assert.match(releaseWorkflow, /Latest release is missing direct installer asset/);
+assert.match(releaseWorkflow, /Published direct installer was not ready after retries/);
+assert.match(
+  readme,
+  /href="https:\/\/github\.com\/Kyuhan1230\/ai-usage-monitor\/releases\/latest\/download\/Codex-Claude-Usage-Setup\.exe"><strong>Download for Windows<\/strong><\/a>/,
+);
 assert.match(releaseWorkflow, /Authenticode 코드 서명이 적용되지 않았습니다/);
 assert.match(releaseWorkflow, /v1\.1\.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치/);
 assert.match(releaseWorkflow, /--notes \$releaseNotice --generate-notes/);

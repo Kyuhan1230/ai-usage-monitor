@@ -4,6 +4,7 @@
 
 const PROVIDER_LABELS = { codex: "Codex", claude: "Claude" };
 const { activeProviders, visibleRecommendations } = window.usageProviderView;
+const INSIGHTS_SCOPE_STORAGE_KEY = "ai-usage-monitor-insights-provider";
 const LIMIT_LABELS = {
   five_hour: "5시간",
   weekly: "주간",
@@ -12,10 +13,37 @@ const LIMIT_LABELS = {
 };
 const CONFIDENCE_LABELS = { high: "높음", medium: "보통", low: "낮음" };
 const ALERT_REASON_LABELS = {
+  limit_exhausted: "한도 소진",
   threshold_critical: "위험 임계치",
   threshold_warning: "주의 임계치",
   forecast_before_reset: "리셋 전 고갈 예측",
 };
+let preferredInsightsProvider = readRequestedProvider();
+clearRequestedProvider();
+
+function readRequestedProvider() {
+  try {
+    const provider = window.localStorage.getItem(INSIGHTS_SCOPE_STORAGE_KEY);
+    return provider === "codex" || provider === "claude" ? provider : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function clearRequestedProvider() {
+  try {
+    window.localStorage.removeItem(INSIGHTS_SCOPE_STORAGE_KEY);
+  } catch (_error) {
+    // 요청은 일회성이므로 저장소를 사용할 수 없으면 현재 창의 선택만 유지한다.
+  }
+}
+
+function insightsProviders(snapshot) {
+  const providers = activeProviders(snapshot);
+  return providers.includes(preferredInsightsProvider)
+    ? [preferredInsightsProvider]
+    : providers;
+}
 
 function formatNumber(value) {
   return Number.isFinite(value) ? new Intl.NumberFormat(window.usageLanguage.locale()).format(value) : "--";
@@ -388,9 +416,14 @@ function renderDecision(analytics, snapshot, providers) {
   const detail = document.getElementById("decision-detail");
   const primaryAction = document.getElementById("primary-action");
   const alerts = analytics.alerts.filter((alert) => providers.includes(alert.provider));
-  const critical = alerts.find((alert) => alert.severity === "critical");
+  const exhausted = alerts.find((alert) => {
+    const remaining = Number(alert.remainingPercent);
+    return alert.reason === "limit_exhausted"
+      || (Number.isFinite(remaining) && remaining <= 0);
+  });
+  const critical = exhausted || alerts.find((alert) => alert.severity === "critical");
   const warning = alerts.find((alert) => alert.severity === "warning");
-  const priority = critical || warning;
+  const priority = exhausted || critical || warning;
   const recommendation = visibleRecommendations(analytics, providers)[0];
   const limits = providers.flatMap((provider) =>
     Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {}).filter(Boolean));
@@ -410,6 +443,10 @@ function renderDecision(analytics, snapshot, providers) {
   if (stalePriority || (!priority && stale.size)) {
     badge.textContent = "판정 보류";
     title.textContent = "최신 사용량을 확인한 뒤 다시 판단하겠습니다";
+  } else if (exhausted) {
+    panel.classList.add("critical");
+    badge.textContent = "소진";
+    title.textContent = `${PROVIDER_LABELS[exhausted.provider]} ${LIMIT_LABELS[exhausted.limitType] || exhausted.limitType} 한도가 소진됐습니다`;
   } else if (critical) {
     panel.classList.add("critical");
     badge.textContent = "위험";
@@ -459,7 +496,7 @@ function render(snapshot) {
   const analytics = snapshot.analytics;
   const empty = document.getElementById("empty");
   const content = document.getElementById("content");
-  const providers = activeProviders(snapshot);
+  const providers = insightsProviders(snapshot);
   if (!providers.length) {
     empty.textContent = "연결된 도구가 없습니다. Setup에서 Codex 또는 Claude Code에 로그인한 뒤 다시 확인하세요.";
     empty.hidden = false;
@@ -521,10 +558,25 @@ async function refresh(force = false) {
       ? await window.usageApp.refreshSnapshot()
       : await window.usageApp.snapshot();
     render(snapshot);
+  } catch (error) {
+    const empty = document.getElementById("empty");
+    empty.textContent = `분석 화면을 표시하지 못했습니다. ${String(error)}`;
+    empty.hidden = false;
+    document.getElementById("content").hidden = true;
   } finally {
     button.disabled = false;
   }
 }
 
 document.getElementById("refresh").addEventListener("click", () => refresh(true));
+window.addEventListener("storage", (event) => {
+  if (event.key !== INSIGHTS_SCOPE_STORAGE_KEY) {
+    return;
+  }
+  preferredInsightsProvider = event.newValue === "codex" || event.newValue === "claude"
+    ? event.newValue
+    : null;
+  clearRequestedProvider();
+  refresh();
+});
 refresh();

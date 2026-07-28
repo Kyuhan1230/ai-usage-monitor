@@ -2,6 +2,20 @@
 
 // Tauri 명령을 기존 renderer가 사용하는 작은 계약으로 감싼다.
 const invoke = window.__TAURI__.core.invoke;
+const INSIGHTS_PROVIDER_KEY = "ai-usage-monitor-insights-provider";
+
+function openInsights(provider = null) {
+  const requestedProvider = provider === "codex" || provider === "claude"
+    ? provider
+    : "all";
+  try {
+    // Insights가 이미 열려 있으면 storage 이벤트로, 새 창이면 초기 로드에서 이 요청을 받는다.
+    window.localStorage.setItem(INSIGHTS_PROVIDER_KEY, requestedProvider);
+  } catch (_error) {
+    // 저장소를 사용할 수 없어도 전역 Insights 창은 계속 열 수 있다.
+  }
+  return invoke("show_window", { label: "insights" });
+}
 
 window.usageApp = {
   snapshot: () => invoke("snapshot"),
@@ -15,7 +29,7 @@ window.usageApp = {
   startResize: () => window.__TAURI__.window.getCurrentWindow().startResizeDragging("SouthEast"),
   openCompact: () => invoke("show_window", { label: "compact" }),
   openDetails: () => invoke("show_window", { label: "details" }),
-  openInsights: () => invoke("show_window", { label: "insights" }),
+  openInsights,
   openSetup: () => invoke("show_window", { label: "setup" }),
   checkForUpdate: (manual = true) => invoke("check_for_update", { manual }),
   getUpdateState: () => invoke("get_update_state"),

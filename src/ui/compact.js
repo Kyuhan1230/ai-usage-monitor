@@ -3,7 +3,7 @@
 // 백엔드 구현과 무관하게 동일한 snapshot 계약만 사용한다.
 
 const { stateText } = window.usageStatusHealth;
-const { activeProviders, visibleRecommendations } = window.usageProviderView;
+const { activeProviders, providerDecisionCopy } = window.usageProviderView;
 
 const ids = [
   "meters",
@@ -136,57 +136,14 @@ function staleProviders(snapshot, providers) {
   }));
 }
 
-function renderProviderDecision(provider, analytics, snapshot, stale) {
-  const label = provider === "codex" ? "Codex" : "Claude";
+function renderProviderDecision(provider, analytics, stale) {
   const container = el[`${provider}-decision`];
   const status = el[`${provider}-decision-status`];
   const action = el[`${provider}-decision-action`];
-  if (!analytics) {
-    container.dataset.tone = "neutral";
-    status.textContent = `${label} 사용 흐름 확인 전`;
-    action.textContent = "최근 사용 속도를 계산하는 중입니다.";
-    return;
-  }
-  if (stale.has(provider)) {
-    container.dataset.tone = "neutral";
-    status.textContent = `${label} 최신 사용량 확인 필요`;
-    action.textContent = "마지막 수집 후 시간이 지났습니다. 지금 새로고침하세요.";
-    return;
-  }
-
-  const alerts = (analytics.alerts || []).filter((alert) => alert.provider === provider);
-  const critical = alerts.find((alert) => alert.severity === "critical");
-  const warning = alerts.find((alert) => alert.severity === "warning");
-  const priority = critical || warning;
-  const recommendation = visibleRecommendations(analytics, [provider])
-    .find((item) => item.provider === provider);
-  const limits = Object.values((analytics.providers[provider] && analytics.providers[provider].limits) || {})
-    .filter(Boolean);
-  const hasKnownForecast = limits.some((limit) => limit.forecastStatus === "safe" || limit.forecastStatus === "risk");
-
-  if (critical) {
-    container.dataset.tone = "critical";
-    status.textContent = `${label} 한도 위험 · ${critical.remainingPercent}% 남음`;
-  } else if (warning) {
-    container.dataset.tone = "warning";
-    status.textContent = warning.reason === "forecast_before_reset"
-      ? `${label} 리셋 전 소진 가능성`
-      : `${label} 한도 주의 · ${warning.remainingPercent}% 남음`;
-  } else if (!hasKnownForecast) {
-    container.dataset.tone = "neutral";
-    status.textContent = `${label} 소진 속도 계산 전`;
-    action.textContent = "잔여량이 줄어들면 리셋 전 고갈 여부를 계산합니다.";
-    return;
-  } else {
-    container.dataset.tone = "ok";
-    status.textContent = `${label} 현재 속도 유지 가능`;
-  }
-
-  action.textContent = warning && warning.reason === "forecast_before_reset" && warning.confidence === "low"
-    ? "고갈 시점의 오차가 큽니다. 큰 작업을 나누고 사용량을 줄이세요."
-    : recommendation
-    ? recommendation.action
-    : "현재 속도를 유지해도 됩니다. 작업량이 달라지면 다시 확인하세요.";
+  const copy = providerDecisionCopy(provider, analytics, stale.has(provider));
+  container.dataset.tone = copy.tone;
+  status.textContent = copy.status;
+  action.textContent = copy.action;
 }
 
 function render(snapshot) {
@@ -231,7 +188,7 @@ function render(snapshot) {
     });
     el["codex-reset"].textContent = resetText(codexLimit);
     el["codex-stamp"].textContent = ageText(snapshot.codex.ageMs);
-    renderProviderDecision("codex", analytics, snapshot, stale);
+    renderProviderDecision("codex", analytics, stale);
   }
 
   if (hasClaude) {
@@ -250,7 +207,7 @@ function render(snapshot) {
     });
     el["claude-reset"].textContent = firstResetText(claudeLimit, claudeSevenDay, claudeFiveHour);
     el["claude-stamp"].textContent = ageText(snapshot.claude.ageMs);
-    renderProviderDecision("claude", analytics, snapshot, stale);
+    renderProviderDecision("claude", analytics, stale);
   }
   el["always-on-top"].checked = Boolean(snapshot.window.alwaysOnTop);
   el.opacity.value = Math.round((snapshot.window.opacity || 0.96) * 100);
@@ -311,11 +268,11 @@ el["open-insights"].addEventListener("click", () => window.usageApp.openInsights
 el["open-details"].addEventListener("click", () => window.usageApp.openDetails());
 for (const provider of ["codex", "claude"]) {
   const decision = el[`${provider}-decision`];
-  decision.addEventListener("click", () => window.usageApp.openInsights());
+  decision.addEventListener("click", () => window.usageApp.openInsights(provider));
   decision.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      window.usageApp.openInsights();
+      window.usageApp.openInsights(provider);
     }
   });
 }
