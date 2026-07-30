@@ -70,6 +70,10 @@ fn current_path_values() -> Vec<OsString> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 
     let mut values = std::env::var_os("PATH").into_iter().collect::<Vec<_>>();
+    #[cfg(test)]
+    if std::env::var_os("AI_USAGE_MONITOR_TEST_PROCESS_PATH_ONLY").is_some() {
+        return values;
+    }
     let user = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(environment) = user.open_subkey("Environment")
         && let Ok(path) = environment.get_value::<String, _>("Path")
@@ -140,19 +144,22 @@ fn command_candidates(name: &str) -> Vec<PathBuf> {
     candidates
 }
 
-fn is_protected_codex_desktop_resource(path: &Path) -> bool {
+fn is_codex_desktop_candidate(path: &Path) -> bool {
     let normalized = path
         .to_string_lossy()
         .replace('/', "\\")
         .to_ascii_lowercase();
-    normalized.contains("\\windowsapps\\openai.codex_")
-        && normalized.contains("\\app\\resources\\codex")
+    let packaged_resource = normalized.contains("\\windowsapps\\openai.codex_")
+        && normalized.contains("\\app\\resources\\codex");
+    let app_execution_alias = normalized.ends_with("\\microsoft\\windowsapps\\codex")
+        || normalized.ends_with("\\microsoft\\windowsapps\\codex.exe");
+    packaged_resource || app_execution_alias
 }
 
 pub fn resolve_command(name: &str) -> Option<PathBuf> {
     command_candidates(name)
         .into_iter()
-        .find(|path| path.exists() && !is_protected_codex_desktop_resource(path))
+        .find(|path| path.exists() && !is_codex_desktop_candidate(path))
 }
 
 pub fn resolve_codex_command() -> Option<PathBuf> {
@@ -208,7 +215,7 @@ pub fn codex_cli_state() -> CliState {
     let desktop_bundle_found = ["codex.exe", "codex"]
         .iter()
         .flat_map(|name| command_candidates(name))
-        .any(|path| is_protected_codex_desktop_resource(&path));
+        .any(|path| is_codex_desktop_candidate(&path));
     if desktop_bundle_found {
         CliState::DesktopBundleOnly
     } else {
@@ -636,13 +643,73 @@ mod tests {
     }
 
     #[test]
-    fn packaged_codex_desktop_binary_is_not_a_standalone_cli() {
+    fn codex_desktop_candidates_are_not_standalone_clis() {
         let packaged = Path::new(
             r"C:\Program Files\WindowsApps\OpenAI.Codex_26.707.9981.0_x64__example\app\resources\codex.exe",
         );
+        let app_execution_alias =
+            Path::new(r"C:\Users\tester\AppData\Local\Microsoft\WindowsApps\codex.exe");
         let standalone = Path::new(r"C:\Users\tester\AppData\Roaming\npm\codex.cmd");
-        assert!(is_protected_codex_desktop_resource(packaged));
-        assert!(!is_protected_codex_desktop_resource(standalone));
+        let official_standalone =
+            Path::new(r"C:\Users\tester\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe");
+        assert!(is_codex_desktop_candidate(packaged));
+        assert!(is_codex_desktop_candidate(app_execution_alias));
+        assert!(!is_codex_desktop_candidate(standalone));
+        assert!(!is_codex_desktop_candidate(official_standalone));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_alias_does_not_mask_standalone_codex_auth() {
+        const CHILD_SCENARIO: &str = "AI_USAGE_MONITOR_CODEX_AUTH_TEST_SCENARIO";
+        const CHILD_COMMAND: &str = "AI_USAGE_MONITOR_CODEX_AUTH_TEST_COMMAND";
+        const TEST_NAME: &str =
+            "collector::tests::windows_alias_does_not_mask_standalone_codex_auth";
+
+        if let Ok(scenario) = std::env::var(CHILD_SCENARIO) {
+            let expected = PathBuf::from(
+                std::env::var_os(CHILD_COMMAND).expect("child command path is present"),
+            );
+            assert_eq!(resolve_codex_command(), Some(expected));
+            let probe = probe_codex_auth(Duration::from_secs(5));
+            let expected_state = if scenario == "authenticated" {
+                AuthState::Authenticated
+            } else {
+                AuthState::Unauthenticated
+            };
+            assert_eq!(probe.state, expected_state, "{:?}", probe.error);
+            return;
+        }
+
+        for (scenario, exit_code) in [("authenticated", 0), ("unauthenticated", 1)] {
+            let root = std::env::temp_dir().join(format!(
+                "ai-usage-monitor-codex-auth-{}-{scenario}",
+                std::process::id()
+            ));
+            let alias_dir = root.join("User/AppData/Local/Microsoft/WindowsApps");
+            let standalone_dir = root.join("Standalone");
+            std::fs::create_dir_all(&alias_dir).expect("alias directory is created");
+            std::fs::create_dir_all(&standalone_dir).expect("standalone directory is created");
+            std::fs::write(alias_dir.join("codex.exe"), []).expect("alias placeholder is created");
+            let standalone = standalone_dir.join("codex.cmd");
+            std::fs::write(&standalone, format!("@echo off\r\nexit /b {exit_code}\r\n"))
+                .expect("standalone command is created");
+
+            let system32 =
+                PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot")).join("System32");
+            let child_path = std::env::join_paths([alias_dir, standalone_dir, system32])
+                .expect("child PATH is valid");
+            let status = Command::new(std::env::current_exe().expect("test executable"))
+                .args(["--exact", TEST_NAME, "--nocapture"])
+                .env("PATH", child_path)
+                .env("AI_USAGE_MONITOR_TEST_PROCESS_PATH_ONLY", "1")
+                .env(CHILD_SCENARIO, scenario)
+                .env(CHILD_COMMAND, &standalone)
+                .status()
+                .expect("child auth probe starts");
+            let _ = std::fs::remove_dir_all(&root);
+            assert!(status.success(), "{scenario} child probe failed");
+        }
     }
 
     #[test]
