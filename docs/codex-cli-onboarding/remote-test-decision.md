@@ -63,13 +63,13 @@
 아래 값은 GitHub 외부 설정이 바뀌면 다시 확인해야 하는 dated snapshot이다.
 
 - repository collaborator가 한 명뿐이어서 서로 다른 T3 tester와 independent reviewer를 지정할 수 없음
-- `production-release` environment의 `prevent_self_review=false`
-- `production-release` environment의 `can_admins_bypass=true`
-- `release:t3-approved` label 미생성
-- repository release immutability 비활성
+- `production-release` environment의 `prevent_self_review=true`
+- `production-release` environment의 `can_admins_bypass=false`
+- `release:t3-approved` label은 생성했지만 사람 T3 증거 전에는 적용하지 않음
+- repository release immutability 활성(`enabled=true`, 향후 공개 Release부터 적용)
 - T3 tester, reviewer, QA account owner와 비용 승인자 미지정
 
-Workflow가 이 설정을 자동으로 완화하거나 우회하지 않는다. required reviewer, self-review 방지, administrator bypass 차단, label, immutability와 역할 분리가 모두 확인되기 전까지 공개 Release는 No-Go다.
+Workflow가 이 설정을 자동으로 완화하거나 우회하지 않는다. 저장소 통제는 fail-closed 상태지만, 독립 reviewer와 T3 역할 분리, 실제 T3 증거와 승인 label이 모두 확인되기 전까지 공개 Release는 No-Go다.
 
 ## 공식 운영 참고
 

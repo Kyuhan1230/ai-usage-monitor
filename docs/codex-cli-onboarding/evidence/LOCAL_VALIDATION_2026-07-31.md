@@ -70,10 +70,10 @@ This is a local validation artifact, not a public release candidate. Any subsequ
 
 The following gates were **not** completed by this local run:
 
-- Actual `/S` install and uninstall were not run locally because that could overwrite uninstall registration for the user's existing installation. The disposable remote Windows CI smoke must execute them.
-- The new official-installer T2 workflow has not yet run on the pushed commit. Its default and custom jobs must install the current official script, produce matching script hashes and CLI versions, and pass the live harness.
-- CI currently proves the `IfSilent` branch plus known Codex-file and User/Machine PATH invariance. It does not dynamically prove that every process in the installer tree attempted zero outbound packets.
-- Browser OAuth/MFA, first authenticated `account/rateLimits/read`, app restart, Windows reboot, legacy npm conflict, and uninstall preservation were not run. A human must complete those steps on a disposable Windows desktop by following the [T3 runbook](../REMOTE_WINDOWS_TEST.md).
-- GitHub release immutability, independent T3 tester/reviewer, and the protected `production-release` environment are external release prerequisites and remain No-Go until configured and evidenced.
+- Actual `/S` install and uninstall were not run locally because that could overwrite uninstall registration for the user's existing installation. Disposable Windows [CI run 30591165846](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30591165846) later passed silent install/uninstall and the public `1.2.7 -> 1.2.8` default/custom upgrade gate.
+- The official-installer [T2 run 30591165792](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30591165792) later passed its default and custom jobs on implementation commit `c4139574b364e93b60037245b1a8b0a2480346b6`.
+- CI now proves the silent and passive-update skip branches plus known Codex-file, credential-home, application-data, and process/User/Machine PATH invariance. It does not dynamically prove that every process in the installer tree attempted zero outbound packets.
+- Browser OAuth/MFA, first authenticated `account/rateLimits/read`, app restart, Windows reboot, legacy npm conflict, and the human uninstall-preservation lane were not run. A human must complete those steps on a disposable Windows desktop by following the [T3 runbook](../REMOTE_WINDOWS_TEST.md).
+- GitHub release immutability is enabled, and `production-release` prevents self-review and administrator bypass. Independent T3 tester/reviewer assignment and human T3 evidence remain external No-Go prerequisites.
 
 No local or T1/T2 result may be reported as proof of human login.

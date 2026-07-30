@@ -113,11 +113,11 @@ T2 implementation snapshot은 [2026-07-31 원격 T2 증거](evidence/REMOTE_T2_2
 
 ### 3.4 2026-07-31 원격 증거와 현재 No-Go
 
-Implementation commit `62c208c6821aa3db5c38da03c4ee2b8229d56492`에서 [T2 run 30567446372](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30567446372)의 기본 위치와 custom 위치 job이 모두 통과했다. 두 job은 같은 공식 installer script SHA-256 `391F247DE2C70C7E99041979EC02DAE7E76BE27AC9CFC1DFE7C1EB21D48D8B97`, Codex CLI `0.146.0`, 격리 `CODEX_HOME`의 `authenticated=false`와 repository live harness 성공을 기록했다.
+Implementation commit `c4139574b364e93b60037245b1a8b0a2480346b6`에서 [T2 run 30591165792](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30591165792)의 기본 위치와 custom 위치 job이 모두 통과했다. 두 job은 공식 standalone installer, 격리 `CODEX_HOME`의 unauthenticated 상태와 repository live harness 성공을 기록했다.
 
-같은 implementation commit의 [standard CI run 30567446378](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30567446378)은 test와 NSIS build 뒤 silent install의 installed-app byte comparison assertion에서 실패했다. 원인 수정 뒤 전체 standard CI와 변경된 release commit의 T2를 다시 통과하기 전까지 자동 gate는 pending이다.
+같은 commit의 [standard CI run 30591165846](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30591165846)은 전체 test, NSIS build, silent install/uninstall과 공개 `1.2.7 -> 1.2.8` default/custom passive upgrade를 통과했다. 이 upgrade gate는 앱 데이터, 격리 credential bytes, Codex CLI 대상, custom 설치 상태, process/user/machine PATH, 설치 위치와 제거 뒤 provider 상태의 불변성을 확인했다.
 
-사람 T3는 아직 수행하지 않았다. [원격 운영 결정](remote-test-decision.md)의 비용·image·담당자 `TBD`, 독립 tester/reviewer, protected `production-release` environment와 release immutability가 닫히기 전까지 공개 Release는 **No-Go**다.
+GitHub release immutability를 활성화했고 `production-release`는 self-review와 administrator bypass를 차단한다. 사람 T3는 아직 수행하지 않았으며 repository collaborator가 한 명뿐이라 독립 reviewer 승인이 불가능하다. [원격 운영 결정](remote-test-decision.md)의 비용·image·담당자 `TBD`, 독립 tester/reviewer와 실제 T3 증거가 닫히기 전까지 공개 Release는 **No-Go**다.
 
 ## 4. 공식 외부 계약
 
@@ -885,12 +885,12 @@ GitHub-hosted runner는 interactive browser/RDP OAuth를 검증할 수 없으므
 2026-07-31 상태:
 
 - implementation commit의 T2 default/custom: PASS
-- 최종 standard CI와 documentation을 포함한 release commit의 same-commit T2: pending
+- implementation commit의 standard CI와 공개 `1.2.7 -> 1.2.8` upgrade gate: PASS
 - 사람 T3와 first usage/reboot/conflict/uninstall: not run
 - T3 cloud 비용·image·tester/reviewer: `TBD`
 - repository collaborator: 독립 tester/reviewer를 충족하기에 부족
-- `production-release`: self-review 방지와 administrator bypass 차단이 미충족
-- release immutability: 비활성
+- `production-release`: self-review 방지와 administrator bypass 차단 완료
+- release immutability: 활성(`enabled=true`)
 
 따라서 현재 공개 Release는 No-Go다.
 
