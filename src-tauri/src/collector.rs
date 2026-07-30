@@ -670,7 +670,11 @@ mod tests {
             let expected = PathBuf::from(
                 std::env::var_os(CHILD_COMMAND).expect("child command path is present"),
             );
-            assert_eq!(resolve_codex_command(), Some(expected));
+            let resolved = resolve_codex_command().expect("standalone command is resolved");
+            assert_eq!(
+                std::fs::canonicalize(resolved).expect("resolved command is canonicalized"),
+                std::fs::canonicalize(expected).expect("expected command is canonicalized")
+            );
             let probe = probe_codex_auth(Duration::from_secs(5));
             let expected_state = if scenario == "authenticated" {
                 AuthState::Authenticated
