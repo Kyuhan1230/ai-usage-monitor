@@ -405,7 +405,7 @@ function staleProviders(snapshot, providers) {
   return new Set(providers.filter((provider) => {
     const state = snapshot[provider];
     const freshness = snapshot.capture[`${provider}FreshnessMs`];
-    return state.connected && Number.isFinite(state.ageMs) && state.ageMs > freshness;
+    return !state.connected || !Number.isFinite(state.ageMs) || state.ageMs > freshness;
   }));
 }
 

@@ -1,3 +1,7 @@
+use crate::codex_cli::{
+    ChildWindow, JobLifetime, ProcessTree, SelectedCodex, SetupSafeErrorCode,
+    selected_app_server_command, spawn_in_process_tree,
+};
 use crate::storage::{append_history_if_changed, home_dir, now_kst_iso, read_json, write_json};
 use chrono::{FixedOffset, TimeZone};
 use regex::Regex;
@@ -12,11 +16,61 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const MAX_CODEX_APP_SERVER_STDOUT_BYTES: u64 = 1024 * 1024;
+const CODEX_READER_JOIN_GRACE: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CodexCaptureError {
+    IdentityChanged,
+    Spawn,
+    Io,
+    Protocol,
+    Timeout,
+    Shutdown,
+    Storage,
+    CapabilityMissing,
+    AuthenticationUnconfirmed,
+}
+
+impl CodexCaptureError {
+    #[cfg(test)]
+    pub(crate) fn kind(self) -> &'static str {
+        match self {
+            Self::IdentityChanged => "identity",
+            Self::Spawn => "spawn",
+            Self::Io => "io",
+            Self::Protocol => "protocol",
+            Self::Timeout => "timeout",
+            Self::Shutdown => "shutdown",
+            Self::Storage => "storage",
+            Self::CapabilityMissing => "capability",
+            Self::AuthenticationUnconfirmed => "authentication",
+        }
+    }
+
+    pub(crate) fn safe_error_code(self) -> SetupSafeErrorCode {
+        match self {
+            Self::IdentityChanged => SetupSafeErrorCode::CandidateNotExecutable,
+            Self::Timeout => SetupSafeErrorCode::UsageCaptureTimeout,
+            Self::CapabilityMissing => SetupSafeErrorCode::UsageCapabilityMissing,
+            Self::AuthenticationUnconfirmed => SetupSafeErrorCode::LoginUnconfirmed,
+            Self::Spawn | Self::Io | Self::Protocol | Self::Shutdown | Self::Storage => {
+                SetupSafeErrorCode::UsageCaptureFailed
+            }
+        }
+    }
+
+    pub(crate) fn should_reprobe_auth(self) -> bool {
+        matches!(
+            self,
+            Self::Spawn | Self::Io | Self::Protocol | Self::Timeout
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CliState {
     Ready,
-    DesktopBundleOnly,
     Missing,
 }
 
@@ -49,7 +103,6 @@ impl CliState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ready => "ready",
-            Self::DesktopBundleOnly => "desktop_bundle_only",
             Self::Missing => "missing",
         }
     }
@@ -162,6 +215,7 @@ pub fn resolve_command(name: &str) -> Option<PathBuf> {
         .find(|path| path.exists() && !is_codex_desktop_candidate(path))
 }
 
+#[cfg(test)]
 pub fn resolve_codex_command() -> Option<PathBuf> {
     resolve_command("codex.exe")
         .or_else(|| resolve_command("codex"))
@@ -208,21 +262,6 @@ pub fn resolve_claude_command() -> Option<PathBuf> {
         })
 }
 
-pub fn codex_cli_state() -> CliState {
-    if resolve_codex_command().is_some() {
-        return CliState::Ready;
-    }
-    let desktop_bundle_found = ["codex.exe", "codex"]
-        .iter()
-        .flat_map(|name| command_candidates(name))
-        .any(|path| is_codex_desktop_candidate(&path));
-    if desktop_bundle_found {
-        CliState::DesktopBundleOnly
-    } else {
-        CliState::Missing
-    }
-}
-
 pub fn claude_cli_state() -> CliState {
     if resolve_claude_command().is_some() {
         CliState::Ready
@@ -265,6 +304,7 @@ fn probe_auth_command(
     }
 }
 
+#[cfg(test)]
 pub fn probe_codex_auth(timeout: Duration) -> AuthProbe {
     probe_auth_command(resolve_codex_command(), &["login", "status"], timeout)
 }
@@ -287,21 +327,45 @@ fn executable_command(path: &Path) -> Command {
     }
 }
 
-fn write_rpc(stdin: &mut impl Write, message: &Value) -> Result<(), String> {
-    writeln!(
-        stdin,
-        "{}",
-        serde_json::to_string(message).map_err(|error| error.to_string())?
-    )
-    .map_err(|error| error.to_string())?;
-    stdin.flush().map_err(|error| error.to_string())
+fn write_rpc(stdin: &mut impl Write, message: &Value) -> Result<(), CodexCaptureError> {
+    let body = serde_json::to_string(message).map_err(|_| CodexCaptureError::Protocol)?;
+    writeln!(stdin, "{body}").map_err(|_| CodexCaptureError::Io)?;
+    stdin.flush().map_err(|_| CodexCaptureError::Io)
 }
 
-fn stop_child(child: &mut Child) {
-    if child.try_wait().ok().flatten().is_none() {
-        let _ = child.kill();
+fn stop_child(child: &mut Child, process_tree: &ProcessTree) -> bool {
+    process_tree.terminate_and_wait(child)
+}
+
+fn join_reader_by<T>(handle: thread::JoinHandle<T>, deadline: Instant) -> Option<T> {
+    while !handle.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
     }
-    let _ = child.wait();
+    handle.is_finished().then(|| handle.join().ok()).flatten()
+}
+
+fn drain_reader(mut reader: impl Read) -> bool {
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => return true,
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+}
+
+enum AppServerEvent {
+    Line(String),
+    ReadFailed,
+}
+
+fn rpc_error_is_method_missing(message: &Value) -> bool {
+    message
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_i64)
+        == Some(-32601)
 }
 
 fn clamp_percent(value: f64) -> i64 {
@@ -356,8 +420,13 @@ pub fn build_codex_status(rate_result: &Value) -> Value {
         "parse_status": if ok { "ok" } else { "failed" },
         "limits": limits,
         "raw_status_text": "",
-        "rate_limit_reset_credits": rate_result.get("rateLimitResetCredits"),
-        "spend_control_reached": rate_result.get("spendControlReached"),
+        "rate_limit_reset_credits": rate_result
+            .get("rateLimitResetCredits")
+            .and_then(Value::as_i64)
+            .map(|value| value.max(0)),
+        "spend_control_reached": rate_result
+            .get("spendControlReached")
+            .and_then(Value::as_bool),
         "capture": {
             "state": if ok { "on_demand_ok" } else { "on_demand_failed" },
             "detail": "official Codex app-server account snapshot",
@@ -367,96 +436,176 @@ pub fn build_codex_status(rate_result: &Value) -> Value {
     })
 }
 
-pub fn capture_codex(
+pub(crate) fn capture_codex_with(
+    selected: &SelectedCodex,
     status_path: &Path,
     history_dir: &Path,
     timeout: Duration,
-) -> Result<Value, String> {
-    let executable =
-        resolve_codex_command().ok_or_else(|| "Codex CLI를 찾을 수 없습니다.".to_string())?;
-    let mut command = executable_command(&executable);
+) -> Result<Value, CodexCaptureError> {
+    let mut command =
+        selected_app_server_command(selected).map_err(|_| CodexCaptureError::IdentityChanged)?;
     command
-        .args(["app-server", "--listen", "stdio://"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    hide_window(&mut command);
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "Codex stdin을 열 수 없습니다.".to_string())?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Codex stdout을 열 수 없습니다.".to_string())?;
+    if !selected.identity_unchanged() {
+        return Err(CodexCaptureError::IdentityChanged);
+    }
+    let (mut child, process_tree) =
+        spawn_in_process_tree(command, ChildWindow::Hidden, JobLifetime::KillOnDrop)
+            .map_err(|_| CodexCaptureError::Spawn)?;
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = stop_child(&mut child, &process_tree);
+        return Err(CodexCaptureError::Io);
+    };
+    let Some(stdout) = child.stdout.take() else {
+        drop(stdin);
+        let _ = stop_child(&mut child, &process_tree);
+        return Err(CodexCaptureError::Io);
+    };
     let stderr = child.stderr.take();
-    let (sender, receiver) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            let _ = sender.send(line);
+    let (sender, receiver) = mpsc::channel::<AppServerEvent>();
+    let stdout_thread = thread::spawn(move || {
+        for line in BufReader::new(stdout.take(MAX_CODEX_APP_SERVER_STDOUT_BYTES)).lines() {
+            match line {
+                Ok(line) => {
+                    if sender.send(AppServerEvent::Line(line)).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    let _ = sender.send(AppServerEvent::ReadFailed);
+                    return false;
+                }
+            }
         }
+        true
     });
-    let stderr_thread = thread::spawn(move || {
-        let mut text = String::new();
-        if let Some(mut stderr) = stderr {
-            let _ = stderr.read_to_string(&mut text);
-        }
-        text
-    });
+    let stderr_thread = thread::spawn(move || stderr.map(drain_reader).unwrap_or(true));
 
-    write_rpc(
+    let initialize_write = write_rpc(
         &mut stdin,
         &json!({
             "method": "initialize",
             "id": 1,
             "params": {"clientInfo": {"name": "ai_usage_monitor", "title": "AI Usage Monitor", "version": env!("CARGO_PKG_VERSION")}}
         }),
-    )?;
+    );
+    if let Err(error) = initialize_write {
+        drop(stdin);
+        let _ = stop_child(&mut child, &process_tree);
+        let join_deadline = Instant::now() + CODEX_READER_JOIN_GRACE;
+        let _ = join_reader_by(stdout_thread, join_deadline);
+        let _ = join_reader_by(stderr_thread, join_deadline);
+        return Err(error);
+    }
 
     let deadline = Instant::now() + timeout;
     let mut rate_result = None;
     let mut initialized = false;
+    let mut capture_failure = None;
+    let mut saw_malformed_message = false;
     while Instant::now() < deadline && rate_result.is_none() {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        let line = match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
-            Ok(line) => line,
+        let event = match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
+            Ok(event) => event,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(_) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                capture_failure = Some(CodexCaptureError::Protocol);
+                break;
+            }
+        };
+        let line = match event {
+            AppServerEvent::Line(line) => line,
+            AppServerEvent::ReadFailed => {
+                capture_failure = Some(CodexCaptureError::Io);
+                break;
+            }
         };
         let message = match serde_json::from_str::<Value>(&line) {
             Ok(message) => message,
-            Err(_) => continue,
+            Err(_) => {
+                saw_malformed_message = true;
+                continue;
+            }
         };
         match message.get("id").and_then(Value::as_i64) {
             Some(1) if message.get("error").is_none() => {
                 initialized = true;
-                write_rpc(&mut stdin, &json!({"method": "initialized"}))?;
-                write_rpc(
-                    &mut stdin,
-                    &json!({"method": "account/rateLimits/read", "id": 2}),
-                )?;
+                if let Err(error) = write_rpc(&mut stdin, &json!({"method": "initialized"}))
+                    .and_then(|_| {
+                        write_rpc(
+                            &mut stdin,
+                            &json!({"method": "account/rateLimits/read", "id": 2}),
+                        )
+                    })
+                {
+                    capture_failure = Some(error);
+                    break;
+                }
             }
-            Some(1) => break,
-            Some(2) => rate_result = message.get("result").cloned(),
+            Some(1) => {
+                capture_failure = Some(if rpc_error_is_method_missing(&message) {
+                    CodexCaptureError::CapabilityMissing
+                } else {
+                    CodexCaptureError::Protocol
+                });
+                break;
+            }
+            Some(2) if message.get("error").is_some() => {
+                capture_failure = Some(if rpc_error_is_method_missing(&message) {
+                    CodexCaptureError::CapabilityMissing
+                } else {
+                    CodexCaptureError::Protocol
+                });
+                break;
+            }
+            Some(2) => {
+                rate_result = message.get("result").cloned();
+                if rate_result.is_none() {
+                    capture_failure = Some(CodexCaptureError::Protocol);
+                    break;
+                }
+            }
             _ => {}
         }
     }
-    drop(stdin);
-    stop_child(&mut child);
-    let stderr = stderr_thread.join().unwrap_or_default();
-    if !initialized {
-        return Err(format!(
-            "Codex app-server 초기화에 실패했습니다. {}",
-            stderr.trim()
-        ));
+    if capture_failure.is_none() && rate_result.is_none() {
+        capture_failure = Some(if saw_malformed_message {
+            CodexCaptureError::Protocol
+        } else {
+            CodexCaptureError::Timeout
+        });
     }
-    let rate_result =
-        rate_result.ok_or_else(|| "Codex 계정 한도 응답 시간이 초과됐습니다.".to_string())?;
+    drop(stdin);
+    let stopped = stop_child(&mut child, &process_tree);
+    let join_deadline = Instant::now() + CODEX_READER_JOIN_GRACE;
+    let stdout_read_ok = join_reader_by(stdout_thread, join_deadline);
+    let stderr_read_ok = join_reader_by(stderr_thread, join_deadline);
+    if stdout_read_ok.is_none() || stderr_read_ok.is_none() {
+        return Err(CodexCaptureError::Shutdown);
+    }
+    if !stopped {
+        return Err(CodexCaptureError::Shutdown);
+    }
+    if stdout_read_ok == Some(false) || stderr_read_ok == Some(false) {
+        return Err(CodexCaptureError::Io);
+    }
+    if let Some(error) = capture_failure {
+        return Err(error);
+    }
+    if !initialized {
+        return Err(CodexCaptureError::Protocol);
+    }
+    let rate_result = rate_result.ok_or(CodexCaptureError::Timeout)?;
     let status = build_codex_status(&rate_result);
+    if status.get("parse_status").and_then(Value::as_str) != Some("ok") {
+        return Err(CodexCaptureError::Protocol);
+    }
     let previous = read_json(status_path);
-    write_json(status_path, &status)?;
-    append_history_if_changed(history_dir, &status, previous.as_ref())?;
+    append_history_if_changed(history_dir, &status, previous.as_ref())
+        .map_err(|_| CodexCaptureError::Storage)?;
+    write_json(status_path, &status).map_err(|_| CodexCaptureError::Storage)?;
     Ok(status)
 }
 
@@ -624,13 +773,21 @@ mod tests {
 
     #[test]
     fn codex_windows_become_remaining_limits() {
-        let status = build_codex_status(&json!({"rateLimits": {
-            "primary": {"usedPercent": 27, "windowDurationMins": 300, "resetsAt": 1784334600},
-            "secondary": {"usedPercent": 61, "windowDurationMins": 10080, "resetsAt": 1784766600}
-        }}));
+        let status = build_codex_status(&json!({
+            "rateLimits": {
+                "primary": {"usedPercent": 27, "windowDurationMins": 300, "resetsAt": 1784334600},
+                "secondary": {"usedPercent": 61, "windowDurationMins": 10080, "resetsAt": 1784766600}
+            },
+            "rateLimitResetCredits": r"C:\Users\private-user\codex.exe",
+            "spendControlReached": {"stderr": "private"}
+        }));
         assert_eq!(status["limits"][0]["remaining_percent"], 73);
         assert_eq!(status["limits"][1]["type"], "weekly");
+        assert!(status["rate_limit_reset_credits"].is_null());
+        assert!(status["spend_control_reached"].is_null());
         assert_eq!(status["raw_status_text"], "");
+        assert!(!status.to_string().contains("private-user"));
+        assert!(!status.to_string().contains("stderr"));
     }
 
     #[test]
@@ -731,5 +888,134 @@ mod tests {
         assert_eq!(auth_state_from_success(false), AuthState::Unauthenticated);
         assert_eq!(AuthState::Unavailable.as_str(), "unavailable");
         assert_eq!(AuthState::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn codex_capture_failures_are_typed_and_privacy_safe() {
+        let cases = [
+            (CodexCaptureError::IdentityChanged, "identity"),
+            (CodexCaptureError::Spawn, "spawn"),
+            (CodexCaptureError::Io, "io"),
+            (CodexCaptureError::Protocol, "protocol"),
+            (CodexCaptureError::Timeout, "timeout"),
+            (CodexCaptureError::Shutdown, "shutdown"),
+            (CodexCaptureError::Storage, "storage"),
+            (CodexCaptureError::CapabilityMissing, "capability"),
+            (
+                CodexCaptureError::AuthenticationUnconfirmed,
+                "authentication",
+            ),
+        ];
+        for (error, expected_kind) in cases {
+            assert_eq!(error.kind(), expected_kind);
+            let public = serde_json::to_string(&error.safe_error_code())
+                .expect("safe capture error code serializes");
+            assert!(!public.contains('\\'));
+            assert!(!public.to_ascii_lowercase().contains("stderr"));
+            assert!(!public.to_ascii_lowercase().contains("stdout"));
+        }
+        assert_eq!(
+            CodexCaptureError::Timeout.safe_error_code(),
+            SetupSafeErrorCode::UsageCaptureTimeout
+        );
+        assert_eq!(
+            CodexCaptureError::CapabilityMissing.safe_error_code(),
+            SetupSafeErrorCode::UsageCapabilityMissing
+        );
+        assert_eq!(
+            CodexCaptureError::AuthenticationUnconfirmed.safe_error_code(),
+            SetupSafeErrorCode::LoginUnconfirmed
+        );
+    }
+
+    #[test]
+    fn only_json_rpc_method_missing_is_a_capability_failure() {
+        assert!(rpc_error_is_method_missing(
+            &json!({"id": 2, "error": {"code": -32601, "message": "private"}})
+        ));
+        assert!(!rpc_error_is_method_missing(
+            &json!({"id": 2, "error": {"code": -32000, "message": "private"}})
+        ));
+        assert!(!rpc_error_is_method_missing(
+            &json!({"id": 2, "error": {"message": "method not found"}})
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_app_server_timeout_and_method_missing_stay_distinct() {
+        use crate::codex_cli::LauncherType;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is after Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "ai-usage-monitor-codex-capture-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("capture test directory is created");
+        let _cleanup = Cleanup(root.clone());
+        let child_path = std::env::var_os("PATH").expect("test PATH is available");
+
+        let timeout_cli = root.join("timeout.cmd");
+        std::fs::write(
+            &timeout_cli,
+            concat!(
+                "@echo off\r\n",
+                ">&2 echo C:\\Users\\private-user\\codex.exe\r\n",
+                "\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 5\" >nul\r\n"
+            ),
+        )
+        .expect("timeout fixture is written");
+        let timeout_selected =
+            SelectedCodex::new(timeout_cli, child_path.clone(), LauncherType::Cmd);
+        let timeout_error = capture_codex_with(
+            &timeout_selected,
+            &root.join("timeout-status.json"),
+            &root.join("timeout-history"),
+            Duration::from_millis(100),
+        )
+        .expect_err("silent app-server must time out");
+        assert_eq!(timeout_error, CodexCaptureError::Timeout);
+        assert_eq!(
+            timeout_error.safe_error_code(),
+            SetupSafeErrorCode::UsageCaptureTimeout
+        );
+
+        let unsupported_cli = root.join("unsupported.cmd");
+        std::fs::write(
+            &unsupported_cli,
+            concat!(
+                "@echo off\r\n",
+                "echo {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\r\n",
+                "echo {\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32601,\"message\":\"C:\\\\Users\\\\private-user\\\\codex.exe\"}}\r\n",
+                ">&2 echo C:\\Users\\private-user\\codex.exe\r\n",
+                "\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 5\" >nul\r\n"
+            ),
+        )
+        .expect("unsupported fixture is written");
+        let unsupported_selected =
+            SelectedCodex::new(unsupported_cli, child_path, LauncherType::Cmd);
+        let unsupported_error = capture_codex_with(
+            &unsupported_selected,
+            &root.join("unsupported-status.json"),
+            &root.join("unsupported-history"),
+            Duration::from_secs(5),
+        )
+        .expect_err("method-not-found response must be unsupported");
+        assert_eq!(unsupported_error, CodexCaptureError::CapabilityMissing);
+        assert_eq!(
+            unsupported_error.safe_error_code(),
+            SetupSafeErrorCode::UsageCapabilityMissing
+        );
     }
 }

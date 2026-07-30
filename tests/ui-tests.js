@@ -60,6 +60,16 @@ assert(nsisHooks.includes("IfSilent cli_offer_done"), "무인 설치에서는 CL
 assert.strictEqual((nsisHooks.match(/MB_YESNO\|MB_DEFBUTTON2/g) || []).length, 1, "기본 설치는 Codex CLI만 선택적으로 제안해야 합니다.");
 assert(nsisHooks.includes("https://chatgpt.com/codex/install.ps1"), "OpenAI 공식 Windows 설치 스크립트만 사용해야 합니다.");
 assert(!nsisHooks.includes("https://claude.ai/install.ps1"), "Claude 설치는 Setup에서 사용자가 명시적으로 선택해야 합니다.");
+assert(
+  nsisHooks.includes('StrCmp $3 "$LOCALAPPDATA\\Microsoft\\WindowsApps\\" cli_search_path_is_desktop')
+    && nsisHooks.includes('StrCmp $3 "$PROGRAMFILES\\WindowsApps\\OpenAI.Codex_" cli_search_path_is_desktop')
+    && nsisHooks.includes('StrCmp $3 "$PROGRAMFILES64\\WindowsApps\\OpenAI.Codex_" cli_search_path_is_desktop'),
+  "NSIS PATH 확인은 App Execution Alias와 Codex desktop bundle을 독립 CLI로 오인하면 안 됩니다.",
+);
+assert(
+  nsisHooks.includes('StrCmp $0 "exe" cli_check_path_cmd cli_offer_prompt'),
+  "codex.exe가 desktop 전용 경로면 실제 codex.cmd를 계속 찾고, 둘 다 없으면 설치를 제안해야 합니다.",
+);
 assert(nsisHooks.includes("$LOCALAPPDATA\\Programs\\OpenAI\\Codex\\bin\\codex.exe"));
 assert(nsisHooks.includes("$APPDATA\\npm\\codex.cmd"));
 assert(!/\bcodex(?:\.exe)?\s+login\b/i.test(nsisHooks), "설치 프로그램이 계정 로그인을 자동 실행하면 안 됩니다.");
@@ -85,6 +95,10 @@ assert.deepStrictEqual(
   "런타임 소스에는 표시용 공식 가격 출처 외의 URL이 없어야 합니다.",
 );
 const rustEntry = fs.readFileSync(path.join(root, "src-tauri", "src", "lib.rs"), "utf8");
+const collectorSource = fs.readFileSync(
+  path.join(root, "src-tauri", "src", "collector.rs"),
+  "utf8",
+);
 const setupBlock = rustEntry.slice(rustEntry.indexOf(".setup("), rustEntry.indexOf(".on_window_event("));
 assert(!setupBlock.includes("refresh_all"), "앱 시작 시 CLI 수집을 자동 실행하면 안 됩니다.");
 assert(setupBlock.includes('--background'), "로그인 시작은 WebView 없는 트레이 모드를 사용해야 합니다.");
@@ -165,6 +179,7 @@ const {
   visibleRecommendations,
   providerDecisionCopy,
 } = require(path.join(ui, "provider-view.js"));
+const { stateText } = require(path.join(ui, "status-health.js"));
 assert.doesNotThrow(
   () => new vm.Script([bridgeScript, providerViewScript, insightsScript].join("\n")),
   "Insights에서 함께 로드되는 classic script의 전역 const 이름이 충돌하면 안 됩니다.",
@@ -210,6 +225,37 @@ assert.deepStrictEqual(
   }),
   ["codex"],
   "인증 확인 전에는 성공적으로 수집한 기존 공급자만 안전하게 표시합니다.",
+);
+assert.strictEqual(
+  stateText({
+    connected: false,
+    ageMs: 1_000,
+    staleText: "지연",
+    captureState: "on_demand_failed",
+    freshnessMs: 10_000,
+    safeErrorCode: "usage_capture_timeout",
+  }),
+  "Codex 사용량 확인 시간이 초과됐습니다.",
+);
+assert.strictEqual(
+  stateText({
+    connected: false,
+    ageMs: 1_000,
+    staleText: "지연",
+    captureState: "on_demand_failed",
+    freshnessMs: 10_000,
+    safeErrorCode: String.raw`C:\Users\private-user\stderr.txt`,
+  }),
+  "확인 필요",
+  "renderer must ignore raw or unknown capture errors",
+);
+assert(
+  compactScript.includes("!state.connected || !Number.isFinite(state.ageMs)"),
+  "Compact는 현재 capture 실패 시 보존된 last_success 값으로 안전 판정을 내리면 안 됩니다.",
+);
+assert(
+  /function staleProviders\(snapshot, providers\)[\s\S]*?return !state\.connected \|\| !Number\.isFinite\(state\.ageMs\) \|\| state\.ageMs > freshness;/.test(insightsScript),
+  "Insights는 현재 capture 실패 시 보존된 last_success 값으로 안전 판정을 내리면 안 됩니다.",
 );
 assert(providerViewScript.includes("visibleRecommendations(analytics, [provider])"), "Compact 우선 문구는 현재 공급자로 걸러야 합니다.");
 assert(insightsScript.includes("visibleRecommendations(analytics, providers)"), "Insights 권장 문구는 인증된 공급자로 걸러야 합니다.");
@@ -364,6 +410,66 @@ assert(languageScript.includes('new Set(["ko", "en"])'), "지원 언어는 한�
 assert(languageScript.includes("MutationObserver"), "동적으로 갱신되는 상태 문구에도 선택 언어를 적용해야 합니다.");
 assert(setupHtml.includes('id="language-select"'), "설정 화면에 언어 선택 컨트롤이 필요합니다.");
 assert(setupScript.includes("window.usageLanguage.setLanguage"), "설정에서 선택한 언어를 즉시 적용해야 합니다.");
+const languageWindow = {
+  addEventListener() {},
+  dispatchEvent() {},
+  localStorage: {
+    getItem() { return "en"; },
+    setItem() {},
+  },
+  location: { reload() {} },
+  setTimeout() {},
+};
+const languageContext = {
+  window: languageWindow,
+  document: {
+    addEventListener() {},
+    body: null,
+    documentElement: {},
+  },
+  MutationObserver: class {
+    observe() {}
+  },
+  Node: { TEXT_NODE: 3 },
+  Element: class {},
+  CustomEvent: class {},
+};
+vm.runInNewContext(languageScript, languageContext);
+const translateSetupText = languageWindow.usageLanguage.translateText;
+assert.strictEqual(
+  translateSetupText("앱은 선택된 Codex CLI에서 로그인 명령까지만 시작합니다. 브라우저의 계정 입력, MFA와 승인은 사용자가 직접 완료합니다."),
+  "The app only starts the sign-in command using the selected Codex CLI. You complete account entry, MFA, and approval in the browser.",
+);
+assert.strictEqual(
+  translateSetupText("사용 가능한 Codex CLI 2개가 충돌합니다. 사용할 CLI를 아래에서 직접 선택하세요."),
+  "2 Codex CLI candidates conflict. Select the CLI to use below.",
+);
+assert.strictEqual(
+  translateSetupText("Codex CLI 확인 완료 · 로그인 확인 완료 · 사용자 PATH #2 · CLI-A1 · exe launcher · v1.2.3 · 공급자 출처 미확인"),
+  "Codex CLI ready · Sign-in confirmed · User PATH #2 · CLI-A1 · exe launcher · v1.2.3 · Publisher provenance unverified",
+);
+assert.strictEqual(
+  translateSetupText(`OpenAI Codex CLI 공식 설치 프로그램을 실행할까요?
+
+출처: https://chatgpt.com/codex/install.ps1
+인터넷에서 CLI를 내려받고 사용자 PATH를 변경할 수 있습니다.
+CLI는 이 앱에 포함되지 않으며 일반 사용자는 Node.js, npm 또는 Rust를 설치할 필요가 없습니다.
+실행 중에는 이 화면에서 취소를 요청할 수 있으며, 종료 확인 단계에 들어가면 취소할 수 없습니다.`),
+  `Run the official OpenAI Codex CLI installer?
+
+Source: https://chatgpt.com/codex/install.ps1
+The installer downloads the CLI from the internet and may update your user PATH.
+The CLI is not bundled with this app, and regular users do not need to install Node.js, npm, or Rust.
+You can request cancellation from this screen while it is running; cancellation is unavailable after final verification begins.`,
+);
+assert.strictEqual(
+  translateSetupText("Codex 사용량 확인 시간이 초과됐습니다."),
+  "Checking Codex usage timed out.",
+);
+assert.strictEqual(
+  translateSetupText("Codex 사용량을 확인하지 못했습니다."),
+  "Codex usage could not be checked.",
+);
 assert(compactCss.includes("color: var(--provider)"), "공급자 메시지 헤더는 아이콘과 같은 식별색을 사용해야 합니다.");
 for (const stylesheet of [setupCss, insightsCss, detailsCss, updateCss]) {
   assert(stylesheet.includes("var(--page-padding)") || stylesheet.includes("var(--card-padding)"), "내부 화면은 공통 간격 토큰을 사용해야 합니다.");
@@ -402,7 +508,13 @@ assert(
   !/updateDetail.textContent = `현재 최신 버전/.test(setupScript),
   "최신 상태 문구에 버전이 빠지면 사용자가 자기 버전을 알 수 없습니다.",
 );
-const { deriveSetupView } = require(path.join(ui, "setup-view.js"));
+const {
+  codexActionPlan,
+  deriveCodexView,
+  deriveSetupView,
+  normalizeCodexSetup,
+  safeErrorText,
+} = require(path.join(ui, "setup-view.js"));
 function setupFixture(codexState, claudeState) {
   return {
     setup: {
@@ -441,8 +553,387 @@ const selectedClaudeOnly = deriveSetupView(
   { setupMode: "claudeOnly", claudeSectionExpanded: true },
 );
 assert.strictEqual(selectedClaudeOnly.canComplete, true);
-assert(rustEntry.includes("let codex_ready = codex_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
-assert(rustEntry.includes("let claude_ready = claude_cli_state() == CliState::Ready"), "설치된 공급자만 수집해야 합니다.");
+
+function codexSetupFixture({
+  cliState = "ready",
+  authState = "unauthenticated",
+  authError = null,
+  installState = "idle",
+  installError = null,
+  installCancelable = ["starting", "running", "long_running"].includes(installState),
+  loginState = "idle",
+  loginError = null,
+  loginCancelable = ["starting", "running", "long_running"].includes(loginState),
+  candidateCount = 0,
+  conflictCount = cliState === "conflict" ? candidateCount : 0,
+  selected = null,
+  deviceAuthSupported = true,
+} = {}) {
+  const candidates = Array.from({ length: candidateCount }, (_, index) => ({
+    candidateId: `candidate-${index + 1}`,
+    candidateTag: `CLI-A${index + 1}`,
+    displayLabel: `사용자 PATH #${index + 1}`,
+    source: "user_path",
+    launcher: "exe",
+    version: `1.2.${index + 1}`,
+    compatibility: "supported",
+    provenance: "unverified",
+    path: String.raw`C:\Users\private-user\candidate-${index + 1}\codex.exe`,
+  }));
+  return {
+    codexSetup: {
+      cliState,
+      selected,
+      candidates,
+      candidateCount,
+      conflictCount,
+      deviceAuthSupported,
+      install: {
+        operationId: "install-op",
+        state: installState,
+        safeErrorCode: installError,
+        cancelable: installCancelable,
+      },
+      login: {
+        operationId: "login-op",
+        state: loginState,
+        safeErrorCode: loginError,
+        cancelable: loginCancelable,
+      },
+      auth: { state: authState, safeErrorCode: authError },
+    },
+    claudeAuth: { state: "unauthenticated" },
+  };
+}
+
+const codexCliViewCases = [
+  ["probing", "unauthenticated", "none", "progress", "확인하는 중"],
+  ["missing", "unavailable", "install", "warning", "없습니다"],
+  ["desktop_bundle_only", "unavailable", "install", "warning", "데스크톱 앱만"],
+  ["invalid_candidate", "unavailable", "install", "error", "실행하거나 버전을 확인"],
+  ["runtime_dependency_missing", "unavailable", "install", "error", "Node.js가 없습니다"],
+  ["runtime_dependency_incompatible", "unavailable", "install", "error", "호환되지 않습니다"],
+  ["unsupported", "unavailable", "install", "warning", "필요한 명령을 지원하지 않습니다"],
+  ["conflict", "unavailable", "refresh", "warning", "충돌합니다"],
+  ["probe_error", "error", "refresh", "error", "판정하지 못했습니다"],
+  ["ready", "checking", "none", "progress", "확인 중"],
+  ["ready", "unauthenticated", "login", "warning", "로그인이 필요합니다"],
+  ["ready", "authenticated", "none", "ok", "로그인 확인 완료"],
+];
+for (const [cliState, authStateValue, action, kind, copy] of codexCliViewCases) {
+  const view = deriveCodexView(codexSetupFixture({
+    cliState,
+    authState: authStateValue,
+    candidateCount: cliState === "conflict" ? 2 : 0,
+  }));
+  assert.strictEqual(view.primary.action, action, `${cliState}/${authStateValue} primary action`);
+  assert.strictEqual(view.kind, kind, `${cliState}/${authStateValue} status kind`);
+  assert(view.text.includes(copy), `${cliState}/${authStateValue} copy: ${view.text}`);
+}
+
+const camelDto = codexSetupFixture({
+  cliState: "conflict",
+  authState: "error",
+  authError: "auth_probe_timeout",
+  installState: "failed",
+  installError: "install_exit_nonzero",
+  candidateCount: 2,
+});
+camelDto.codexSetup.install.id = "legacy-install";
+camelDto.codexSetup.install.error = "install_spawn_failed";
+camelDto.codexSetup.auth.error = "auth_probe_failed";
+const normalizedCamelDto = normalizeCodexSetup(camelDto);
+assert.deepStrictEqual(
+  normalizedCamelDto.install,
+  {
+    state: "failed",
+    operationId: "install-op",
+    safeErrorCode: "install_exit_nonzero",
+    cancelable: false,
+  },
+  "camelCase operation DTO must take precedence over legacy aliases",
+);
+assert.deepStrictEqual(
+  normalizedCamelDto.auth,
+  { state: "error", safeErrorCode: "auth_probe_timeout" },
+  "camelCase auth.safeErrorCode must take precedence over auth.error",
+);
+assert.deepStrictEqual(
+  Object.keys(normalizedCamelDto.candidates[0]).sort(),
+  [
+    "candidateId",
+    "candidateTag",
+    "compatibility",
+    "displayLabel",
+    "launcher",
+    "provenance",
+    "safeErrorCode",
+    "source",
+    "version",
+  ],
+  "candidate normalization must preserve only the renderer-safe DTO allowlist",
+);
+assert(!JSON.stringify(normalizedCamelDto).includes("private-user"));
+
+const legacyOperationDto = codexSetupFixture({ installState: "failed" });
+delete legacyOperationDto.codexSetup.install.operationId;
+delete legacyOperationDto.codexSetup.install.safeErrorCode;
+legacyOperationDto.codexSetup.install.id = "legacy-install";
+legacyOperationDto.codexSetup.install.error = "install_spawn_failed";
+assert.deepStrictEqual(
+  normalizeCodexSetup(legacyOperationDto).install,
+  {
+    state: "failed",
+    operationId: "legacy-install",
+    safeErrorCode: "install_spawn_failed",
+    cancelable: false,
+  },
+  "legacy operation aliases must remain supported",
+);
+
+const conflictSelectionView = deriveCodexView(codexSetupFixture({
+  cliState: "conflict",
+  authState: "unavailable",
+  candidateCount: 2,
+}));
+assert.deepStrictEqual(
+  conflictSelectionView.candidateOptions.map((candidate) => candidate.candidateId),
+  ["candidate-1", "candidate-2"],
+);
+assert(conflictSelectionView.candidateOptions[0].label.includes("사용자 PATH #1"));
+assert(conflictSelectionView.candidateOptions[0].label.includes("CLI-A1"));
+assert(!JSON.stringify(conflictSelectionView.candidateOptions).includes("private-user"));
+
+const lowerPriorityCandidateView = deriveCodexView(codexSetupFixture({
+  cliState: "ready",
+  authState: "authenticated",
+  candidateCount: 2,
+  conflictCount: 1,
+  selected: {
+    candidateId: "candidate-selected",
+    candidateTag: "CLI-A1",
+    displayLabel: "기본 standalone 경로",
+    source: "default_standalone_path",
+    launcher: "exe",
+    version: "1.2.7",
+    compatibility: "supported",
+    provenance: "tracked_official_install",
+  },
+}));
+assert.strictEqual(lowerPriorityCandidateView.kind, "warning");
+assert(lowerPriorityCandidateView.text.includes("추가 Codex 후보 1개"));
+assert(lowerPriorityCandidateView.text.includes("예전 npm 설치"));
+assert(lowerPriorityCandidateView.text.includes("업데이트하거나 제거"));
+assert.deepStrictEqual(lowerPriorityCandidateView.candidateOptions, []);
+assert(
+  translateSetupText(lowerPriorityCandidateView.text)
+    .includes("1 additional Codex CLI candidate"),
+);
+
+for (const installState of ["starting", "running", "long_running"]) {
+  const view = deriveCodexView(codexSetupFixture({ cliState: "missing", installState }));
+  assert.strictEqual(view.primary.disabled, true, `${installState} 중 중복 설치를 차단합니다.`);
+  assert.strictEqual(view.secondary.action, "cancel_install");
+  assert.deepStrictEqual(view.poll, { kind: "install", operationId: "install-op" });
+}
+for (const loginState of ["starting", "running", "long_running"]) {
+  const view = deriveCodexView(codexSetupFixture({ loginState }));
+  assert.strictEqual(view.primary.disabled, true, `${loginState} 중 중복 로그인을 차단합니다.`);
+  assert.strictEqual(view.secondary.action, "cancel_login");
+  assert.deepStrictEqual(view.poll, { kind: "login", operationId: "login-op" });
+  assert(view.text.includes("사용자가 직접") || view.text.includes("취소할 수"));
+}
+const installVerifying = deriveCodexView(codexSetupFixture({
+  cliState: "missing",
+  installState: "running",
+  installCancelable: false,
+}));
+assert.strictEqual(installVerifying.secondary.action, "none");
+assert.deepStrictEqual(installVerifying.poll, { kind: "install", operationId: "install-op" });
+assert(installVerifying.text.includes("실행·취소 결과와 설치된 CLI를 검증"));
+const loginVerifying = deriveCodexView(codexSetupFixture({
+  loginState: "running",
+  loginCancelable: false,
+}));
+assert.strictEqual(loginVerifying.secondary.action, "none");
+assert.deepStrictEqual(loginVerifying.poll, { kind: "login", operationId: "login-op" });
+assert(loginVerifying.text.includes("실행·취소 결과와 같은 Codex CLI의 인증 상태를 확인"));
+
+const terminalOperationCases = [
+  ["install", "succeeded", "install_exit_nonzero", "warning", "별도로 확인했습니다"],
+  ["install", "failed", "install_exit_nonzero", "error", "정상적으로 끝나지 않았습니다"],
+  ["install", "cancelled", "install_cancelled", "warning", "취소했습니다"],
+  ["install", "detached", null, "warning", "추적이 끊겼습니다"],
+  ["login", "failed", "login_spawn_failed", "error", "시작하지 못했습니다"],
+  ["login", "cancelled", "login_cancelled", "warning", "취소했습니다"],
+  ["login", "detached", null, "warning", "추적이 끊겼습니다"],
+];
+for (const [kind, state, error, expectedKind, expectedCopy] of terminalOperationCases) {
+  const input = kind === "install"
+    ? { cliState: "missing", installState: state, installError: error }
+    : { loginState: state, loginError: error };
+  const view = deriveCodexView(codexSetupFixture(input));
+  assert.strictEqual(view.poll, null, `${kind}/${state} must stop polling`);
+  assert.strictEqual(view.kind, expectedKind, `${kind}/${state} status kind`);
+  assert(view.text.includes(expectedCopy), `${kind}/${state} safe terminal copy`);
+}
+
+const exitedChecking = deriveCodexView(codexSetupFixture({
+  loginState: "exited",
+  authState: "checking",
+}));
+assert.strictEqual(exitedChecking.primary.disabled, true);
+assert.deepStrictEqual(exitedChecking.poll, { kind: "auth", operationId: "login-op" });
+assert(exitedChecking.text.includes("인증 상태를 다시 확인"));
+const exitedAuthenticated = deriveCodexView(codexSetupFixture({
+  loginState: "exited",
+  authState: "authenticated",
+}));
+assert.strictEqual(exitedAuthenticated.poll, null);
+assert.strictEqual(exitedAuthenticated.authenticated, true);
+const exitedUnconfirmed = deriveCodexView(codexSetupFixture({
+  loginState: "exited",
+  authState: "unauthenticated",
+}));
+assert.strictEqual(exitedUnconfirmed.primary.action, "login");
+assert.strictEqual(exitedUnconfirmed.secondary.action, "device_login");
+assert(exitedUnconfirmed.text.includes("인증 완료를 확인하지 못했습니다"));
+const noDeviceAuth = deriveCodexView(codexSetupFixture({
+  loginState: "exited",
+  authState: "unauthenticated",
+  deviceAuthSupported: false,
+}));
+assert.strictEqual(noDeviceAuth.secondary.action, "none");
+
+const safeAuthFailure = deriveCodexView(codexSetupFixture({
+  authState: "error",
+  authError: "auth_probe_timeout",
+}));
+assert(safeAuthFailure.text.includes("시간이 초과"));
+const rawAuthFailure = deriveCodexView(codexSetupFixture({
+  authState: "error",
+  authError: String.raw`C:\Users\private-user\.codex\auth.json`,
+}));
+assert(!rawAuthFailure.text.includes("private-user"));
+assert.strictEqual(
+  safeErrorText(String.raw`C:\Users\private-user\.codex\auth.json`),
+  "Codex 설정 상태를 확인하지 못했습니다.",
+);
+for (const code of [
+  "codex_not_found",
+  "candidate_provenance_invalid",
+  "runtime_dependency_missing",
+  "install_target_invalid",
+  "install_spawn_failed",
+  "install_no_valid_cli",
+  "login_spawn_failed",
+  "login_unconfirmed",
+  "auth_probe_timeout",
+  "usage_capability_missing",
+  "usage_capture_failed",
+  "usage_capture_timeout",
+  "operation_already_running",
+]) {
+  const copy = safeErrorText({ code });
+  assert(copy.length > 0, `${code} must map to safe user copy`);
+  assert(!copy.includes("C:\\"), `${code} copy must not expose a path`);
+}
+
+const sanitizedSelected = deriveCodexView(codexSetupFixture({
+  authState: "authenticated",
+  selected: {
+    candidateId: "candidate-selected",
+    candidateTag: "CLI-Z9",
+    source: "default_standalone_path",
+    launcher: "exe",
+    version: "1.2.3",
+    provenance: "unverified",
+    displayLabel: String.raw`C:\Users\private-user\codex.exe`,
+    path: String.raw`C:\Users\private-user\codex.exe`,
+  },
+}));
+assert(sanitizedSelected.selectedSummary.includes("기본 standalone 경로"));
+assert(sanitizedSelected.selectedSummary.includes("CLI-Z9"));
+assert(sanitizedSelected.selectedSummary.includes("공급자 출처 미확인"));
+assert(!sanitizedSelected.selectedSummary.includes("private-user"));
+assert(!JSON.stringify(normalizeCodexSetup(codexSetupFixture())).includes("install.ps1"));
+assert.strictEqual(
+  codexActionPlan(codexSetupFixture({ cliState: "ready", authState: "unauthenticated" })).secondary.action,
+  "device_login",
+);
+
+assert(setupHtml.includes('id="codex-device-login"'), "Codex device-code 로그인 버튼이 필요합니다.");
+assert(setupHtml.includes('id="codex-browse"'), "off-PATH Codex CLI를 고르는 native picker 버튼이 필요합니다.");
+assert(setupHtml.includes('id="codex-cancel"'), "Codex install/login 취소 버튼이 필요합니다.");
+assert(setupHtml.includes('id="codex-candidate-list"'), "Codex conflict 후보 목록이 필요합니다.");
+assert(setupHtml.includes("브라우저의 계정 입력, MFA와 승인은 사용자가 직접"), "사용자 OAuth 책임을 명시해야 합니다.");
+assert(bridgeScript.includes('invoke("start_codex_install"'), "Codex 설치는 tracked operation command를 사용해야 합니다.");
+assert(bridgeScript.includes('invoke("start_codex_login", { deviceAuth }'), "브라우저/device login은 하나의 명시적 IPC 계약을 사용해야 합니다.");
+assert(bridgeScript.includes('invoke("cancel_codex_operation", { kind }'), "Codex 작업 취소 IPC가 필요합니다.");
+assert(
+  bridgeScript.includes('invoke("codex_operation_snapshot")'),
+  "Codex operation polling은 probe를 다시 실행하지 않는 전용 IPC를 사용해야 합니다.",
+);
+assert(bridgeScript.includes('invoke("browse_codex_candidate"'), "manual path는 backend native picker IPC를 사용해야 합니다.");
+assert(
+  bridgeScript.includes('invoke("select_codex_candidate", { candidateId }')
+    && setupScript.includes("window.usageApp.selectCodexCandidate(candidateId)"),
+  "선택한 privacy-safe candidateId만 backend selection command로 전달해야 합니다.",
+);
+assert(setupScript.includes("CODEX_POLL_INTERVAL_MS = 750"), "Codex operation polling은 750ms 간격이어야 합니다.");
+assert(setupScript.includes("CODEX_POLL_MAX_MS = 10 * 60 * 1000"), "Codex operation polling은 10분 뒤 멈춰야 합니다.");
+const pollFunction = setupScript.slice(
+  setupScript.indexOf("async function pollCodexOperation"),
+  setupScript.indexOf("function ensureCodexPolling"),
+);
+assert(
+  pollFunction.includes("usageApp.codexOperationSnapshot()"),
+  "진행 중 polling은 operation 상태만 읽어야 합니다.",
+);
+assert.strictEqual(
+  (pollFunction.match(/usageApp\.setupSnapshot\(\)/g) || []).length,
+  1,
+  "terminal operation마다 전체 probe refresh는 정확히 한 번만 실행해야 합니다.",
+);
+assert(
+  setupScript.includes("실행 중에는 이 화면에서 취소를 요청할 수 있으며")
+    && setupScript.includes("종료 확인 단계에 들어가면 취소할 수 없습니다"),
+  "설치 동의에는 실제 취소 가능 구간을 명시해야 합니다.",
+);
+assert(
+  setupScript.includes("reachedPollingLimit")
+    && setupScript.includes("expiryObserved")
+    && setupScript.indexOf("usageApp.codexOperationSnapshot()") < setupScript.indexOf("if (reachedPollingLimit)"),
+  "10분 경계의 backend long_running 상태를 마지막으로 읽은 뒤 polling만 중단해야 합니다.",
+);
+assert(setupScript.includes("window.setTimeout") && !setupScript.includes("window.setInterval"), "operation polling은 bounded timeout chain이어야 합니다.");
+assert(!setupScript.includes("String(error)"), "Setup은 backend raw 오류를 그대로 표시하면 안 됩니다.");
+assert(!setupScript.includes(".path"), "Setup renderer가 Codex 전체 경로를 요구하면 안 됩니다.");
+assert(
+  rustEntry.includes("let codex_ready = codex_selected.is_some()")
+    && rustEntry.includes("capture_codex_with("),
+  "검증·선택된 Codex CLI만 수집에 사용해야 합니다.",
+);
+assert(
+  collectorSource.includes("Result<Value, CodexCaptureError>")
+    && collectorSource.includes("Self::Timeout => SetupSafeErrorCode::UsageCaptureTimeout"),
+  "Codex capture 실패는 raw String이 아닌 typed privacy-safe 오류여야 합니다.",
+);
+assert(
+  rustEntry.includes('"last_success": last_success')
+    && rustEntry.includes("last_successful_codex_status")
+    && rustEntry.includes("capture_error_after_auth_probe"),
+  "현재 실패 상태와 정제된 직전 성공 snapshot 및 auth re-probe를 분리해야 합니다.",
+);
+assert(
+  compactScript.includes("safeErrorCode: snapshot.codex.status")
+    && !compactScript.includes("snapshot.codex.status.stderr"),
+  "Compact renderer에는 allowlisted safe capture code만 전달해야 합니다.",
+);
+assert(
+  rustEntry.includes("claude_cli_state() == CollectorCliState::Ready"),
+  "설치된 Claude 공급자만 수집해야 합니다.",
+);
 assert(setupHtml.includes('id="activity-monitoring"'), "활동 기반 자동 확인은 사용자가 켜고 끌 수 있어야 합니다.");
 assert(setupScript.includes("setActivityMonitoring"), "자동 확인 설정은 백엔드에 명시적으로 저장해야 합니다.");
 assert(rustEntry.includes("AUTO_REFRESH_COOLDOWN_MS"), "활동 기반 수집에는 최소 실행 간격이 필요합니다.");
