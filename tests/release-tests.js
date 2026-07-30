@@ -555,7 +555,37 @@ assert.match(
 );
 assert.match(
   silentNsisSmokeStep,
-  /Installed application bytes differ from the freshly built application/,
+  /function Get-NsisPayloadReference/,
+);
+assert.strictEqual(
+  (silentNsisSmokeStep.match(/__TAURI_BUNDLE_TYPE_VAR_UNK/g) || []).length,
+  1,
+);
+assert.strictEqual(
+  (silentNsisSmokeStep.match(/__TAURI_BUNDLE_TYPE_VAR_NSS/g) || []).length,
+  1,
+);
+assert.match(
+  silentNsisSmokeStep,
+  /\$asciiView\.IndexOf\([\s\S]*\$markerOffset \+ 1,[\s\S]*StringComparison\]::Ordinal/,
+);
+assert.match(silentNsisSmokeStep, /\$sha256\.ComputeHash\(\$bytes\)/);
+assert.match(
+  silentNsisSmokeStep,
+  /Installed application length differs from the NSIS payload reference/,
+);
+assert.match(
+  silentNsisSmokeStep,
+  /Installed application bytes differ from the NSIS payload reference/,
+);
+assert.doesNotMatch(silentNsisSmokeStep, /\$builtApplicationHash\b/);
+assert.match(
+  silentNsisSmokeStep,
+  /\$builtApplicationBefore = Get-FileFingerprint -LiteralPath \$builtApplication/,
+);
+assert.match(
+  silentNsisSmokeStep,
+  /\$installerBefore = Get-FileFingerprint -LiteralPath \$installer\[0\]\.FullName/,
 );
 assert.match(silentNsisSmokeStep, /Join-Path \$installRoot 'uninstall\.exe'/);
 assert.match(silentNsisSmokeStep, /if \(\(Get-Item -LiteralPath \$artifact\)\.Length -le 0\)/);
@@ -575,7 +605,15 @@ assert.match(
 );
 assert.match(
   silentNsisSmokeStep,
-  /try \{[\s\S]*\} finally \{[\s\S]*-ArgumentList @\('\/S'\)/,
+  /catch \{\s+\$installError = \$_\s+\}/,
+);
+assert.match(
+  silentNsisSmokeStep,
+  /-ArgumentList @\('\/S'\)[\s\S]*\$cleanupErrors \+= "uninstall:/,
+);
+assert.match(
+  silentNsisSmokeStep,
+  /Cleanup validation also failed: \$\(\$cleanupErrors -join ' \| '\)/,
 );
 assert.strictEqual(
   (silentNsisSmokeStep.match(/Assert-CodexStateUnchanged/g) || []).length,
