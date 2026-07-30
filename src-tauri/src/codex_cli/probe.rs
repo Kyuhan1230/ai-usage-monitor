@@ -1280,23 +1280,11 @@ mod tests {
             let worker_root = unique_root(&format!("job-worker-{mode}"));
             fs::create_dir_all(&launcher_root).expect("launcher fixture directory");
             fs::create_dir_all(&worker_root).expect("worker fixture directory");
-            let grandchild_script = worker_root.join("grandchild.ps1");
-            fs::write(
-                &grandchild_script,
-                r#"param([Parameter(Mandatory = $true)][string]$PidPath)
-$child = Start-Process `
-  -FilePath (Join-Path $PSHOME "powershell.exe") `
-  -ArgumentList @("-NoLogo", "-NoProfile", "-Command", "Start-Sleep -Seconds 60") `
-  -WindowStyle Hidden `
-  -PassThru
-[System.IO.File]::WriteAllText($PidPath, [string]$child.Id)
-"#,
-            )
-            .expect("grandchild script");
             let parent_script = worker_root.join("parent.js");
             fs::write(
                 &parent_script,
                 r#""use strict";
+const fs = require("fs");
 const { spawn } = require("child_process");
 const hold = setInterval(() => {}, 1000);
 const grandchild = spawn(
@@ -1304,19 +1292,16 @@ const grandchild = spawn(
   [
     "-NoLogo",
     "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    process.argv[3],
-    process.argv[4]
+    "-Command",
+    "Start-Sleep -Seconds 60"
   ],
   { stdio: "ignore", windowsHide: true }
 );
 grandchild.once("error", () => process.exit(71));
-grandchild.once("close", (code) => {
-  if (code !== 0) process.exit(71);
-  if (process.argv[5] === "normal") clearInterval(hold);
-});
+if (!grandchild.pid) process.exit(71);
+fs.writeFileSync(process.argv[3], String(grandchild.pid));
+grandchild.unref();
+if (process.argv[4] === "normal") clearInterval(hold);
 "#,
             )
             .expect("Node parent");
@@ -1327,10 +1312,9 @@ grandchild.once("close", (code) => {
                 format!(
                     "@echo off\r\n\
                      if /I not \"%~1\"==\"--version\" exit /b 87\r\n\
-                     node.exe \"{}\" \"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" \"{}\" \"{}\" \"{mode}\"\r\n\
+                     node.exe \"{}\" \"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" \"{}\" \"{mode}\"\r\n\
                      exit /b %errorlevel%\r\n",
                     parent_script.display(),
-                    grandchild_script.display(),
                     pid_path.display()
                 ),
             )
@@ -1344,7 +1328,7 @@ grandchild.once("close", (code) => {
         }
 
         fn wait_for_descendant_pid(pid_path: &Path) -> u32 {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(15);
             loop {
                 if let Some(process_id) = fs::read_to_string(pid_path)
                     .ok()
@@ -1361,10 +1345,13 @@ grandchild.once("close", (code) => {
         }
 
         for (mode, timeout, expected) in [
-            ("normal", Duration::from_secs(5), Ok(())),
+            // These deadlines cover a deliberately layered cmd -> Node ->
+            // PowerShell fixture on contended hosted runners. Production probe
+            // deadlines are independently enforced by PROBE_TIMEOUT/AUTH_TIMEOUT.
+            ("normal", Duration::from_secs(15), Ok(())),
             (
                 "timeout",
-                Duration::from_secs(2),
+                Duration::from_secs(15),
                 Err(ProcessFailure::Timeout),
             ),
         ] {
@@ -1403,6 +1390,10 @@ grandchild.once("close", (code) => {
             spawn_in_process_tree(command, ChildWindow::Hidden, JobLifetime::DetachOnDrop)
                 .expect("cancel fixture starts");
         let process_id = wait_for_descendant_pid(&pid_path);
+        assert!(
+            process_is_running(process_id),
+            "cancel fixture descendant was not running before termination"
+        );
         let terminated = process_tree.terminate_and_wait(&mut child);
         assert!(terminated, "cancel terminated and reaped the process tree");
         assert!(
