@@ -69,8 +69,18 @@ jobs:
           node-version: 22.12.0
           cache: npm
 
+      - name: Verify Node.js and npm versions
+        run: node scripts/verify-toolchain.js --node-only
+
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable 2026-07-23
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # pinned action, verified 2026-07-30
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+          targets: x86_64-pc-windows-msvc
+
+      - name: Verify complete development toolchain
+        run: node scripts/verify-toolchain.js
 
       - name: Install frontend build tooling
         run: npm ci
