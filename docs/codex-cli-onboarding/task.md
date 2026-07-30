@@ -1,6 +1,6 @@
 # Codex CLI 설치·탐지·로그인 강화 실행 계획
 
-> 상태: In progress — 구현 및 자동 검증 중, T2/T3 릴리스 증거 대기
+> 상태: In progress — implementation commit T2 통과, 최종 standard CI·same-commit T2 재실행과 사람 T3 대기
 > 상위 명세: [spec.md](spec.md)
 > 관련 이슈: [#33 Codex 로그인 이슈](https://github.com/Kyuhan1230/ai-usage-monitor/issues/33)
 > 선행 수정: [PR #34](https://github.com/Kyuhan1230/ai-usage-monitor/pull/34)
@@ -26,34 +26,52 @@
 
 전체 계획은 다음 조건을 모두 만족할 때 완료한다.
 
-- [ ] `spec.md`의 AC-01부터 AC-16까지 각각 자동 또는 수동 evidence가 있다.
+- [ ] `spec.md`의 AC-01부터 AC-18까지 각각 자동 또는 수동 evidence가 있다.
 - [ ] 모든 PR에서 T0 단위 시험과 T1 Windows process integration이 실행된다.
 - [ ] Release candidate commit에서 T2 실제 공식 installer smoke가 통과한다.
 - [ ] 폐기 가능한 remote Windows VM에서 T3 사용자 OAuth와 첫 사용량 확인이 통과한다.
 - [ ] Node.js `22.12.0`, npm `10.9.0`, 정확한 Rust compiler가 repository와 CI에 고정돼 있다.
 - [ ] 고객용 installer 실행에는 Node/npm/Rust가 필요하지 않다는 설명이 README와 Setup에 있다.
 - [ ] 실제 로그인은 사용자가 브라우저에서 수행하고 앱은 선택 CLI 실행·상태 재확인만 담당한다.
+- [ ] credential 인증과 현재 사용량 준비가 분리되고, `login status` exit `0`만으로 사용량 연결 성공을 표시하지 않는다.
 - [ ] 설치·로그인·수집의 원문 출력과 전체 CLI path가 renderer에 노출되지 않는다.
 - [ ] `README`, `PRIVACY`, historical refactor docs, smoke template이 현재 동작과 모순되지 않는다.
 - [ ] rollback이 Codex CLI, credential, 사용자 PATH를 삭제하지 않는다는 시험 또는 검토 evidence가 있다.
 
 ### 2.1 현재 진행 상태
 
-2026-07-31 현재 아래 표는 작업 branch의 진행 상황을 설명한다. 개별 체크박스는 해당 task의 요구사항뿐 아니라 시험 URL·commit·artifact hash까지 생긴 뒤에만 닫는다.
+2026-07-31 현재 아래 표는 작업 branch의 진행 상황을 설명한다. 개별 체크박스는 해당 task의 요구사항뿐 아니라 시험 URL·commit·artifact hash까지 생긴 뒤에만 닫는다. 구현 코드가 존재하더라도 release commit의 최종 gate가 없으면 체크박스를 닫지 않는다.
 
 | Phase | 상태 | 아직 닫지 않는 이유 |
 | --- | --- | --- |
-| 0 기준선·외부 계약 | 구현 완료, 증거 보강 중 | 새 commit의 원격 run URL은 push 뒤 기록 |
-| 1 툴체인 고정 | 구현 완료, 불일치 차단 확인 | 현재 개발 PC의 Node.js `20.10.0`은 고정값 `22.12.0`이 아니어서 preflight가 의도대로 실패함. pinned Node 환경의 원격 CI와 clean build 성공 증거가 필요 |
-| 2 characterization | 구현 완료 | 최종 evidence ledger에 명령·결과 고정 필요 |
-| 3~6 backend·operation·Setup UI | 구현 완료 단계, 독립 리뷰 중 | Windows file identity, process-tree와 UI 상태 회귀를 최종 검증 중 |
-| 7 T0/T1 | 로컬 실행 중 | 전체 suite와 실제 NSIS smoke 결과를 commit에 연결해야 함 |
-| 7 T2 | workflow·live harness 작성 완료, 미실행 | push된 exact commit의 default/custom Windows run 필요 |
-| 7 T3 | runbook·report template 작성 완료, 미실행 | 사람이 disposable Windows VM에서 exact draft installer로 OAuth/MFA와 첫 사용량을 확인해야 함 |
-| 8 문서·개인정보 | 구현 완료 단계 | 최종 코드·UI와 마지막 정합성 검토 필요 |
-| 9 Release | **No-Go** | T2/T3 evidence, 독립 tester/reviewer, GitHub environment 보호 설정과 repository release immutability가 아직 충족되지 않음 |
+| 0 기준선·외부 계약 | 부분 완료 | 공식 계약·compatibility·T2 snapshot은 존재. T3 운영 값과 publisher provenance는 `TBD/No-Go` |
+| 1 툴체인 고정 | 구현·로컬 검증 완료 | pinned Node.js `22.12.0`, npm `10.9.0`, Rust `1.97.1` local pass. 최종 release commit standard CI 필요 |
+| 2 characterization | 구현 완료, ledger 보강 필요 | 현재/변경 동작과 exact command evidence를 최종 ledger에 연결 |
+| 3~6 backend·operation·Setup UI | 대부분 구현, 후속 계약 필요 | credential auth와 usage readiness 분리 `CSH-058`, 실제 file map 정합화와 독립 review 필요 |
+| 7 T0/T1 | local full suite PASS | implementation commit의 standard CI는 installed-app byte comparison에서 실패. 수정 commit의 full CI pending |
+| 7 T2 | implementation commit PASS | `62c208c6821aa3db5c38da03c4ee2b8229d56492`의 [run 30567446372](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30567446372) default/custom PASS. 후속 documentation/수정 commit은 same-commit T2 재실행 필요 |
+| 7 T3 | runbook 작성, **미실행** | pristine no-Codex/no-Node/npm/Rust baseline, 사람 OAuth/MFA, first usage, reboot/conflict/uninstall 필요 |
+| 8 문서·개인정보 | 보강 중 | README troubleshooting, auth/usage 상태와 현재 UI의 최종 정합성 필요 |
+| 9 Release | **No-Go** | final CI, release-commit T2, T3, 독립 tester/reviewer, environment 보호와 release immutability 미충족 |
 
 따라서 “코드가 있다”, “가짜 CLI 시험이 통과했다”, “로그인 terminal이 열렸다”는 이유만으로 이 계획 전체를 완료 처리하지 않는다.
+
+### 2.2 실제 구현 파일과 증거 map
+
+계획 중 제안했던 `candidate.rs`, `select.rs`는 별도 파일로 만들지 않았고 현재 구현은 아래 파일에 통합돼 있다. 이후 task의 대상 파일은 이 map을 우선한다.
+
+| 영역 | 실제 파일 | 구현 상태 | 남은 release 증거 |
+| --- | --- | --- | --- |
+| candidate inventory·canonicalization·selection | `src-tauri/src/codex_cli/discovery.rs`, `types.rs` | 구현·unit test 존재 | final Windows CI, release-commit T2 |
+| version/capability/auth command | `src-tauri/src/codex_cli/probe.rs` | 구현·unit/live harness 존재 | credential/usage 분리 case |
+| child process tree | `src-tauri/src/codex_cli/process_tree.rs` | Windows Job Object와 regression fixture 존재 | final Windows CI |
+| install/login operation | `src-tauri/src/codex_cli/operation.rs`, `src-tauri/src/lib.rs` | tracked operation 존재 | T3 visible terminal·cancel·restart |
+| safe errors·DTO | `src-tauri/src/codex_cli/error.rs`, `types.rs`, `src-tauri/src/lib.rs` | 구현·privacy test 존재 | CSH-058 DTO와 UI |
+| Setup renderer | `src/ui/setup.js`, `setup-view.js`, `bridge.js`, `language.js` | 구현·UI test 존재 | auth/usage copy와 T3 |
+| T2 | `.github/workflows/codex-cli-installer-smoke.yml`, `codex_live_install` example | implementation commit PASS | 변경된 release commit에서 재실행 |
+| Release | `.github/workflows/release.yml`, `scripts/release-evidence.js` | gate 구현 | 외부 protection, T3와 immutable release |
+
+[원격 T2 snapshot](evidence/REMOTE_T2_2026-07-31.md)은 official script hash, 두 job, CLI version과 sanitized artifact digest를 기록한다. [Standard CI run 30567446378](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30567446378)은 최종 green이 아니므로 전체 자동 gate를 완료로 표시하지 않는다.
 
 ## 3. 의존 관계와 권장 변경 묶음
 
@@ -117,6 +135,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   2. 현재 Codex 계약은 `docs/codex-cli-onboarding/spec.md`를 보라고 링크한다.
   3. “Setup snapshot은 CLI를 실행하지 않는다”와 “Setup 진입 시 auth probe를 실행한다” 같은 버전별 차이를 삭제하지 말고 역사로 보존한다.
   4. 두 공급자 모두 인증해야 완료한다는 오래된 정책이 현재 단일 공급자 정책을 덮지 않게 한다.
+  5. historical 문서를 대량 재작성하지 않는다. 후속 범위가 정해진 docs PR에서 각 파일 상단에 “역사 기록이며 현재 Codex 정본은 `docs/codex-cli-onboarding/spec.md`”라는 배너와 링크만 우선 추가한다.
 - [ ] 완료 기준:
   - 새 기여자가 historical 문서를 현재 계약으로 오해할 수 없다.
 
@@ -174,6 +193,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   4. 전용 ChatGPT 시험 계정의 소유자와 MFA 처리 책임을 정한다.
   5. VM image·snapshot에 credential을 남기지 않는 폐기 절차를 승인한다.
   6. provider credential은 repository와 GitHub artifact에 넣지 않는다.
+  7. 문서의 subscription, region, image SKU/version, VM size, 비용 상한, auto-shutdown, tester/reviewer와 QA account owner의 모든 `TBD`를 닫는다.
 - [ ] 완료 기준:
   - 다른 물리 PC 없이도 승인된 예산과 책임자로 T3를 재현할 수 있다.
 
@@ -390,6 +410,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - `InstallOperationState`: `idle / consent_required / starting / running / long_running / succeeded / failed / cancelled / detached`
   - `LoginOperationState`: `idle / starting / running / long_running / exited / failed / cancelled / detached`
   - `AuthState`: `unavailable / checking / unauthenticated / authenticated / error`
+  - `UsageReadiness`: `unavailable / checking / ready / unsupported / error` — CSH-058 후속 구현
   - `SetupSafeErrorCode`
 - [ ] 규칙:
   - enum은 exhaustively match한다.
@@ -410,7 +431,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   1. 내부 `PathBuf`를 serialize할 수 없는 private field/type 경계로 둔다.
   2. renderer에는 ephemeral candidate ID/tag, privacy-safe display label, 발견 source, launcher, version, compatibility와 provenance만 보낸다.
   3. operation ID는 무작위·비추측 값으로 만들고 credential과 관계없게 한다.
-  4. install operation, login operation, auth 상태를 서로 다른 object로 보낸다.
+  4. install operation, login operation, auth와 usage readiness 상태를 서로 다른 object로 보낸다.
   5. 전체 path를 넣으려 하면 실패하는 serialization test를 둔다.
 - [ ] 완료 기준:
   - snapshot JSON에 drive-letter user path나 `%USERPROFILE%` 확장값이 없다.
@@ -448,6 +469,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
      - `auth_probe_timeout`
      - `auth_probe_failed`
      - `usage_capability_missing`
+     - `usage_account_access_unavailable` — CSH-058 후속 구현
      - `usage_capture_failed`
      - `usage_capture_timeout`
      - `operation_already_running`
@@ -462,7 +484,8 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [ ] 담당 영역: backend
 - [ ] 선행 조건: CSH-030~033
 - [ ] 대상:
-  - `src-tauri/src/codex_cli/candidate.rs`
+  - `src-tauri/src/codex_cli/discovery.rs`
+  - `src-tauri/src/codex_cli/types.rs`
 - [ ] 구현:
   1. `where.exe` 결과를 전부 읽는다.
   2. process, HKLM, HKCU 환경을 대소문자 비구분 map으로 합쳐 일반 변수 확장용 user-over-machine snapshot을 만들되 PATH 목록 자체는 세 source 모두 보존한다.
@@ -511,7 +534,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [ ] 담당 영역: backend/QA
 - [ ] 선행 조건: CSH-040
 - [ ] 대상:
-  - `src-tauri/src/codex_cli/candidate.rs`
+  - `src-tauri/src/codex_cli/discovery.rs`
 - [ ] 구현:
   1. packaged resource와 execution alias를 별도 rejection enum으로 둔다.
   2. `/`와 `\`, 대소문자, 확장자 유무를 정규화한다.
@@ -601,7 +624,9 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [ ] 담당 영역: backend
 - [ ] 선행 조건: CSH-040~045
 - [ ] 대상:
-  - `src-tauri/src/codex_cli/select.rs`
+  - `src-tauri/src/codex_cli/discovery.rs`
+  - `src-tauri/src/codex_cli/probe.rs`
+  - `src-tauri/src/codex_cli/types.rs`
 - [ ] 구현:
   1. 명세 9.7의 priority를 pure function으로 구현한다.
   2. 명시적 사용자 선택 뒤에는 검증된 publisher, tracked official install, default-path, custom/PATH, legacy 순서를 적용한다.
@@ -687,18 +712,19 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - `src/ui/bridge.js`
 - [ ] 구현:
   1. 설치 전 consent payload에 공식 URL과 변경 범위를 제공한다.
-  2. 승인 시점에 resolved install target과 pre-install candidate inventory를 operation ID에 묶어 backend memory에 기록한다.
-  3. inventory에는 canonical path의 salted fingerprint, file identity, size와 SHA-256을 사용하고 raw path를 renderer, log 또는 영구 저장소에 보내지 않는다.
-  4. 승인 뒤 visible PowerShell을 `-NoExit` 없이 tracked child로 실행한다.
-  5. interactive user flow에는 `CODEX_NON_INTERACTIVE`를 설정하지 않는다.
-  6. child exit 뒤 fresh environment로 전체 candidate를 재탐지하고 pre/post inventory delta를 계산한다.
-  7. operation target 안에서 새로 생기거나 file identity/hash가 변경된 compatible candidate가 정확히 하나일 때만 `tracked_official_install`을 부여한다.
-  8. 설치 전부터 있던 unchanged candidate, target 밖의 concurrent candidate, 여러 delta로 인과관계가 모호한 후보는 provenance를 승격하지 않는다.
-  9. default path 또는 exit 0만으로 공식 provenance를 추론하지 않는다.
-  10. exit 0이지만 유효 후보가 없으면 실패다.
-  11. nonzero라도 유효 후보가 있으면 ready와 warning을 함께 반환한다.
-  12. 설치 뒤 auth probe를 자동 한 번 실행한다.
-  13. operation이 terminal 상태가 되면 pre-install inventory 원본을 폐기한다.
+  2. 승인 시점의 fresh process/HKCU/HKLM environment에서 install target을 `process > HKCU > HKLM > default`로 결정하고 pre-install candidate inventory와 함께 operation ID에 묶어 backend memory에 기록한다.
+  3. 우선순위가 가장 높은 명시적 `CODEX_INSTALL_DIR`가 unresolved·cycle·relative·file·invalid metadata이면 낮은 scope/default로 fallback하지 않고 `install_target_invalid`로 installer 시작 전에 실패한다.
+  4. inventory에는 canonical path의 salted fingerprint, file identity, size와 SHA-256을 사용하고 raw path를 renderer, log 또는 영구 저장소에 보내지 않는다.
+  5. 승인 뒤 visible PowerShell을 `-NoExit` 없이 tracked child로 실행한다.
+  6. interactive user flow에는 `CODEX_NON_INTERACTIVE`를 설정하지 않는다.
+  7. child exit 뒤 fresh environment로 전체 candidate를 재탐지하고 pre/post inventory delta를 계산한다.
+  8. operation target 안에서 새로 생기거나 file identity/hash가 변경된 compatible candidate가 정확히 하나일 때만 `tracked_official_install`을 부여한다.
+  9. 설치 전부터 있던 unchanged candidate, target 밖의 concurrent candidate, 여러 delta로 인과관계가 모호한 후보는 provenance를 승격하지 않는다.
+  10. default path 또는 exit 0만으로 공식 provenance를 추론하지 않는다.
+  11. exit 0이지만 유효 후보가 없으면 실패다.
+  12. nonzero라도 유효 후보가 있으면 ready와 warning을 함께 반환한다.
+  13. 설치 뒤 auth probe를 자동 한 번 실행한다.
+  14. operation이 terminal 상태가 되면 pre-install inventory 원본을 폐기한다.
 - [ ] 시험:
   - spawn failure
   - exit 0 + valid
@@ -711,6 +737,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - operation target의 기존 candidate binary 변경 → `tracked_official_install`
   - target 밖에서 concurrent candidate 생성 → 해당 후보는 `unverified`
   - operation target에 compatible delta 둘 이상 → provenance 승격 없음
+  - process/HKCU/HKLM target precedence와 invalid highest-scope fail-closed
   - renderer snapshot, log와 persisted state에 raw path 없음
 - [ ] 완료 기준:
   - UI의 설치 완료는 유효 CLI 재발견 뒤에만 표시된다.
@@ -831,6 +858,41 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [x] 완료 기준:
   - 로그인 성공과 현재 사용량 연결 성공을 구분해 표시한다.
 
+### CSH-058 credential 인증과 사용량 준비 분리
+
+- [ ] 담당 영역: backend/frontend/QA
+- [ ] 선행 조건: CSH-044, CSH-048, CSH-057
+- [ ] 실제 대상:
+  - `src-tauri/src/codex_cli/types.rs`
+  - `src-tauri/src/codex_cli/probe.rs`
+  - `src-tauri/src/collector.rs`
+  - `src-tauri/src/lib.rs`
+  - `src/ui/setup-view.js`
+  - `src/ui/status-health.js`
+  - `tests/ui-tests.js`
+- [ ] 배경:
+  - 공식 Codex CLI는 ChatGPT browser sign-in과 API key credential을 모두 지원한다.
+  - `codex login status` exit `0`은 credential 존재 증거지만 ChatGPT subscription의 `account/rateLimits/read` 성공 증거가 아니다.
+- [ ] 구현:
+  1. `AuthState::Authenticated`를 credential 사실로만 정의한다.
+  2. `UsageReadiness`를 `unavailable / checking / ready / unsupported / error`로 별도 유지한다.
+  3. 같은 `SelectedCodex`의 현재 `account/rateLimits/read`가 성공한 경우에만 usage를 `ready`로 둔다.
+  4. auth exit `0` 뒤 usage method-not-found, 명시적 account access/entitlement error, timeout과 protocol error를 각각 typed 내부 결과와 safe code로 분류한다. 명시적 account access 거절만 `usage_account_access_unavailable`로 공개하고 timeout이나 임의 문자열로 auth method를 추정하지 않는다.
+  5. 안정적인 machine-readable auth-method 계약이 없으면 `login status`의 사람이 읽는 stdout을 파싱해 ChatGPT/API key를 추정하지 않는다.
+  6. API key, access token, auth method 원문, workspace와 account identity를 renderer 또는 evidence에 보내지 않는다.
+  7. Setup의 “로그인 확인”과 “사용량 연결 확인” 문구를 분리하고 credential만으로 현재 사용량 성공을 표시하지 않는다.
+  8. 앱은 `--with-api-key` 또는 `--with-access-token` flow를 시작하지 않는다.
+- [ ] 시험:
+  - auth exit `0` + current usage success → auth `authenticated`, usage `ready`
+  - auth exit `0` + method-not-found → auth `authenticated`, usage `unsupported`
+  - auth exit `0` + timeout/protocol failure → auth `authenticated`, usage `error`
+  - auth unauthenticated → usage `unavailable`
+  - API-key/unknown credential fake control이 사용량 성공으로 오인되지 않음
+  - previous success 뒤 current failure가 `ready`로 남지 않음
+  - snapshot에 API key, access token, raw auth output과 account identity 없음
+- [ ] 완료 기준:
+  - credential을 확인한 상태와 이 모니터가 현재 subscription usage를 읽을 수 있는 상태가 UI·DTO·저장·시험에서 구분된다.
+
 ## 10. Phase 6 — Setup UI 상태 머신
 
 ### CSH-060 pure view model 확장
@@ -841,10 +903,10 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - `src/ui/setup-view.js`
   - `tests/ui-tests.js`
 - [ ] 구현:
-  1. CLI, install operation, login operation, auth 네 축으로 view를 계산한다.
+  1. CLI, install operation, login operation, auth와 usage readiness 다섯 축으로 view를 계산한다.
   2. 모든 enum 조합에서 status kind, headline, detail, CTA를 반환한다.
   3. `ready`가 아닌 상태에서 login 버튼을 금지한다.
-  4. `authenticated`가 아닌 상태에서 사용량 성공 문구를 금지한다.
+  4. `usage=ready`가 아닌 상태에서 사용량 연결 성공 문구를 금지한다. `authenticated`만으로는 충분하지 않다.
   5. unknown enum은 safe generic error로 처리한다.
 - [ ] 완료 기준:
   - DOM 없이 상태 조합을 전부 unit test할 수 있다.
@@ -872,11 +934,11 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [ ] 선행 조건: CSH-052~054, CSH-060
 - [ ] 구현:
   1. 버튼 설명을 “앱이 선택된 Codex CLI에서 로그인 명령을 시작”한다고 쓴다.
-  2. browser 계정 입력과 MFA는 사용자가 직접 수행한다고 쓴다.
+  2. 앱이 선택 CLI로 `codex login`을 시작하고 Codex CLI가 browser를 열며, 계정 입력·MFA·workspace 선택과 OAuth 승인은 사용자가 직접 수행한다고 쓴다.
   3. login operation의 `starting/running/long_running/exited/cancelled/detached`와 auth의 `checking/unauthenticated/authenticated/error`를 조합한다.
   4. `login_unconfirmed`는 auth 상태가 아니라 safe error code로만 사용한다.
   5. 자동 auth recheck와 수동 **상태 다시 확인**을 둘 다 제공한다.
-  6. browser를 열 수 없는 경우 device-code CTA를 제공한다.
+  6. browser를 열 수 없고 선택 후보가 `--device-auth`를 지원하는 경우에만 device-code CTA를 제공한다. 계정 보안 설정 또는 workspace 정책에서 허용되지 않을 수 있음을 안내한다.
 - [ ] 완료 기준:
   - 사용자가 “앱이 로그인까지 대신 하는가?”를 오해하지 않는다.
 
@@ -935,6 +997,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - environment expansion/unresolved/cycle/relative path
   - Node missing/old/wrong-architecture/broken launcher
   - auth success/unauth/error/timeout
+  - auth exit `0` + usage ready/unsupported/error
   - install/login operation의 모든 상태와 auth 독립성
   - snapshot privacy
 - [ ] 완료 기준:
@@ -1007,6 +1070,7 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - raw auth output artifact
 - [ ] 완료 기준:
   - “공식 installer로 실제 Codex를 기본 위치와 custom 위치에 설치했다”는 독립 evidence가 생긴다.
+  - 2026-07-31 implementation snapshot은 [REMOTE_T2_2026-07-31.md](evidence/REMOTE_T2_2026-07-31.md)에 기록돼 있다. 후속 code/docs commit의 Release gate에는 같은 commit의 새 run이 필요하다.
 
 ### CSH-074 T3 remote Windows runbook
 
@@ -1018,14 +1082,15 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [ ] runbook 포함:
   1. VM 생성과 RDP 보안
   2. standard user 생성
-  3. 전용 browser profile
-  4. installer hash 확인
-  5. missing → decline → install → unauthenticated → OAuth → authenticated → usage
-  6. 앱 재실행과 Windows reboot
-  7. legacy npm conflict
-  8. uninstall 후 Codex 보존
-  9. screenshot redaction
-  10. VM 종료·disk·snapshot 폐기
+  3. standard user에서 `codex`, `node`, `npm`, `rustc`가 모두 absent임을 확인하고 하나라도 있으면 reimage
+  4. 전용 browser profile
+  5. installer hash 확인
+  6. missing → decline → install → unauthenticated → 사람 OAuth → credential authenticated → usage ready
+  7. Node/npm/Rust가 없는 상태에서 앱 재실행과 Windows reboot까지 완료
+  8. baseline 완료 뒤에만 승인된 Node/npm과 legacy Codex를 설치해 conflict 확인
+  9. uninstall 후 Codex 보존
+  10. screenshot redaction
+  11. VM 종료·disk·snapshot 폐기
 - [ ] 완료 기준:
   - 처음 보는 tester가 계정 정보를 repository에 남기지 않고 같은 시험을 수행할 수 있다.
 
@@ -1035,12 +1100,14 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
 - [ ] 선행 조건: CSH-004, CSH-074, Release candidate
 - [ ] 실행:
   1. 새 VM에서 runbook을 처음부터 끝까지 수행한다.
-  2. 실제 앱 로그인 버튼이 terminal과 browser를 여는지 확인한다.
+  2. 실제 앱 로그인 버튼이 선택 CLI의 terminal을 시작하고 Codex CLI가 browser를 여는지 확인한다.
   3. tester가 직접 OAuth/MFA를 완료한다.
   4. 자동 auth recheck와 첫 rate limit 수집을 확인한다.
   5. reboot 뒤 재탐지와 auth 상태를 확인한다.
-  6. sanitized smoke report를 commit한다.
-  7. 실패는 숨기지 않고 follow-up Issue를 만든다.
+  6. pristine baseline 완료 시점까지 Node.js, npm과 Rust가 없었음을 확인한다.
+  7. 그 뒤에만 approved legacy Node/npm package를 추가한다.
+  8. sanitized smoke report를 commit한다.
+  9. 실패는 숨기지 않고 follow-up Issue를 만든다.
 - [ ] 완료 기준:
   - `PASS` 또는 release blocker가 명시된 `FAIL` report가 존재한다.
   - `PASS WITH ISSUES`는 blocker가 없고 owner/date가 있는 follow-up만 허용한다.
@@ -1072,8 +1139,11 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - Release installer 고객은 Node/npm/Rust가 필요 없음
   - 앱이 명시적 동의 후 공식 installer terminal을 시작
   - 앱이 선택된 CLI 전체 경로로 `codex login`을 시작
-  - 사용자는 browser에서 직접 OAuth
+  - Codex CLI가 browser를 열고 사용자는 계정·MFA·workspace·OAuth를 직접 완료
+  - device auth는 후보 capability와 계정/workspace 허용 조건을 모두 만족할 때만 사용 가능
   - 앱은 완료 뒤 상태를 자동 재확인하며 수동 재확인도 가능
+  - credential 확인과 실제 사용량 연결 성공은 별도 상태
+  - 비표준 PATH/manual picker, legacy npm Node 오류와 일반 고객의 무 Rust 설치 troubleshooting
   - rustup 없는 기여자/있는 기여자/CI의 pinned Rust 준비 차이
   - 상세 spec/runbook 링크
 - [ ] 완료 기준:
@@ -1142,6 +1212,8 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   1. pinned toolchain과 preflight 명령을 추가한다.
   2. T0/T1/T2/T3의 의미와 실행 주체를 적는다.
   3. T2/T3 evidence가 없으면 Release를 막는 기준을 추가한다.
+  4. historical refactor 문서는 대량 수정하지 않고, 별도 scoped docs 변경에서 정본 spec 배너를 추가한다.
+  5. `production-release`의 required reviewer, prevent self-review, administrator bypass 차단과 release immutability의 owner·현재 상태를 기록한다.
 - [ ] 완료 기준:
   - release 담당자가 기억에 의존하지 않고 gate를 실행할 수 있다.
 
@@ -1166,6 +1238,7 @@ git diff --check
   - installer SHA-256
   - artifact retention 확인
   - worktree dirty 여부 확인
+  - 문서 변경을 포함한 final release commit에서 standard CI와 T2 default/custom 재실행
 - [ ] 완료 기준:
   - 자동 gate 하나라도 실패하면 Release candidate를 만들지 않는다.
 
@@ -1182,6 +1255,7 @@ git diff --check
   - privacy redaction
 - [ ] 완료 기준:
   - tester와 reviewer 두 사람이 report에 승인 기록을 남긴다.
+  - 현재 repository collaborator가 한 명뿐이면 충족할 수 없다. 두 번째 권한 있는 collaborator와 역할 분리가 확인될 때까지 No-Go다.
 
 ### CSH-092 제한된 beta rollout
 
@@ -1252,6 +1326,9 @@ git diff --check
 | M22 | app uninstall | 제거 | 해당 없음 | 해당 없음 | Codex와 credential 보존 | T3 |
 | M23 | signature 검증 실패 후보 | 상태 확인 | 자동 선택 제외 | `idle` | `unavailable` | T0/T1 |
 | M24 | `%USERPROFILE%`/nested registry PATH | 상태 확인 | 확장 뒤 실제 결과 | `idle` | 실제 상태 | T0/T1 |
+| M25 | credential 있음, account usage 미지원/실패 | 상태·사용량 확인 | `ready` | `idle` | auth `authenticated`, usage `unsupported/error` | T0/T1/T3 |
+| M26 | Codex/Node/npm/Rust 없는 pristine Windows | install→OAuth→usage→reboot | standalone `ready` | tracked install/login | auth `authenticated`, usage `ready` | T3 |
+| M27 | process/HKCU/HKLM `CODEX_INSTALL_DIR` 충돌 | 설치 승인 | 가장 높은 explicit target 판정 | invalid면 installer 미시작 | `unavailable` 또는 실제 상태 | T0/T1 |
 
 ## 15. Go/No-Go
 
@@ -1260,6 +1337,8 @@ git diff --check
 - T0/T1 전부 green
 - 같은 commit T2 기본 위치·custom 위치 job green
 - T3 실제 OAuth·첫 사용량·reboot `PASS`
+- T3 standalone baseline 시작 시 Codex/Node/npm/Rust 모두 absent
+- credential auth와 usage readiness 분리 case green
 - blocker/critical setup Issue 0
 - raw credential/path 노출 0
 - 고객/기여자/CI dependency 문서 일치
@@ -1274,6 +1353,8 @@ git diff --check
 - 기본 경로라는 이유만으로 후보를 “OpenAI 공식 바이너리”라고 표시
 - official installer exit 0만 보고 CLI 검증 생략
 - login operation 상태와 auth 사실 상태를 하나의 enum으로 혼합
+- credential 인증을 현재 subscription usage 연결 성공으로 표시
+- 명시적 invalid `CODEX_INSTALL_DIR`를 낮은 scope/default로 조용히 fallback
 - Node/npm/Rust floating version
 - T3 없이 공개 Release
 - evidence에 계정 이메일, 조직, token, 전체 home path 포함

@@ -1,8 +1,12 @@
 # Codex CLI 원격 Windows T3 시험 절차
 
+> 현재 상태: NOT RUN — 운영 결정 `TBD`, 사람 T3와 최종 release commit 증거 대기
+
 이 문서는 별도 물리 PC가 없을 때 일회성 원격 Windows 11 VM에서 Codex CLI의 설치, 로그인, 첫 사용량 확인을 사람이 검증하는 절차다. 이 시험은 [설치·탐지·로그인 강화 명세](spec.md)의 **T3**이며, GitHub-hosted runner에서 수행하는 T2와 대체 관계가 아니다.
 
 Draft 생성부터 exact-byte 공개 승인까지의 자동 gate와 구조화 Issue marker는 [Codex onboarding Release gate](RELEASE_GATE.md)를 따른다.
+
+VM subscription, exact image, 비용 한도와 담당자 결정은 [T3 원격 Windows 운영 결정](remote-test-decision.md)을 따른다. 해당 문서에 `TBD`가 하나라도 남아 있으면 T3를 시작하지 않는다.
 
 ## 1. T2와 T3의 경계
 
@@ -24,8 +28,12 @@ GitHub Actions secret에 ChatGPT 계정, OAuth token, session cookie 또는 MFA 
 - [ ] T2가 raw installer/auth 출력이나 전체 사용자 경로를 artifact로 올리지 않았음을 확인했다.
 - [ ] blocker로 분류된 Setup Issue가 없다.
 - [ ] [compatibility matrix](evidence/codex-compatibility-matrix.md)에 지정된 `@openai/codex@0.144.5`, Node.js `22.12.0` x64, npm `10.9.0`을 legacy 충돌 시험에 사용한다.
+- [ ] [원격 운영 결정](remote-test-decision.md)의 subscription, image, 비용, auto-shutdown, tester/reviewer와 QA account owner가 모두 확정됐다.
+- [ ] fresh standard user에서 Codex desktop/CLI, Node.js, npm과 Rust가 모두 없는 image를 사용할 수 있다.
 
 T3 보고서의 installer SHA-256은 최종 공개할 versioned installer의 SHA-256과 같아야 한다. T3 뒤 Release workflow가 installer를 다시 빌드했다면 기존 T3 결과는 무효다.
+
+2026-07-31의 [T2 implementation snapshot](evidence/REMOTE_T2_2026-07-31.md)은 commit `62c208c6821aa3db5c38da03c4ee2b8229d56492`에서 PASS했다. 후속 code 또는 documentation commit은 release commit과 SHA가 다르므로 그 snapshot을 same-commit gate로 재사용하지 않고 T2를 다시 실행한다.
 
 ## 3. VM과 계정 보안
 
@@ -111,10 +119,10 @@ where.exe codex 2>$null | ForEach-Object {
      Select-Object WindowsProductName, WindowsVersion, OsBuildNumber, OsArchitecture
    ```
 
-5. Node.js, npm과 Rust의 존재 여부만 기록한다. 경로는 기록하지 않는다. 신규 고객 기본 경로는 세 도구가 없어도 동작해야 한다.
+5. 아래 명령으로 Codex CLI, Node.js, npm과 Rust가 **모두 absent**인지 확인한다. 하나라도 `Present=True`면 이 image로 pristine 고객 baseline을 주장하지 않는다. 설치 제거로 상태를 추측해 만들지 말고 새 image 또는 새 standard user를 준비한다.
 
    ```powershell
-   foreach ($name in 'node', 'npm', 'rustc') {
+   foreach ($name in 'codex', 'node', 'npm', 'rustc') {
      [pscustomobject]@{
        Tool = $name
        Present = $null -ne (Get-Command $name -ErrorAction SilentlyContinue)
@@ -122,7 +130,7 @@ where.exe codex 2>$null | ForEach-Object {
    }
    ```
 
-6. Codex CLI와 Codex desktop이 설치되지 않은 새 image인지 확인한다. 발견한 전체 경로는 보고서에 옮기지 않는다.
+6. Codex desktop도 설치되지 않은 새 image인지 확인한다. 발견한 전체 경로는 보고서에 옮기지 않는다.
 7. RC installer를 신뢰하는 제어 PC에서 받은 뒤 VM으로 한 번만 전송한다. 시험 VM에 개인 GitHub credential을 저장하지 않는다.
 8. VM에서 SHA-256과 Authenticode 상태를 확인한다.
 
@@ -168,7 +176,7 @@ where.exe codex 2>$null | ForEach-Object {
 ### 6.3 앱에서 로그인 시작과 사람 OAuth
 
 1. Setup의 **Codex 로그인**을 누른다.
-2. 앱이 선택한 standalone의 전체 경로로 `codex login` terminal을 시작하는지 확인한다.
+2. 앱이 선택한 standalone의 전체 경로로 `codex login` terminal을 시작하는지 확인한다. 브라우저는 앱이 직접 조작하는 것이 아니라 Codex CLI가 연다.
 3. login operation `running`과 auth `unauthenticated`를 독립적으로 확인한다.
 4. Codex가 연 브라우저에서 tester가 직접 계정 로그인과 MFA를 완료한다.
 5. password, MFA code, OAuth callback URL 또는 browser 화면을 촬영하지 않는다.
@@ -183,13 +191,17 @@ where.exe codex 2>$null | ForEach-Object {
 
 9. 종료 코드가 `0`인데 앱이 authenticated가 아니거나, nonzero인데 앱이 authenticated면 `FAIL`이다.
 
+`authenticated`는 credential 존재 증거다. 이 단계만으로 subscription 사용량 연결 성공을 기록하지 않는다. 선택 후보가 `--device-auth`를 지원하더라도 개인 보안 설정 또는 workspace 관리 정책에서 device code를 허용하지 않을 수 있다. Device-code fallback을 사용할 때는 Codex CLI가 terminal에 표시한 flow를 tester가 직접 완료하며 code나 URL을 보고서에 남기지 않는다.
+
 ### 6.4 첫 실제 사용량
 
 1. Setup에서 연결된 Codex의 사용량 확인을 실행한다.
-2. 실제 `account/rateLimits/read`가 성공하고 잔여량과 reset 정보가 나타나는지만 확인한다.
+2. 실제 `account/rateLimits/read`가 성공하고 usage readiness가 `ready`로 바뀌며 잔여량과 reset 정보가 나타나는지만 확인한다.
 3. 실제 quota 숫자, plan, 계정명 또는 workspace는 보고서와 screenshot에 남기지 않는다.
 4. 이전 성공 cache가 아니라 현재 요청 결과인지 UI 시각과 상태로 확인한다.
 5. 실패하면 auth 성공과 usage 성공을 분리해 기록하고 safe error code를 남긴다.
+
+`login status`가 exit `0`이어도 이 단계가 실패하면 “credential 확인, usage unsupported/error”로 기록한다. API-key 또는 method를 raw 출력에서 추정하거나 account identity를 보고서에 넣지 않는다.
 
 ### 6.5 앱 재실행과 Windows 재부팅
 
@@ -199,26 +211,36 @@ where.exe codex 2>$null | ForEach-Object {
 4. standard tester로 다시 로그인한다.
 5. Setup에서 CLI 재탐지와 auth 재확인을 수행한다.
 6. 첫 사용량 확인을 한 번 더 실행한다.
+7. 이 단계가 끝날 때까지 `node`, `npm`, `rustc`가 계속 absent인지 다시 확인한다. 하나라도 중간에 설치됐다면 pristine baseline은 `FAIL`이다.
 
 재부팅 전 결과만으로 T3를 PASS 처리하지 않는다.
 
 ### 6.6 legacy npm 충돌
 
-이 단계는 compatibility matrix가 지정한 `@openai/codex@0.144.5`, Node.js `22.12.0` x64, npm `10.9.0`으로만 진행한다. 다른 version을 썼으면 Release gate를 충족하지 못한 것으로 기록한다.
+이 단계는 standalone 설치, 사람 OAuth, 첫 사용량, 앱 재실행과 Windows 재부팅의 pristine baseline이 모두 PASS한 뒤에만 시작한다. 그 전에는 Node.js, npm 또는 Rust를 설치하지 않는다.
+
+Compatibility matrix가 지정한 `@openai/codex@0.144.5`, Node.js `22.12.0` x64, npm `10.9.0`으로만 진행한다. 다른 version을 썼으면 Release gate를 충족하지 못한 것으로 기록한다. Rust는 이 단계에도 설치하지 않는다.
 
 1. 승인된 Node.js/npm 조합을 설치한다.
-2. `node --version`과 `npm --version`이 각각 정확히 `v22.12.0`, `10.9.0`인지 확인한 뒤 `npm install --global '@openai/codex@0.144.5'`를 실행한다.
+2. `node --version`과 `npm --version`이 각각 정확히 `v22.12.0`, `10.9.0`인지 확인한다.
+3. `npm view '@openai/codex@0.144.5' dist.integrity`가 compatibility matrix의 승인된 integrity와 일치하는지 확인한다. 다른 값이면 설치하지 않고 `FAIL`이다.
+4. `npm install --global '@openai/codex@0.144.5'`를 실행한다.
 
    ```powershell
-   $legacyVersion = '<compatibility-matrix-version>'
+   $legacyVersion = '0.144.5'
+   $expectedIntegrity = 'sha512-jjB+K+OMv572mKhS+2QuLxWXDJNdpwbPenf+V+8bdq7wg4Scqt3cn6WEekD8wPqDVZqck0HSX17K9rD9kbDJQA=='
+   $actualIntegrity = npm view "@openai/codex@$legacyVersion" dist.integrity
+   if ($actualIntegrity -ne $expectedIntegrity) {
+     throw 'Approved legacy package integrity mismatch.'
+   }
    npm install --global "@openai/codex@$legacyVersion"
    ```
 
-3. Setup에서 상태를 다시 확인한다.
-4. 공식 standalone과 npm legacy 후보가 모두 발견되는지 확인한다.
-5. 결정적 우선순위에 따라 standalone이 선택되고 conflict warning이 표시되는지 확인한다.
-6. 로그인 probe와 사용량 수집이 같은 선택 후보를 사용하는지 확인한다.
-7. 보고서에는 두 전체 경로 대신 source, version과 privacy-safe candidate tag만 기록한다.
+5. Setup에서 상태를 다시 확인한다.
+6. 공식 standalone과 npm legacy 후보가 모두 발견되는지 확인한다.
+7. 결정적 우선순위에 따라 standalone이 선택되고 conflict warning이 표시되는지 확인한다.
+8. 로그인 probe와 사용량 수집이 같은 선택 후보를 사용하는지 확인한다.
+9. 보고서에는 두 전체 경로 대신 source, version과 privacy-safe candidate tag만 기록한다.
 
 ### 6.7 앱 제거와 공급자 보존
 
@@ -266,3 +288,6 @@ Store를 사용할 수 없어 실행하지 못했다면 T1 fake alias 검증과 
 - 계정 정보, token, raw auth 출력 또는 전체 home path가 evidence에 포함됨
 - T3 뒤 installer를 다시 빌드하고도 기존 보고서를 재사용함
 - 독립 review 뒤 Issue 본문을 수정하고 새 `T3_REPORT_BODY_SHA256` 승인 없이 공개하려 함
+- pristine baseline 시작 시 `codex`, `node`, `npm`, `rustc` 중 하나라도 존재했는데도 고객 무의존 시험으로 PASS 처리함
+- standalone OAuth·첫 사용량·restart/reboot가 끝나기 전에 legacy 시험용 Node/npm을 설치함
+- credential 인증만 확인하고 현재 `account/rateLimits/read` 실패를 사용량 연결 성공으로 표시함

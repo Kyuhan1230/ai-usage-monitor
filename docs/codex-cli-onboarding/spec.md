@@ -1,6 +1,6 @@
 # Codex CLI 설치·탐지·로그인 강화 명세
 
-> 상태: In progress — 구현 완료 단계, 자동·원격 릴리스 증거 수집 중
+> 상태: In progress — implementation commit T2 통과, 최종 standard CI 재실행과 사람 T3 대기
 > 적용 범위: Windows용 Codex Claude Usage의 Codex CLI 온보딩
 > 기준 앱 버전: 1.2.7
 > 최초 작성: 2026-07-30
@@ -103,13 +103,21 @@ PR #34의 [Windows Actions 실행](https://github.com/Kyuhan1230/ai-usage-monito
 
 T2는 `.github/workflows/codex-cli-installer-smoke.yml`이 실행하고 개인정보 없는 구조화 evidence를 남긴다. T3는 [REMOTE_WINDOWS_TEST.md](REMOTE_WINDOWS_TEST.md)와 [설치 smoke 보고서 template](../community/INSTALL_SMOKE_REPORT_TEMPLATE.md)을 사용한다. 계정 secret이나 OAuth를 CI에 넣지 않는다.
 
-새 branch를 push하기 전까지 T2의 새 commit 증거는 존재하지 않는다. T3 보고서가 독립 검토를 통과하기 전에는 로그인 전체 흐름이나 공개 배포 준비 완료를 주장하지 않는다. 다음 항목은 T0/T1 또는 문서 검토만으로 확인했다고 표현해서는 안 된다.
+T2 implementation snapshot은 [2026-07-31 원격 T2 증거](evidence/REMOTE_T2_2026-07-31.md)에 고정돼 있다. 그러나 그 뒤 documentation commit을 포함해 release commit이 바뀌면 같은 commit에서 T2를 다시 실행해야 한다. T3 보고서가 독립 검토를 통과하기 전에는 로그인 전체 흐름이나 공개 배포 준비 완료를 주장하지 않는다. 다음 항목은 T0/T1 또는 문서 검토만으로 확인했다고 표현해서는 안 된다.
 
 - Microsoft가 실제 생성한 App Execution Alias의 모든 Windows build별 동작
 - OpenAI 공식 설치 스크립트의 미래 변경과 모든 네트워크 장애
 - 실제 브라우저 OAuth, MFA, workspace 선택
 - 실제 계정의 `account/rateLimits/read`
 - 실제 NSIS 설치 뒤 재부팅·충돌·제거까지 포함한 사용자 흐름
+
+### 3.4 2026-07-31 원격 증거와 현재 No-Go
+
+Implementation commit `62c208c6821aa3db5c38da03c4ee2b8229d56492`에서 [T2 run 30567446372](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30567446372)의 기본 위치와 custom 위치 job이 모두 통과했다. 두 job은 같은 공식 installer script SHA-256 `391F247DE2C70C7E99041979EC02DAE7E76BE27AC9CFC1DFE7C1EB21D48D8B97`, Codex CLI `0.146.0`, 격리 `CODEX_HOME`의 `authenticated=false`와 repository live harness 성공을 기록했다.
+
+같은 implementation commit의 [standard CI run 30567446378](https://github.com/Kyuhan1230/ai-usage-monitor/actions/runs/30567446378)은 test와 NSIS build 뒤 silent install의 installed-app byte comparison assertion에서 실패했다. 원인 수정 뒤 전체 standard CI와 변경된 release commit의 T2를 다시 통과하기 전까지 자동 gate는 pending이다.
+
+사람 T3는 아직 수행하지 않았다. [원격 운영 결정](remote-test-decision.md)의 비용·image·담당자 `TBD`, 독립 tester/reviewer, protected `production-release` environment와 release immutability가 닫히기 전까지 공개 Release는 **No-Go**다.
 
 ## 4. 공식 외부 계약
 
@@ -125,6 +133,8 @@ T2는 `.github/workflows/codex-cli-installer-smoke.yml`이 실행하고 개인�
   - 플래그 없는 `codex login`은 ChatGPT OAuth를 위해 브라우저를 연다.
   - `codex login status`는 credential이 있으면 종료 코드 `0`을 반환한다.
   - 브라우저를 열 수 없을 때 device-code flow를 사용할 수 있다.
+
+[공식 인증 문서](https://developers.openai.com/codex/auth)는 Codex CLI가 ChatGPT browser sign-in뿐 아니라 API key sign-in도 지원한다고 설명한다. 따라서 `login status` exit `0`은 “Codex가 어떤 credential을 가지고 있다”는 증거이지 ChatGPT subscription의 `account/rateLimits/read`가 성공한다는 증거가 아니다. 이 앱은 API key나 access token 입력을 자동화하지 않는다. 이 명세는 credential 인증과 현재 사용량 연결 준비를 별도 상태로 판정하도록 요구하며, 전용 Setup usage state 구현은 [task.md의 CSH-058](task.md#csh-058-credential-인증과-사용량-준비-분리)이 완료되기 전까지 pending이다. 그 전에도 현재 collector 요청이 실패하면 연결 성공으로 표시하면 안 된다.
 
 외부 설치 스크립트와 CLI 동작은 앱 저장소와 독립적으로 바뀔 수 있다. 따라서 공식 URL이나 기본 경로만으로 성공을 추정하지 않고, 설치 뒤 실제 후보를 다시 발견하고 검증한다.
 
@@ -206,7 +216,7 @@ T2는 `.github/workflows/codex-cli-installer-smoke.yml`이 실행하고 개인�
 
 ## 8. 목표 상태 모델
 
-설치 파일 존재, 설치 작업, 로그인 프로세스와 인증 사실을 하나의 문자열로 섞지 않는다. 다음 네 축을 독립적으로 유지한다.
+설치 파일 존재, 설치 작업, 로그인 프로세스, credential 인증 사실과 사용량 준비를 하나의 문자열로 섞지 않는다. 목표 모델은 다음 다섯 축을 독립적으로 유지한다. 이 중 전용 Setup usage readiness 축은 CSH-058의 미완료 후속 구현이며, 현재 구현 완료로 간주하지 않는다.
 
 ### 8.1 CLI 상태
 
@@ -273,7 +283,25 @@ PowerShell 창을 열었다는 사실은 `starting` 또는 `running`일 뿐 `suc
 - 미지원 명령, spawn 실패, 접근 거부, timeout, 알 수 없는 nonzero는 `error`다.
 - 오류를 근거 없이 “로그인 필요”로 축약하지 않는다.
 
-### 8.5 정상 상태 전이
+`authenticated`는 선택된 CLI가 credential을 가지고 있음을 뜻한다. 공식적으로 지원되는 API key 또는 향후 다른 credential method도 이 상태가 될 수 있으므로 “ChatGPT 구독 사용량 연결 완료”와 동의어로 사용하지 않는다. CLI가 안정적이고 privacy-safe한 machine-readable auth method를 제공한다는 계약이 확인되기 전에는 stdout 문구를 파싱해 ChatGPT/API key를 추정하지 않는다.
+
+### 8.5 사용량 준비 상태
+
+| 상태 | 의미 |
+| --- | --- |
+| `unavailable` | 선택된 호환 CLI 또는 credential이 없어 현재 사용량 확인 불가 |
+| `checking` | 같은 `SelectedCodex`로 `account/rateLimits/read` 확인 중 |
+| `ready` | 현재 요청에서 rate limit 응답을 검증하고 privacy-safe snapshot을 생성함 |
+| `unsupported` | credential은 있으나 해당 auth method, entitlement 또는 CLI가 필요한 account method를 제공하지 않음 |
+| `error` | timeout, network, protocol, 권한 등으로 현재 준비 여부를 확인하지 못함 |
+
+- `auth=authenticated`와 `usage=ready`는 독립적이다.
+- `login status` exit `0`만으로 usage를 `ready`로 바꾸지 않는다.
+- “Codex 사용량 연결 완료”와 현재 연결 성공 표시는 실제 `usage=ready`에서만 허용한다.
+- 기존 제품의 공급자별 온보딩 완료 정책을 적용하더라도 credential 확인만으로 현재 usage 성공 문구를 표시하지 않는다.
+- API key, access token, workspace 이름이나 credential 원문을 renderer에 보내지 않는다.
+
+### 8.6 정상 상태 전이
 
 ```mermaid
 flowchart TD
@@ -286,7 +314,10 @@ flowchart TD
     F --> G["선택 후보 재검증"]
     C -- "하나" --> G
     G --> H["codex login status"]
-    H -- "인증됨" --> I["첫 사용량 확인 가능"]
+    H -- "credential 확인됨" --> I["같은 CLI로 첫 사용량 확인"]
+    I --> O{"account/rateLimits/read 성공?"}
+    O -- "성공" --> P["사용량 ready"]
+    O -- "미지원·실패" --> Q["credential 인증과 사용량 오류를 분리 표시"]
     H -- "미인증" --> J["사용자가 Codex 로그인 클릭"]
     J --> K["앱이 선택된 전체 경로로 codex login 실행"]
     K --> L["사용자가 브라우저에서 직접 OAuth"]
@@ -322,6 +353,17 @@ registry와 환경 변수는 다음 규칙으로 해석한다.
 - 확장 뒤에도 `%NAME%` token이 남은 entry, 빈 entry와 상대 경로는 실행 후보에서 제외하고 safe 진단만 남긴다.
 - PATH entry 바깥쪽 따옴표와 불필요한 공백은 제거하되 경로 안의 공백은 보존한다.
 - `CODEX_INSTALL_DIR`도 같은 확장·절대 경로 검증을 거친 뒤에만 사용한다.
+
+후보 inventory는 process, HKCU와 HKLM의 유효한 `CODEX_INSTALL_DIR`를 모두 source로 기록할 수 있다. 반면 새 공식 설치의 target은 정확히 하나여야 하므로 사용자 승인 시점의 fresh snapshot에서 다음 우선순위로 결정하고 operation에 고정한다.
+
+```text
+non-empty process CODEX_INSTALL_DIR
+→ non-empty HKCU CODEX_INSTALL_DIR
+→ non-empty HKLM CODEX_INSTALL_DIR
+→ 공식 기본 위치
+```
+
+우선순위가 가장 높은 명시적 값이 unresolved token, cycle, 상대 경로, 파일 경로, 잘못된 metadata 또는 읽을 수 없는 target이면 낮은 scope나 기본 위치로 몰래 fallback하지 않는다. `install_target_invalid`로 fail-closed하고 installer를 시작하지 않는다. 설치 승인 뒤 environment가 바뀌어도 진행 중 operation의 target을 바꾸지 않는다.
 
 ### 9.2 canonicalization과 중복 제거
 
@@ -491,7 +533,7 @@ NSIS는 monitor 설치 성공과 Codex 설치 성공을 계속 분리한다. Cod
 4. 로그인 프로세스 종료를 추적한다.
 5. 종료 뒤 `codex login status`를 자동으로 한 번 실행한다.
 6. 인증됨이 확인되면 Setup을 갱신하고 첫 사용량 확인을 활성화한다.
-7. 브라우저 실행이 어려운 사용자를 위해 명시적인 **device code 방식**을 별도 행동으로 제공한다.
+7. 브라우저 실행이 어려운 사용자를 위해 선택 CLI의 help가 `--device-auth`를 지원할 때만 명시적인 **device code 방식**을 별도 행동으로 제공한다. 실제 사용 가능 여부는 개인 보안 설정 또는 workspace 관리 정책에도 좌우될 수 있음을 안내한다.
 
 ### 11.2 사용자가 하는 일
 
@@ -500,7 +542,7 @@ NSIS는 monitor 설치 성공과 Codex 설치 성공을 계속 분리한다. Cod
 3. MFA, 조직 또는 workspace 선택, 동의를 직접 완료한다.
 4. 브라우저를 열 수 없으면 terminal에 표시된 device code flow를 직접 완료한다.
 
-앱은 사용자의 브라우저를 대신 조작하거나 계정 정보를 입력하지 않는다.
+앱은 선택된 CLI로 `codex login`을 시작한다. 브라우저는 Codex CLI가 열고, 사용자는 그 브라우저에서 인증한다. 앱은 사용자의 브라우저를 대신 조작하거나 계정 정보를 입력하지 않는다.
 
 ### 11.3 금지 사항
 
@@ -573,9 +615,15 @@ renderer에는 다음과 같은 privacy-safe 데이터만 전달한다.
     "state": "unauthenticated",
     "safeErrorCode": null
   },
+  "usage": {
+    "state": "unavailable",
+    "safeErrorCode": null
+  },
   "checkedAt": "ISO-8601"
 }
 ```
+
+`usage` object는 CSH-058에서 추가할 목표 DTO이며 현재 전용 Setup snapshot 구현 완료를 뜻하지 않는다. CSH-058 전에도 기존 collector의 `connected=false`와 current failure 계약은 유지한다.
 
 금지 필드:
 
@@ -626,6 +674,7 @@ Tauri command는 최소한 다음 역할로 분리한다.
 | `auth_probe_timeout` | status 명령 timeout | 재시도 |
 | `auth_probe_failed` | status 명령 판정 불가 | 업데이트/진단 |
 | `usage_capability_missing` | app-server 계약 미지원 | CLI 업데이트 |
+| `usage_account_access_unavailable` | credential은 있으나 명시적 account method 응답에서 현재 auth method·entitlement·workspace access로 사용량을 읽을 수 없음 | ChatGPT sign-in/workspace 권한 확인 후 재시도 |
 | `usage_capture_failed` | app-server 실행·입출력·protocol·종료·저장 실패 | 재시도 후 진단 |
 | `usage_capture_timeout` | 지원되는 app-server의 현재 사용량 응답 timeout | 네트워크 확인 후 재시도 |
 | `operation_already_running` | 중복 설치/로그인 요청 | 기존 작업 표시 |
@@ -674,6 +723,8 @@ Codex 사용량 capture 내부 오류는 raw 문자열이 아니라 `identity`, 
 | `ready + unauthenticated` | “Codex CLI 확인 완료 · 로그인이 필요합니다.” | Codex 로그인 |
 | 로그인 작업 `running / long_running` | “브라우저에서 로그인을 완료하세요. 계정 입력은 Codex가 처리합니다.” | 취소/도움말 |
 | `authenticated` | “Codex 로그인 확인 완료.” | 사용량 확인 |
+| `authenticated + usage 미확인/실패` | “Codex credential은 확인했지만 현재 사용량 연결은 아직 확인되지 않았습니다.” | 사용량 다시 확인/진단 |
+| `usage ready` | “Codex 사용량 연결 확인 완료.” | 설정 계속 |
 | `error` | “로그인 상태를 확인하지 못했습니다.” | 다시 확인/진단 |
 
 ### 15.2 신뢰를 위한 표시 규칙
@@ -700,10 +751,11 @@ Codex 사용량 capture 내부 오류는 raw 문자열이 아니라 `identity`, 
 - version parser 정상·pre-release·garbage·oversized 출력
 - Node missing/old/wrong-architecture/broken launcher 분류
 - capability와 auth exit 결과 분류
+- `login status` exit `0`과 사용량 준비를 분리하고, credential은 있으나 `account/rateLimits/read`가 실패하는 case
 - publisher verification이 확인되지 않았을 때 `unverified` 유지
 - 복수 후보 priority와 conflict
 - privacy-safe snapshot serialization
-- 모든 CLI/install/login/auth 상태에 대한 Setup view와 버튼
+- 모든 CLI/install/login/auth/usage 상태에 대한 Setup view와 버튼
 
 ### 16.2 T1: Windows 자식 프로세스 모의 통합
 
@@ -722,6 +774,7 @@ Codex 사용량 capture 내부 오류는 raw 문자열이 아니라 `identity`, 
 - spawn failure, nonzero, timeout, user cancel
 - probe 정상 완료와 timeout 뒤 descendant process 잔존 0
 - 로그인 완료 뒤 자동 auth 재확인
+- auth exit `0` 뒤 app-server usage success/failure 독립 판정
 
 T1은 실제 OpenAI installer 또는 OAuth 시험으로 부르지 않는다.
 
@@ -756,6 +809,7 @@ T1은 실제 OpenAI installer 또는 OAuth 시험으로 부르지 않는다.
 - standard user 계정과 별도 관리자 계정
 - private chat·업무 자료가 없는 전용 ChatGPT 시험 계정
 - 시험 시작 전 Codex desktop/CLI가 없는 snapshot 또는 새 image
+- baseline 완료 전 `codex`, `node`, `npm`, `rustc`가 모두 없는 standard-user 환경
 - 시험 뒤 VM을 image로 보존하지 않고 폐기
 
 수동 절차:
@@ -767,11 +821,12 @@ T1은 실제 OpenAI installer 또는 OAuth 시험으로 부르지 않는다.
 5. 앱의 로그인 버튼으로 선택된 CLI의 `codex login` 창이 열리는지 확인한다.
 6. tester가 RDP browser에서 직접 OAuth와 MFA를 완료한다.
 7. 앱이 자동으로 `authenticated`로 바뀌는지 확인한다.
-8. 첫 사용량 확인에서 `account/rateLimits/read`가 성공하는지 확인한다.
+8. 첫 사용량 확인에서 `account/rateLimits/read`가 성공하고 usage가 `ready`로 바뀌는지 확인한다.
 9. 앱 재실행과 Windows 재부팅 뒤에도 같은 CLI와 로그인 상태를 확인한다.
-10. npm legacy CLI를 추가한 conflict 시나리오를 확인한다.
-11. 앱 제거 뒤 Codex CLI와 credential이 앱 제거 대상이 아닌지 확인한다.
-12. 개인정보를 제거한 smoke report와 screenshot만 repository evidence로 남긴다.
+10. 여기까지 Node.js, npm과 Rust가 없었다는 baseline을 확정한 뒤에만 legacy 시험용 Node.js/npm을 설치한다. Rust는 설치하지 않는다.
+11. npm legacy CLI를 추가한 conflict 시나리오를 확인한다.
+12. 앱 제거 뒤 Codex CLI와 credential이 앱 제거 대상이 아닌지 확인한다.
+13. 개인정보를 제거한 smoke report와 screenshot만 repository evidence로 남긴다.
 
 GitHub-hosted runner는 interactive browser/RDP OAuth를 검증할 수 없으므로 T3를 대체하지 못한다. OAuth 계정 credential을 CI secret으로 넣어 T3를 자동화하지 않는다.
 
@@ -807,6 +862,8 @@ GitHub-hosted runner는 interactive browser/RDP OAuth를 검증할 수 없으므
 - **AC-14**: Node/npm/Rust compiler가 정확히 고정되고 로컬과 CI preflight가 불일치를 차단하며 rustup의 pinned toolchain 자동 다운로드 경계를 문서화한다.
 - **AC-15**: T0와 T1은 모든 PR에서, T2는 Release candidate commit에서, T3는 공개 Release 전에 통과한다.
 - **AC-16**: 실제 사용량 수집 실패가 이전 성공 상태를 현재 연결 성공처럼 보이게 하지 않는다.
+- **AC-17**: `login status` exit `0`을 credential 인증으로만 판정하고, 같은 선택 CLI의 현재 `account/rateLimits/read` 성공 전에는 사용량 준비 또는 연결 성공으로 표시하지 않는다. API-key/unknown credential control도 이 규칙을 따른다.
+- **AC-18**: T3의 standalone happy path는 baseline에서 Codex, Node.js, npm과 Rust가 모두 없는 standard-user 환경으로 시작하며, legacy 충돌용 Node/npm은 standalone OAuth·사용량·restart/reboot baseline이 끝난 뒤에만 설치한다.
 
 ## 18. Release gate와 증거
 
@@ -824,6 +881,18 @@ GitHub-hosted runner는 interactive browser/RDP OAuth를 검증할 수 없으므
 10. blocker·critical setup bug 0개
 11. `README`, `PRIVACY`, smoke template과 현재 UI 문구의 정합성 확인
 12. 기존 Claude-only 온보딩 회귀 없음
+
+2026-07-31 상태:
+
+- implementation commit의 T2 default/custom: PASS
+- 최종 standard CI와 documentation을 포함한 release commit의 same-commit T2: pending
+- 사람 T3와 first usage/reboot/conflict/uninstall: not run
+- T3 cloud 비용·image·tester/reviewer: `TBD`
+- repository collaborator: 독립 tester/reviewer를 충족하기에 부족
+- `production-release`: self-review 방지와 administrator bypass 차단이 미충족
+- release immutability: 비활성
+
+따라서 현재 공개 Release는 No-Go다.
 
 증거 보고서에는 다음만 포함한다.
 
@@ -849,16 +918,16 @@ GitHub-hosted runner는 interactive browser/RDP OAuth를 검증할 수 없으므
 6. rollback은 credential, Codex 설치본 또는 사용자의 PATH를 삭제하지 않는다.
 7. 앱 제거와 rollback은 공급자 CLI를 제거하지 않는다.
 
-## 20. 구현 전에 닫아야 할 결정
+## 20. 닫힌 결정과 남은 Release 결정
 
-다음은 임의로 정하지 않고 [task.md](task.md)의 조사·시험 결과로 확정한다.
+| 결정 | 현재 상태 | 근거 또는 남은 행동 |
+| --- | --- | --- |
+| version/capability acceptance | 닫힘 | [compatibility matrix](evidence/codex-compatibility-matrix.md)의 measured capability를 우선하며 임의 version 문자열만 신뢰하지 않음 |
+| 알려진 unauthenticated 판정 | 제한적으로 닫힘 | measured normalized signature만 허용하고 unknown nonzero는 `error` |
+| off-PATH manual 선택 persistence | 닫힘 | session-only, raw path 저장 금지 |
+| credential auth와 usage readiness | 구현·시험 필요 | AC-17과 `CSH-058` |
+| Windows ARM64 공개 지원 | 열림 — No-Go for ARM64 claim | 실제 T2/T3와 provenance evidence 필요 |
+| T3 provider/image/cost/owner | 열림 — Release No-Go | [remote-test-decision.md](remote-test-decision.md)의 모든 `TBD` 해소 |
+| standalone Authenticode/hash 계약 | 열림 | [provenance matrix](evidence/codex-provenance-matrix.md) 조사 완료 전 `verified_publisher` 금지 |
 
-1. 현재 app-server 계약을 처음 지원한 최소 Codex version
-2. version 출력의 공식·실제 형식 목록
-3. unauthenticated 상태의 version별 exit code와 안전한 판정 신호
-4. Windows ARM64를 이번 Release 필수 matrix에 포함할지 여부
-5. T3 cloud provider, image와 월별 비용 한도
-6. native file picker로 선택한 off-PATH 경로를 session-only로 둘지, 별도 암호화 저장을 도입할지 여부
-7. 실제 standalone x64/ARM64가 안정적으로 제공하는 Authenticode publisher 또는 공식 hash manifest 계약
-
-결정이 닫히기 전까지는 더 보수적인 상태를 사용한다. 확인할 수 없는 후보를 `ready`, 확인할 수 없는 auth를 `unauthenticated`, 열기만 한 작업을 `succeeded`로 표시하지 않는다.
+열린 결정은 임의로 채우지 않는다. 확인할 수 없는 후보를 `ready`, 확인할 수 없는 auth를 `unauthenticated`, credential 인증을 사용량 준비, 열기만 한 작업을 `succeeded`로 표시하지 않는다.
