@@ -105,10 +105,58 @@ const checkDevEnvironment = fs.readFileSync(
   path.join(__dirname, "..", "scripts", "check-dev-environment.ps1"),
   "utf8",
 );
+const windowsUpgradeSmoke = fs.readFileSync(
+  path.join(__dirname, "..", "scripts", "windows-upgrade-smoke.ps1"),
+  "utf8",
+);
 const nsisHooks = fs.readFileSync(
   path.join(__dirname, "..", "src-tauri", "windows", "hooks.nsh"),
   "utf8",
 );
+const updateModeSkipOffset = nsisHooks.indexOf('StrCmp $UpdateMode "1" cli_offer_done');
+const passiveModeSkipOffset = nsisHooks.indexOf('StrCmp $PassiveMode "1" cli_offer_done');
+const silentModeSkipOffset = nsisHooks.indexOf("IfSilent cli_offer_done");
+assert.ok(
+  updateModeSkipOffset >= 0 && updateModeSkipOffset < silentModeSkipOffset,
+  "Tauri /UPDATE installs must skip the Codex offer before any interactive work.",
+);
+assert.ok(
+  passiveModeSkipOffset >= 0 && passiveModeSkipOffset < silentModeSkipOffset,
+  "Tauri /P installs must skip the Codex offer before any interactive work.",
+);
+assert.match(ciWorkflow, /Smoke-test public 1\.2\.7 to candidate upgrade/);
+assert.match(
+  ciWorkflow,
+  /\.\/scripts\/windows-upgrade-smoke\.ps1[\s\S]*-ExpectedVersion \$version/,
+);
+assert.match(releaseWorkflow, /Verify public 1\.2\.7 to exact release candidate upgrade/);
+assert.match(
+  releaseWorkflow,
+  /\.\/scripts\/windows-upgrade-smoke\.ps1[\s\S]*-ExpectedVersion \$env:RELEASE_VERSION/,
+);
+assert.match(windowsUpgradeSmoke, /\$baselineVersion = '1\.2\.7'/);
+assert.match(
+  windowsUpgradeSmoke,
+  /\$baselineTagCommit = 'd417cb919c5e0c491a647ee45031ea03b296c5eb'/,
+);
+assert.match(windowsUpgradeSmoke, /\$baselineInstallerSize = 2299068/);
+assert.match(
+  windowsUpgradeSmoke,
+  /\$baselineInstallerSha256 = '2F194A0D25A59DC024D26C2BB3367BC78EA91082EECBE953FEDF43CF75F271FC'/,
+);
+assert.match(windowsUpgradeSmoke, /\$env:GITHUB_ACTIONS -cne 'true'/);
+assert.match(windowsUpgradeSmoke, /foreach \(\$mode in @\('default', 'custom'\)\)/);
+assert.match(
+  windowsUpgradeSmoke,
+  /-ArgumentList @\('\/P', '\/UPDATE'\)/,
+);
+assert.match(windowsUpgradeSmoke, /Updated application bytes differ from the candidate NSIS payload/);
+assert.match(windowsUpgradeSmoke, /Candidate update changed seeded application data/);
+assert.match(windowsUpgradeSmoke, /Post-upgrade launch changed seeded application data/);
+assert.match(windowsUpgradeSmoke, /Candidate uninstall changed preserved application data/);
+assert.match(windowsUpgradeSmoke, /unexpectedly changed the user PATH/);
+assert.match(windowsUpgradeSmoke, /unexpectedly changed the machine PATH/);
+assert.match(windowsUpgradeSmoke, /unexpectedly changed the isolated CODEX_HOME/);
 const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
 const tauriConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src-tauri", "tauri.conf.json"), "utf8"));
@@ -749,6 +797,22 @@ assert.doesNotMatch(codexInstallerSmokeWorkflow, /secrets\./);
 assert.match(
   betaReleaseChecklist,
   /T2 workflow passed for both `default` and `custom` install modes on this exact release commit/,
+);
+assert.match(
+  betaReleaseChecklist,
+  /exact release candidate passed the hosted Windows `1\.2\.7 -> 1\.2\.8` upgrade gate/,
+);
+assert.match(
+  codexReleaseGate,
+  /scripts\/windows-upgrade-smoke\.ps1/,
+);
+assert.match(
+  remoteWindowsTest,
+  /기존 1\.2\.7 설치 고객 업그레이드/,
+);
+assert.match(
+  remoteWindowsTest,
+  /-ArgumentList '\/P','\/UPDATE'/,
 );
 assert.match(
   betaReleaseChecklist,

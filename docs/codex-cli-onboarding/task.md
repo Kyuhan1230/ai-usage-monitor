@@ -1072,6 +1072,34 @@ PR #34는 App Execution Alias 제외의 선행 수정이다. 이 계획 전체�
   - “공식 installer로 실제 Codex를 기본 위치와 custom 위치에 설치했다”는 독립 evidence가 생긴다.
   - 2026-07-31 implementation snapshot은 [REMOTE_T2_2026-07-31.md](evidence/REMOTE_T2_2026-07-31.md)에 기록돼 있다. 후속 code/docs commit의 Release gate에는 같은 commit의 새 run이 필요하다.
 
+### CSH-073A 기존 1.2.7 고객 업그레이드 gate
+
+- [ ] 담당 영역: CI/QA/release
+- [ ] 선행 조건: CSH-062, CSH-073, exact `1.2.8` candidate
+- [ ] 대상:
+  - `scripts/windows-upgrade-smoke.ps1`
+  - `.github/workflows/ci.yml`
+  - `.github/workflows/release.yml`
+- [ ] 자동 gate:
+  1. 공개 `v1.2.7` annotated tag가 commit `d417cb919c5e0c491a647ee45031ea03b296c5eb`로 resolve되는지 확인한다.
+  2. 공개 installer가 `2,299,068 bytes`, SHA-256 `2F194A0D25A59DC024D26C2BB3367BC78EA91082EECBE953FEDF43CF75F271FC`인지 확인한다.
+  3. GitHub-hosted Windows의 fresh user에서 `v1.2.7`을 disposable path에 설치한다.
+  4. valid app-data marker, history, update state와 격리 `CODEX_HOME` credential sentinel을 seed한다.
+  5. 기본 Codex 경로와 custom `CODEX_INSTALL_DIR` 두 mode를 각각 실행한다.
+  6. candidate를 Tauri updater와 같은 passive/update mode인 `/P /UPDATE`로 설치한다.
+  7. candidate payload exact bytes, DisplayVersion, 기존 install location과 stale file 부재를 확인한다.
+  8. baseline·candidate launch가 5초 동안 즉시 crash하지 않는지 확인한다.
+  9. 앱 데이터, Codex CLI 후보, credential sentinel, custom install directory와 process/HKCU/HKLM PATH 불변성을 확인한다.
+  10. candidate 제거 뒤 install directory와 uninstall entry만 없어지고 앱 데이터와 provider 상태는 유지되는지 확인한다.
+- [ ] fail-closed:
+  - script는 기본적으로 `GITHUB_ACTIONS=true`와 `RUNNER_TEMP`가 없는 환경에서 실행을 거부한다.
+  - public baseline tag, size 또는 SHA-256이 바뀌면 실행을 중단한다.
+  - passive update가 Codex 설치 prompt에서 멈추면 bounded timeout으로 실패한다.
+- [ ] 완료 기준:
+  - PR CI candidate와 updater-signed draft exact candidate가 모두 같은 gate를 통과한다.
+  - 사람 T3가 별도 standard user 또는 pre-auth snapshot에서 실제 기존 고객 상태를 다시 확인한다.
+  - public updater endpoint를 사용하는 stock `1.2.7 -> 1.2.8` canary는 공개 직후 disposable Windows에서 수행한다.
+
 ### CSH-074 T3 remote Windows runbook
 
 - [ ] 담당 영역: QA/보안/문서

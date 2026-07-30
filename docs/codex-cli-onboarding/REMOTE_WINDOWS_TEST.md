@@ -242,7 +242,24 @@ Compatibility matrix가 지정한 `@openai/codex@0.144.5`, Node.js `22.12.0` x64
 8. 로그인 probe와 사용량 수집이 같은 선택 후보를 사용하는지 확인한다.
 9. 보고서에는 두 전체 경로 대신 source, version과 privacy-safe candidate tag만 기록한다.
 
-### 6.7 앱 제거와 공급자 보존
+### 6.7 기존 1.2.7 설치 고객 업그레이드
+
+이 시나리오는 fresh-install T3와 분리된 새 standard user 또는 pre-auth snapshot에서 수행한다. 공개 `v1.2.7` installer와 draft의 exact candidate를 사용하며, production `latest.json`을 draft로 바꾸거나 공개 asset을 덮어쓰지 않는다.
+
+1. 공개 `v1.2.7` tag commit, installer byte size와 SHA-256이 release gate에 고정된 값과 일치하는지 확인한다.
+2. `v1.2.7`을 standard user의 기본 위치에 설치하고 앱 설정·history marker를 만든다.
+3. 같은 QA 계정으로 Codex CLI 인증을 완료하고, 전체 credential 내용 대신 VM 안에서만 credential 파일의 SHA-256을 기록한다.
+4. 앱 설치 위치, uninstall entry, Codex CLI file hash, `CODEX_HOME` credential hash와 process/HKCU/HKLM PATH를 기록한다. 보고서에는 full path와 credential hash 자체를 옮기지 않고 PASS/FAIL만 기록한다.
+5. draft candidate를 `Start-Process .\Codex-Claude-Usage-Setup-<version>.exe -ArgumentList '/P','/UPDATE' -Wait`로 실행한다.
+6. 업데이트 진행 중 Codex 설치 질문, OpenAI 설치 script terminal 또는 별도 로그인 terminal이 나타나면 즉시 `FAIL`이다.
+7. 설치 위치와 uninstall entry가 유지되고 DisplayVersion, app binary와 재시작 앱 version만 candidate로 바뀌는지 확인한다.
+8. 기존 설정·history marker, CLI 선택, Codex CLI bytes, credential hash와 세 PATH가 모두 유지되는지 확인한다.
+9. Setup을 열어 CLI와 인증을 다시 확인한다. 이미 인증된 고객에게 재로그인을 요구하거나 onboarding을 강제로 다시 시작하면 `FAIL`이다.
+10. 이 시나리오의 candidate installer SHA-256이 fresh-install T3 및 `release-evidence.json`에 묶인 installer와 같아야 한다.
+
+이 시험은 unpublished draft를 production updater endpoint로 발견하는 시험이 아니다. stock `1.2.7`의 실제 production updater 발견·서명 다운로드는 공개 후 disposable Windows canary에서 별도로 확인하며, 실패 시 published asset을 바꾸지 않고 후속 patch release로 복구한다.
+
+### 6.8 앱 제거와 공급자 보존
 
 1. tray에서 앱을 종료한다.
 2. Windows **설치된 앱**에서 Codex Claude Usage만 제거한다.

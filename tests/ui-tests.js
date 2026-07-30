@@ -31,7 +31,7 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.7");
+assert.strictEqual(packageJson.version, "1.2.8");
 assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
@@ -56,6 +56,16 @@ assert(capabilities.permissions.includes("core:window:allow-start-resize-draggin
 assert(!capabilities.permissions.some((permission) => permission.startsWith("updater:")), "프런트엔드에 updater plugin 권한을 직접 열면 안 됩니다.");
 
 const nsisHooks = fs.readFileSync(path.join(root, "src-tauri", "windows", "hooks.nsh"), "utf8");
+assert(
+  nsisHooks.indexOf('StrCmp $UpdateMode "1" cli_offer_done')
+    < nsisHooks.indexOf("IfSilent cli_offer_done"),
+  "업데이트 설치에서는 대화형 Codex 설치 제안을 시작하기 전에 즉시 빠져나가야 합니다.",
+);
+assert(
+  nsisHooks.indexOf('StrCmp $PassiveMode "1" cli_offer_done')
+    < nsisHooks.indexOf("IfSilent cli_offer_done"),
+  "passive 설치에서는 대화형 Codex 설치 제안을 시작하기 전에 즉시 빠져나가야 합니다.",
+);
 assert(nsisHooks.includes("IfSilent cli_offer_done"), "무인 설치에서는 CLI 설치 질문을 건너뛰어야 합니다.");
 assert.strictEqual((nsisHooks.match(/MB_YESNO\|MB_DEFBUTTON2/g) || []).length, 1, "기본 설치는 Codex CLI만 선택적으로 제안해야 합니다.");
 assert(nsisHooks.includes("https://chatgpt.com/codex/install.ps1"), "OpenAI 공식 Windows 설치 스크립트만 사용해야 합니다.");

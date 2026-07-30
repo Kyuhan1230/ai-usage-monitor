@@ -4,6 +4,12 @@
   Push $2
   Push $3
 
+  ; 앱 업데이트는 기존 고객의 Codex 설치나 PATH를 절대 건드리지 않는다.
+  ; Tauri updater의 passive NSIS 실행은 /P /R /UPDATE이며 IfSilent만으로는
+  ; 걸러지지 않으므로, installer template이 설정한 mode 변수를 먼저 확인한다.
+  StrCmp $UpdateMode "1" cli_offer_done
+  StrCmp $PassiveMode "1" cli_offer_done
+
   ; 무인 설치는 질문이나 네트워크 요청 없이 끝내야 합니다.
   IfSilent cli_offer_done
 

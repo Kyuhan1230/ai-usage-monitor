@@ -24,7 +24,8 @@ Release tag `v<package-version>`을 `main` tip에 만든다. Tag push가 자동�
 3. Node.js 22.12.0, npm 10.9.0과 Rust 1.97.1 toolchain이 정확하다.
 4. 전체 Rust·UI·Release test가 통과한다.
 5. Tauri updater private key로 installer updater signature를 만든다.
-6. draft에 다음 5개 asset만 올린다.
+6. 공개 `v1.2.7` tag commit과 installer byte size·SHA-256을 고정값으로 재검증한 뒤, exact release candidate로 `/P /UPDATE`를 실행한다. 기본 경로와 custom `CODEX_INSTALL_DIR` 두 경우 모두 설치 위치, `~/.codex-usage-wrapper`, 격리 credential bytes, Codex 파일, process/HKCU/HKLM PATH와 제거 후 공급자 상태가 바뀌지 않아야 한다.
+7. draft에 다음 5개 asset만 올린다.
 
    - `Codex-Claude-Usage-Setup-<version>.exe`
    - `Codex-Claude-Usage-Setup.exe`
@@ -35,6 +36,8 @@ Release tag `v<package-version>`을 `main` tip에 만든다. Tag push가 자동�
 `release-evidence.json`에는 release tag, version, full commit, 준비 workflow run ID와 앞의 네 배포 파일별 byte size·SHA-256이 들어간다. 이 JSON 자체의 SHA-256을 공개 입력과 T3 보고서에 함께 고정하므로 네 배포 파일 전체가 하나의 digest로 묶인다. 편의용 installer alias는 versioned installer와 byte-for-byte로 같아야 한다.
 
 준비 job은 같은 `release-evidence.json`을 `release-preparation-evidence-<run-id>-<attempt>` Actions artifact로도 올린다. 공개 job은 JSON 안의 run ID를 숫자로만 믿지 않고 GitHub API로 해당 run의 성공 상태, exact commit, release workflow 경로, 성공한 `prepare-draft` job, exact attempt의 만료되지 않은 artifact와 그 파일 hash를 확인한다. 공개 직전에도 run·job·artifact identity를 다시 확인한다.
+
+기존 고객 업그레이드 gate는 [`scripts/windows-upgrade-smoke.ps1`](../../scripts/windows-upgrade-smoke.ps1)이 소유한다. 이 스크립트는 기본적으로 ephemeral GitHub Actions runner 밖에서 실행을 거부한다. 일반 CI는 unsigned candidate의 설치 동작을 검증하고, draft 준비 job은 T3에 전달될 updater-signed exact installer bytes로 같은 gate를 다시 실행한다. 이 gate는 browser OAuth를 대신하지 않으며, T3의 실제 사용자 업그레이드 확인도 생략하지 않는다.
 
 Draft Release 본문에도 full commit, versioned installer SHA-256과 `release-evidence.json` SHA-256을 기록한다. 준비 검증과 공개 검증이 이 세 줄을 다시 확인하므로 고객에게 보이는 checksum과 gate 입력이 갈라지지 않는다.
 

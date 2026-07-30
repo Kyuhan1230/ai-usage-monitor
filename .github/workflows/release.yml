@@ -248,6 +248,15 @@ jobs:
           Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup.exe"
           Copy-Item -LiteralPath $sourceSignature -Destination "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe.sig"
 
+      - name: Verify public 1.2.7 to exact release candidate upgrade
+        shell: pwsh
+        timeout-minutes: 12
+        run: |
+          ./scripts/windows-upgrade-smoke.ps1 `
+            -CandidateInstaller "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe" `
+            -CandidateApplication src-tauri/target/release/codex-claude-usage.exe `
+            -ExpectedVersion $env:RELEASE_VERSION
+
       - name: Create and verify updater manifest
         shell: pwsh
         run: |

@@ -2,7 +2,7 @@
 
 > 상태: In progress — implementation commit T2 통과, 최종 standard CI 재실행과 사람 T3 대기
 > 적용 범위: Windows용 Codex Claude Usage의 Codex CLI 온보딩
-> 기준 앱 버전: 1.2.7
+> 기준 앱 버전: 1.2.8
 > 최초 작성: 2026-07-30
 > 관련 이슈: [#33 Codex 로그인 이슈](https://github.com/Kyuhan1230/ai-usage-monitor/issues/33)
 > 선행 수정: [PR #34](https://github.com/Kyuhan1230/ai-usage-monitor/pull/34)

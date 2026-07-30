@@ -6,6 +6,7 @@ Use this checklist for every public release until Authenticode code signing is a
 
 - [ ] CI, Rust tests, UI tests, and release-contract tests pass.
 - [ ] The `production-release` environment has at least one required reviewer, prevents self-review, and disables administrator bypass; the prepare job verifies these controls before updater signing secrets are used.
+- [ ] The exact release candidate passed the hosted Windows `1.2.7 -> 1.2.8` upgrade gate in both default and custom `CODEX_INSTALL_DIR` modes, preserving application data, Codex files, isolated credential bytes, process/user/machine PATH, install location, and post-uninstall provider state.
 - [ ] The `Codex CLI official installer smoke` T2 workflow passed for both `default` and `custom` install modes on this exact release commit.
 - [ ] Both T2 artifacts record the official installer-script SHA-256, actual Codex version, capability probes, isolated unauthenticated result, and successful repository live-harness result without raw paths or command output.
 - [ ] The T2 `default` and `custom` artifacts contain the same official installer-script SHA-256 and the same installed Codex CLI version.
@@ -19,7 +20,7 @@ Use this checklist for every public release until Authenticode code signing is a
 - [ ] The release notes link to installation, removal, privacy, and known-issues instructions.
 - [ ] SmartScreen behavior was checked on a clean or representative Windows account.
 - [ ] A sanitized install and first-refresh smoke test passed for at least one supported provider.
-- [ ] Upgrade from the previous supported release preserves `~/.codex-usage-wrapper`.
+- [ ] The human T3 upgrade lane confirmed that an existing `1.2.7` installation receives no Codex-install prompt during `/P /UPDATE`, starts the candidate successfully, and preserves the existing user's settings, history, CLI selection, and authentication.
 - [ ] Rollback or manual reinstall behavior is documented if the release changes storage or updating.
 - [ ] Immediately after publication, the workflow re-downloaded and rehashed all five release assets, reverified updater evidence/signature, and confirmed the remote tag still resolves to the exact release commit.
 
