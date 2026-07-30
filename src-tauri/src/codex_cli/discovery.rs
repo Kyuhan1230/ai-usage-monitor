@@ -76,6 +76,8 @@ fn discover_from_inputs(inputs: DiscoveryInputs) -> CandidateInventory {
     let app_data = environment_path(&effective_environment, "APPDATA");
     let user_profile = environment_path(&effective_environment, "USERPROFILE");
     let program_files = environment_path(&effective_environment, "PROGRAMFILES");
+    let canonical_local_app_data = canonical_reference_root(local_app_data.as_deref());
+    let canonical_program_files = canonical_reference_root(program_files.as_deref());
 
     let mut raw_candidates = Vec::<(PathBuf, CandidateSource)>::new();
     raw_candidates.extend(
@@ -164,8 +166,8 @@ fn discover_from_inputs(inputs: DiscoveryInputs) -> CandidateInventory {
         let canonical = fs::canonicalize(&path).unwrap_or_else(|_| lexical_absolute_path(&path));
         match classify_desktop_candidate(
             &canonical,
-            local_app_data.as_deref(),
-            program_files.as_deref(),
+            canonical_local_app_data.as_deref(),
+            canonical_program_files.as_deref(),
         ) {
             Some(DesktopCandidate::PackagedResource) => {
                 desktop_bundle_count += 1;
@@ -460,6 +462,10 @@ fn lexical_absolute_path(path: &Path) -> PathBuf {
     }
 }
 
+fn canonical_reference_root(path: Option<&Path>) -> Option<PathBuf> {
+    path.map(|root| fs::canonicalize(root).unwrap_or_else(|_| lexical_absolute_path(root)))
+}
+
 fn windows_path_key(path: &Path) -> String {
     let mut value = path
         .to_string_lossy()
@@ -644,8 +650,9 @@ mod tests {
     fn canonicalized_junction_into_packaged_resources_is_rejected() {
         let root = unique_root("packaged-junction");
         let local = root.join("Local");
-        let program_files = root.join("Program Files");
-        let packaged_resources = program_files
+        let actual_program_files = root.join("actual Program Files");
+        let program_files = root.join("Program Files alias");
+        let packaged_resources = actual_program_files
             .join("WindowsApps")
             .join("OpenAI.Codex_1.0_x64__id")
             .join("app")
@@ -655,6 +662,25 @@ mod tests {
         fs::create_dir_all(&packaged_resources).expect("packaged resource fixture");
         fs::write(packaged_resources.join("codex.exe"), b"fixture")
             .expect("packaged executable fixture");
+        let program_files_junction_status = Command::new("cmd.exe")
+            .args([
+                "/D",
+                "/C",
+                "mklink",
+                "/J",
+                program_files
+                    .to_str()
+                    .expect("program files alias path is UTF-8"),
+                actual_program_files
+                    .to_str()
+                    .expect("program files target path is UTF-8"),
+            ])
+            .status()
+            .expect("program files junction command starts");
+        assert!(
+            program_files_junction_status.success(),
+            "program files alias fixture is created"
+        );
         let junction_status = Command::new("cmd.exe")
             .args([
                 "/D",
@@ -681,6 +707,8 @@ mod tests {
         assert!(inventory.candidates.is_empty());
         assert_eq!(inventory.desktop_bundle_count, 1);
         fs::remove_dir(&junction).expect("junction fixture is removed without traversing it");
+        fs::remove_dir(&program_files)
+            .expect("program files alias is removed without traversing it");
         fs::remove_dir_all(root).expect("fixture is removed");
     }
 
