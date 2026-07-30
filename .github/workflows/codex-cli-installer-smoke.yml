@@ -34,10 +34,13 @@ jobs:
       CODEX_NON_INTERACTIVE: "1"
       OPENAI_API_KEY: ""
       CODEX_API_KEY: ""
+      AI_USAGE_MONITOR_T2_APP_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Initialize isolated T2 environment
         id: initialize
@@ -45,6 +48,13 @@ jobs:
         shell: pwsh
         run: |
           $mode = '${{ matrix.install_mode }}'
+          $checkedOutCommit = (git rev-parse HEAD).Trim()
+          if (
+            $env:AI_USAGE_MONITOR_T2_APP_COMMIT -notmatch '^[0-9a-fA-F]{40}$' -or
+            $checkedOutCommit -cne $env:AI_USAGE_MONITOR_T2_APP_COMMIT
+          ) {
+            throw 'The checked-out source did not match the exact T2 application commit.'
+          }
           $codexHome = Join-Path $env:RUNNER_TEMP "codex-home-$mode"
           $scriptPath = Join-Path $env:RUNNER_TEMP "codex-install-$mode.ps1"
           $stdoutPath = Join-Path $env:RUNNER_TEMP "codex-install-$mode.stdout.log"
@@ -76,6 +86,7 @@ jobs:
           }
 
           "CODEX_HOME=$codexHome" >> $env:GITHUB_ENV
+          "CODEX_CHECKED_OUT_COMMIT=$checkedOutCommit" >> $env:GITHUB_ENV
           "CODEX_INSTALL_SCRIPT=$scriptPath" >> $env:GITHUB_ENV
           "CODEX_INSTALL_STDOUT=$stdoutPath" >> $env:GITHUB_ENV
           "CODEX_INSTALL_STDERR=$stderrPath" >> $env:GITHUB_ENV
@@ -161,9 +172,70 @@ jobs:
             throw "The official installer returned a nonzero exit code: $exitCode"
           }
 
+      - name: Emit sanitized installer failure diagnostics
+        if: steps.install.outcome == 'failure'
+        shell: pwsh
+        run: |
+          $diagnosticLines = @()
+          foreach ($path in @($env:CODEX_INSTALL_STDOUT, $env:CODEX_INSTALL_STDERR)) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              $diagnosticLines += Get-Content -LiteralPath $path -Tail 20 -ErrorAction SilentlyContinue
+            }
+          }
+          $diagnostic = @(
+            $diagnosticLines |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+              Select-Object -Last 8
+          ) -join "`n"
+          $diagnostic = $diagnostic.Trim()
+          if ([string]::IsNullOrWhiteSpace($diagnostic)) {
+            $diagnostic = 'The official installer returned no diagnostic output.'
+          }
+          foreach ($sensitivePath in @(
+            $env:USERPROFILE,
+            $env:LOCALAPPDATA,
+            $env:RUNNER_TEMP,
+            $env:GITHUB_WORKSPACE,
+            $env:CODEX_HOME,
+            $env:CODEX_INSTALL_DIR,
+            $env:CODEX_EXPECTED_TARGET
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($sensitivePath)) {
+              $diagnostic = $diagnostic.Replace($sensitivePath, '<REDACTED_PATH>')
+            }
+          }
+          $diagnostic = [regex]::Replace(
+            $diagnostic,
+            '(?i)(https?://[^\s?]+)\?[^\s]+',
+            '$1?<REDACTED_QUERY>'
+          )
+          $diagnostic = [regex]::Replace(
+            $diagnostic,
+            '(?i)(authorization\s*:\s*(?:bearer\s+)?)[^\s]+',
+            '$1<REDACTED>'
+          )
+          if ($diagnostic.Length -gt 4000) {
+            $diagnostic = $diagnostic.Substring($diagnostic.Length - 4000)
+          }
+          $annotation = $diagnostic.
+            Replace('%', '%25').
+            Replace("`r", '%0D').
+            Replace("`n", '%0A')
+          Write-Output "::error title=Official Codex installer failed::$annotation"
+          "CODEX_INSTALL_FAILURE_CATEGORY=installer_process_failed" >> $env:GITHUB_ENV
+          foreach ($entry in @(
+            @{ Name = 'CODEX_INSTALL_STDOUT_SHA256'; Path = $env:CODEX_INSTALL_STDOUT },
+            @{ Name = 'CODEX_INSTALL_STDERR_SHA256'; Path = $env:CODEX_INSTALL_STDERR }
+          )) {
+            if (Test-Path -LiteralPath $entry.Path -PathType Leaf) {
+              $hash = (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash
+              "$($entry.Name)=$hash" >> $env:GITHUB_ENV
+            }
+          }
+
       - name: Validate the installed real Codex CLI without credentials
         id: validate_cli
-        if: steps.download.outcome == 'success'
+        if: steps.install.outcome == 'success'
         continue-on-error: true
         shell: pwsh
         run: |
@@ -401,7 +473,9 @@ jobs:
             schema_version = 1
             tier = 'T2'
             install_mode = $mode
-            app_commit = '${{ github.sha }}'
+            app_commit = $env:AI_USAGE_MONITOR_T2_APP_COMMIT
+            checked_out_commit = $env:CODEX_CHECKED_OUT_COMMIT
+            workflow_trigger_commit = '${{ github.sha }}'
             workflow_run = 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
             run_attempt = '${{ github.run_attempt }}'
             runner = [ordered]@{
@@ -416,6 +490,21 @@ jobs:
               target_was_empty = $env:CODEX_TARGET_WAS_EMPTY -eq 'true'
               isolated_codex_home_was_empty = $env:CODEX_HOME_WAS_EMPTY -eq 'true'
               preexisting_command_count = Optional-Integer $env:CODEX_PREEXISTING_COMMAND_COUNT
+              failure_category = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_FAILURE_CATEGORY)) {
+                $null
+              } else {
+                $env:CODEX_INSTALL_FAILURE_CATEGORY
+              }
+              stdout_sha256 = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_STDOUT_SHA256)) {
+                $null
+              } else {
+                $env:CODEX_INSTALL_STDOUT_SHA256
+              }
+              stderr_sha256 = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_STDERR_SHA256)) {
+                $null
+              } else {
+                $env:CODEX_INSTALL_STDERR_SHA256
+              }
             }
             cli = [ordered]@{
               source = $env:CODEX_EXPECTED_SOURCE
@@ -458,7 +547,7 @@ jobs:
 
           $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $evidencePath -Encoding utf8
           "### Codex CLI T2 — $mode" >> $env:GITHUB_STEP_SUMMARY
-          "- Commit: ${{ github.sha }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Commit: $($env:AI_USAGE_MONITOR_T2_APP_COMMIT)" >> $env:GITHUB_STEP_SUMMARY
           "- Official script SHA-256: $($env:CODEX_INSTALL_SCRIPT_SHA256)" >> $env:GITHUB_STEP_SUMMARY
           "- Codex version: $($env:CODEX_VERSION_SAFE)" >> $env:GITHUB_STEP_SUMMARY
           "- OAuth/account secrets used: no" >> $env:GITHUB_STEP_SUMMARY

@@ -30,6 +30,34 @@ const codexInstallerSmokeWorkflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "codex-cli-installer-smoke.yml"),
   "utf8",
 );
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /AI_USAGE_MONITOR_T2_APP_COMMIT: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /\$checkedOutCommit -cne \$env:AI_USAGE_MONITOR_T2_APP_COMMIT/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /Emit sanitized installer failure diagnostics[\s\S]*steps\.install\.outcome == 'failure'/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /CODEX_INSTALL_FAILURE_CATEGORY=installer_process_failed/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /Validate the installed real Codex CLI without credentials[\s\S]*if: steps\.install\.outcome == 'success'/,
+);
+assert.doesNotMatch(
+  codexInstallerSmokeWorkflow,
+  /app_commit = '\$\{\{ github\.sha \}\}'/,
+);
 const betaReleaseChecklist = fs.readFileSync(
   path.join(__dirname, "..", "docs", "BETA_RELEASE_CHECKLIST.md"),
   "utf8",
