@@ -153,20 +153,56 @@ jobs:
             '-File',
             "`"$env:CODEX_INSTALL_SCRIPT`""
           )
-          $process = Start-Process `
-            -FilePath powershell.exe `
-            -ArgumentList $arguments `
-            -NoNewWindow `
-            -PassThru `
-            -RedirectStandardOutput $env:CODEX_INSTALL_STDOUT `
-            -RedirectStandardError $env:CODEX_INSTALL_STDERR
-          if (-not $process.WaitForExit(600000)) {
-            try { $process.Kill($true) } catch { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
-            "CODEX_INSTALL_TIMED_OUT=true" >> $env:GITHUB_ENV
-            throw 'The official installer exceeded the 10-minute T2 timeout.'
+          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $windowsPowerShellModules = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules'
+          if (
+            -not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $windowsPowerShellModules -PathType Container)
+          ) {
+            throw 'The Windows PowerShell 5.1 runtime or its system module directory was unavailable.'
+          }
+
+          # GitHub's pwsh host exports a PowerShell 7 PSModulePath. A nested
+          # powershell.exe inherits it, unlike the desktop app, and then cannot
+          # autoload built-in Windows PowerShell cmdlets such as Get-FileHash.
+          $originalModulePath = $env:PSModulePath
+          $documents = [Environment]::GetFolderPath('MyDocuments')
+          $windowsModulePaths = @(
+            if (-not [string]::IsNullOrWhiteSpace($documents)) {
+              Join-Path $documents 'WindowsPowerShell\Modules'
+            }
+            Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'
+            $windowsPowerShellModules
+          )
+          try {
+            $env:PSModulePath = $windowsModulePaths -join ';'
+            & $windowsPowerShell `
+              -NoLogo `
+              -NoProfile `
+              -NonInteractive `
+              -Command 'Get-Command Get-FileHash -ErrorAction Stop | Out-Null'
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Windows PowerShell could not autoload its built-in Get-FileHash cmdlet.'
+            }
+            "CODEX_WINDOWS_POWERSHELL_MODULE_PATH_NORMALIZED=true" >> $env:GITHUB_ENV
+
+            $process = Start-Process `
+              -FilePath $windowsPowerShell `
+              -ArgumentList $arguments `
+              -NoNewWindow `
+              -PassThru `
+              -RedirectStandardOutput $env:CODEX_INSTALL_STDOUT `
+              -RedirectStandardError $env:CODEX_INSTALL_STDERR
+            if (-not $process.WaitForExit(600000)) {
+              try { $process.Kill($true) } catch { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+              "CODEX_INSTALL_TIMED_OUT=true" >> $env:GITHUB_ENV
+              throw 'The official installer exceeded the 10-minute T2 timeout.'
+            }
+            $exitCode = $process.ExitCode
+          } finally {
+            $env:PSModulePath = $originalModulePath
           }
           "CODEX_INSTALL_TIMED_OUT=false" >> $env:GITHUB_ENV
-          $exitCode = $process.ExitCode
           "CODEX_INSTALL_EXIT_CODE=$exitCode" >> $env:GITHUB_ENV
           if ($exitCode -ne 0) {
             throw "The official installer returned a nonzero exit code: $exitCode"
@@ -490,6 +526,8 @@ jobs:
               target_was_empty = $env:CODEX_TARGET_WAS_EMPTY -eq 'true'
               isolated_codex_home_was_empty = $env:CODEX_HOME_WAS_EMPTY -eq 'true'
               preexisting_command_count = Optional-Integer $env:CODEX_PREEXISTING_COMMAND_COUNT
+              windows_powershell_module_path_normalized =
+                $env:CODEX_WINDOWS_POWERSHELL_MODULE_PATH_NORMALIZED -eq 'true'
               failure_category = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_FAILURE_CATEGORY)) {
                 $null
               } else {

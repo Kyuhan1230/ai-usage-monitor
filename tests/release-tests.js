@@ -52,6 +52,18 @@ assert.match(
 );
 assert.match(
   codexInstallerSmokeWorkflow,
+  /System32\\WindowsPowerShell\\v1\.0\\Modules/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /Get-Command Get-FileHash -ErrorAction Stop/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
+  /CODEX_WINDOWS_POWERSHELL_MODULE_PATH_NORMALIZED=true/,
+);
+assert.match(
+  codexInstallerSmokeWorkflow,
   /Validate the installed real Codex CLI without credentials[\s\S]*if: steps\.install\.outcome == 'success'/,
 );
 assert.doesNotMatch(
