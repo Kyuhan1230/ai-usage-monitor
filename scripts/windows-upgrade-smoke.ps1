@@ -556,6 +556,13 @@ try {
         if (Test-Path -LiteralPath $installRoot) {
             throw "Candidate uninstall did not remove the install root in $mode scenario."
         }
+        $registryDeadline = (Get-Date).AddSeconds(30)
+        while (
+            (Test-Path -LiteralPath $uninstallRegistryPath) -and
+            (Get-Date) -lt $registryDeadline
+        ) {
+            Start-Sleep -Milliseconds 250
+        }
         if (Test-Path -LiteralPath $uninstallRegistryPath) {
             throw "Candidate uninstall did not remove the uninstall registry entry in $mode scenario."
         }
