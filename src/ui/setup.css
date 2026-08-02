@@ -104,65 +104,9 @@ h1 {
   align-items: center;
 }
 
-.provider-control-actions {
-  display: grid;
-  gap: 7px;
-  min-width: 142px;
-  overflow: visible !important;
-}
-
-.provider-control-actions button {
-  width: 100%;
-}
-
-.provider-responsibility,
-.provider-meta {
-  margin-top: 7px;
-  font-size: 12px;
-}
-
-.provider-responsibility {
-  color: var(--muted);
-}
-
-.provider-meta {
-  color: #b7c4d8;
-}
-
-.candidate-picker {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.candidate-picker > p {
-  font-size: 12px;
-}
-
-.candidate-list {
-  display: grid;
-  gap: 7px;
-  margin-top: 8px;
-}
-
-.candidate-option {
-  width: 100%;
-  min-height: 38px;
-  justify-content: flex-start;
-  text-align: left;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .secondary-action {
   color: var(--muted);
   border-style: dashed;
-}
-
-.danger-action {
-  color: #ffc0c0;
-  border-color: #704343;
-  background: #2b2024;
 }
 
 .check {
@@ -218,11 +162,6 @@ p {
 
 .status-message[data-kind="warning"] {
   color: var(--warn);
-}
-
-.status-message[data-kind="progress"],
-.action-message[data-kind="progress"] {
-  color: #9bd1ff;
 }
 
 .status-message[data-kind="error"],
@@ -379,7 +318,6 @@ footer {
 
   .check > button,
   .check > .toggle,
-  .provider-control-actions,
   .provider-actions > button {
     width: 100%;
     justify-content: center;

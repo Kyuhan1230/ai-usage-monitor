@@ -36,25 +36,15 @@
 
 1. [최신 릴리스](https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest)에서 `Codex-Claude-Usage-Setup-<version>.exe`를 내려받아 실행합니다.
 2. 앱을 처음 실행하면 설정 화면이 자동으로 열립니다. Codex CLI와 Claude Code 중 사용하는 도구 하나만 연결해도 시작할 수 있습니다.
-3. Codex를 사용한다면 Setup이 현재 PATH, Windows 사용자·시스템 PATH, 공식 기본 위치, `CODEX_INSTALL_DIR`, 기존 npm 설치, `.local/bin`, 사용자가 고른 파일을 차례로 검사합니다. 이름만 같은 파일은 사용하지 않고 실제 version과 필수 명령 지원 여부를 제한 시간 안에 확인합니다.
-4. 사용할 수 있는 Codex CLI가 없다면 **Codex 설치**를 누르고 OpenAI 공식 설치 프로그램 실행에 동의합니다. 앱은 보이는 PowerShell 창을 추적한 뒤 후보를 다시 검사하며, 설치 프로그램 종료 코드만으로 성공했다고 표시하지 않습니다.
-5. **Codex 로그인**을 누르면 앱이 검증한 바로 그 CLI의 전체 경로로 보이는 터미널에서 `codex login`을 시작합니다. 브라우저는 Codex CLI가 열고, 계정 입력·MFA·workspace 선택·OAuth 승인은 사용자가 그 브라우저에서 직접 완료합니다. 브라우저를 열 수 없을 때는 선택된 CLI가 `--device-auth`를 지원하고 계정 또는 workspace 정책에서도 허용된 경우에만 **기기 코드 로그인**을 사용할 수 있습니다.
-6. 로그인 프로세스가 끝나면 앱이 같은 CLI로 `codex login status`를 다시 실행합니다. 사용하기로 한 Codex 또는 Claude 중 하나 이상의 인증이 확인돼야 **설정 완료**가 활성화됩니다. credential 확인은 현재 구독 사용량 연결 성공과 별개이며, Codex 사용량은 새 요청이 성공한 뒤에만 현재 연결 성공으로 표시합니다. 사용하지 않는 도구와 Claude `statusLine` 이벤트 연결은 건너뛰어도 됩니다.
-7. **사용량 확인**을 누르면 최신 상태를 한 번 읽습니다. **활동 중 자동 확인**을 켜면 로컬 세션 파일이 바뀔 때만, 최소 5분 간격으로 상태를 확인합니다.
+3. 필요한 도구에 표시된 **설치** 또는 **로그인** 버튼을 누릅니다. 터미널에서 직접 로그인하려면 다음 명령을 사용합니다.
 
-Codex CLI를 직접 로그인하려면 터미널에서 `codex login`을 실행할 수도 있습니다. 앱으로 돌아와 **상태 다시 확인**을 누르면 동일한 검증 절차를 수행합니다.
+   ```powershell
+   codex login
+   claude auth login
+   ```
 
-설치·탐지·로그인 상태와 오류 처리의 정본은 [Codex CLI 온보딩 강화 명세](codex-cli-onboarding/spec.md), 구현 순서와 완료 기준은 [실행 계획](codex-cli-onboarding/task.md), 폐기 가능한 원격 Windows VM에서 실제 OAuth를 시험하는 절차는 [원격 Windows T3 실행서](codex-cli-onboarding/REMOTE_WINDOWS_TEST.md)에 기록돼 있습니다.
-
-### Codex 설정 문제 해결
-
-| 상황 | 앱이 확인하는 것 | 해결 방법 |
-| --- | --- | --- |
-| Codex가 기본 위치가 아닌 곳에 있음 | 현재 process PATH, 새 HKCU/HKLM PATH, `CODEX_INSTALL_DIR`, standalone/npm 위치와 native file picker | **상태 다시 확인** 뒤 **다른 CLI 파일 선택**으로 `codex.exe`, `codex.cmd` 또는 `codex.bat`를 고릅니다. PATH 밖에서 직접 고른 파일은 현재 앱 세션에서만 유지되므로 계속 쓰려면 해당 directory를 PATH 또는 `CODEX_INSTALL_DIR`에 등록합니다. |
-| 예전 npm Codex는 있지만 실행되지 않음 | 과거 설치에 쓴 npm client version이 아니라 현재 launcher, 설치된 package, Node.js version과 architecture | 공식 standalone 설치를 권장합니다. legacy launcher를 유지한다면 호환 Node.js가 PATH에서 실행돼야 하며, Node 누락과 version/architecture 불일치는 서로 다른 오류로 표시됩니다. |
-| Node.js, npm 또는 Rust가 없음 | Release 앱과 공식 standalone에는 추가 개발 도구가 필요 없음 | 이 앱 때문에 개발 툴체인을 설치하지 마세요. 고객 PC에 Rust를 자동 설치하지 않으며 Node.js는 legacy package-manager launcher를 고른 경우에만 관련됩니다. |
-| 로그인은 확인됐지만 사용량이 실패함 | credential 상태와 현재 `account/rateLimits/read` 결과를 별도 판정 | 사용량 확인을 다시 실행하고 safe error를 확인합니다. API-key 또는 workspace credential이 Codex에는 유효해도 구독 한도 조회는 지원되지 않을 수 있습니다. auth 원문이나 계정 정보는 Issue에 붙이지 마세요. |
-| Codex 데스크톱 앱만 설치됨 | 보호된 desktop resource와 Windows App Execution Alias는 CLI 후보에서 제외 | 독립 standalone Codex CLI를 설치하거나 실제 CLI 파일을 직접 선택합니다. |
+4. 로그인을 마친 뒤 **상태 다시 확인 → 설정 완료**를 누릅니다. 사용하지 않는 도구와 Claude `statusLine` 이벤트 연결은 건너뛰어도 됩니다.
+5. **사용량 확인**을 누르면 최신 상태를 한 번 읽습니다. **활동 중 자동 확인**을 켜면 로컬 세션 파일이 바뀔 때만, 최소 5분 간격으로 상태를 확인합니다.
 
 `X`를 누르면 화면만 닫히고 앱은 트레이에 남습니다. 앱을 완전히 종료하려면 트레이 메뉴에서 **Quit**을 선택합니다.
 
@@ -67,8 +57,8 @@ Codex CLI를 직접 로그인하려면 터미널에서 `codex login`을 실행�
 
 ### 설치 전에 알아둘 점
 
-- 설치 파일에는 Codex CLI와 Claude Code가 들어 있지 않습니다. 대화형 NSIS 설치 중 Codex CLI가 보이지 않으면 기본값 **아니요**인 선택 설치를 한 번 제안할 수 있고, 첫 실행 Setup이 실제 실행 가능성과 로그인 상태를 최종 판정합니다. 거절하거나 CLI 설치에 실패해도 모니터 설치는 계속됩니다. `/S` 무인 설치는 질문하거나 CLI를 내려받지 않습니다.
-- 릴리스 설치 파일과 OpenAI 공식 standalone Codex CLI를 쓰는 고객 PC에는 Node.js, npm, Rust, Python이 필요하지 않으며 앱도 이 개발 도구를 자동 설치하지 않습니다. 과거 npm 기반 Codex launcher를 선택한 경우에만 그 launcher가 요구하는 호환 Node.js가 PATH에서 실행 가능해야 합니다.
+- 설치 파일에는 Codex CLI와 Claude Code가 들어 있지 않습니다. 두 도구 중 설치되지 않은 것이 있으면 설치 프로그램이 공식 설치 방법을 실행할지 각각 묻습니다. 동의한 도구만 내려받으며, 거절하거나 설치에 실패해도 이 앱의 설치는 계속됩니다.
+- 별도 Node.js나 Python은 필요하지 않습니다.
 - 앱과 설치 프로그램은 WebView2를 자동으로 내려받지 않습니다. WebView2가 제거된 Windows에서는 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)을 먼저 설치해야 합니다.
 - 앱은 새 버전을 확인할 때 GitHub Release의 `latest.json`만 조회합니다. 사용자가 CLI 설치에 동의하면 해당 도구의 공식 설치 주소에도 연결합니다.
 
@@ -213,8 +203,8 @@ flowchart LR
 ### 개발 환경
 
 - Windows 10 이상
-- Node.js **22.12.0**과 npm **10.9.0**
-- Rust **1.97.1**, `rustfmt`, `clippy`, `x86_64-pc-windows-msvc`
+- Node.js 22.12 이상
+- Rust stable MSVC toolchain
 - Microsoft C++ Build Tools와 WebView2
 - Codex CLI 및 Claude Code(실데이터 확인 시)
 
@@ -223,14 +213,11 @@ flowchart LR
 ```powershell
 git clone https://github.com/Kyuhan1230/ai-usage-monitor.git
 cd ai-usage-monitor
-npm run verify:toolchain
 npm ci
 npm test
 npm run app
 npm run dist
 ```
-
-전체 Windows 사전 점검은 `powershell -ExecutionPolicy Bypass -File scripts/check-dev-environment.ps1`로 실행합니다. 저장소는 Node.js나 npm을 설치하지 않습니다. `rustup`이 이미 설치돼 있으면 이 저장소에서 Rust 명령을 처음 실행할 때 고정된 toolchain과 component를 내려받을 수 있지만, 전역 기본 toolchain은 바꾸지 않습니다. `rustup`, 네트워크, MSVC Build Tools 중 필요한 항목이 없으면 사전 점검이 누락 항목을 표시하고 실패합니다.
 
 Tauri NSIS 설치 파일은 `src-tauri/target/release/bundle/nsis/`에 만들어집니다. 일반 CI에서는 업데이트 파일 생성을 끈 별도 설정으로 게시자 서명 없는 설치 파일을 검증합니다. 릴리스 작업에서는 GitHub secret에 저장한 Tauri 개인키로 업데이트 검증 파일인 `.exe.sig`와 `latest.json`을 만듭니다. 두 자동화 작업 모두 설치 파일이 20MB를 넘으면 실패 처리합니다.
 

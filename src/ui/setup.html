@@ -20,29 +20,11 @@
 
     <section class="checks" aria-label="도구 연결">
       <article id="codex-card" class="check">
-        <div class="provider-copy">
+        <div>
           <h2 id="codex-heading" tabindex="-1">Codex CLI</h2>
-          <p id="codex-detail" class="status-message" role="status" aria-live="polite">확인 중</p>
-          <p id="codex-responsibility" class="provider-responsibility">
-            앱은 선택된 Codex CLI에서 로그인 명령까지만 시작합니다. 브라우저의 계정 입력, MFA와 승인은 사용자가 직접 완료합니다.
-          </p>
-          <p id="codex-meta" class="provider-meta" hidden></p>
-          <div id="codex-candidates" class="candidate-picker" hidden>
-            <p>사용할 Codex CLI를 선택하세요. 전체 경로는 앱에 표시되지 않습니다.</p>
-            <div
-              id="codex-candidate-list"
-              class="candidate-list"
-              role="list"
-              aria-label="Codex CLI 후보 목록"
-            ></div>
-          </div>
+          <p id="codex-detail" class="status-message">확인 중</p>
         </div>
-        <div class="provider-control-actions" aria-label="Codex CLI 작업">
-          <button id="codex-login" type="button">확인 중</button>
-          <button id="codex-device-login" class="secondary-action" type="button" hidden>Device code 로그인</button>
-          <button id="codex-browse" class="secondary-action" type="button">다른 CLI 파일 선택</button>
-          <button id="codex-cancel" class="danger-action" type="button" hidden>작업 취소</button>
-        </div>
+        <button id="codex-login" type="button">확인 중</button>
       </article>
 
       <div id="claude-actions" class="provider-actions">
