@@ -12,20 +12,30 @@ permissions:
 jobs:
   test-and-build-windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22.12.0
           cache: npm
 
+      - name: Verify Node.js and npm versions
+        run: node scripts/verify-toolchain.js --node-only
+
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # pinned action, verified 2026-07-30
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+          targets: x86_64-pc-windows-msvc
+
+      - name: Verify complete development toolchain
+        run: node scripts/verify-toolchain.js
 
       - name: Install frontend build tooling
         run: npm ci
@@ -36,6 +46,351 @@ jobs:
       - name: Build Tauri NSIS installer
         run: npm run dist:ci
 
+      - name: Smoke-test silent NSIS install
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Invoke-BoundedProcess {
+            param(
+              [Parameter(Mandatory)]
+              [string] $FilePath,
+              [Parameter(Mandatory)]
+              [string[]] $ArgumentList,
+              [Parameter(Mandatory)]
+              [ValidateRange(1, 120)]
+              [int] $TimeoutSeconds,
+              [Parameter(Mandatory)]
+              [string] $Description
+            )
+
+            $process = Start-Process `
+              -FilePath $FilePath `
+              -ArgumentList $ArgumentList `
+              -PassThru
+            try {
+              if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+                $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+                try {
+                  & $taskkill /PID $process.Id /T /F *> $null
+                } catch {
+                  # Preserve the deterministic timeout failure even if taskkill reports a race.
+                }
+                $null = $process.WaitForExit(10000)
+                throw "$Description timed out after $TimeoutSeconds seconds."
+              }
+
+              if ($process.ExitCode -ne 0) {
+                throw "$Description failed with exit code $($process.ExitCode)."
+              }
+            } finally {
+              $process.Dispose()
+            }
+          }
+
+          function Get-FileFingerprint {
+            param(
+              [Parameter(Mandatory)]
+              [string] $LiteralPath
+            )
+
+            if (-not (Test-Path -LiteralPath $LiteralPath)) {
+              return '[absent]'
+            }
+            if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+              return '[not-a-file]'
+            }
+
+            $item = Get-Item -LiteralPath $LiteralPath
+            $hash = (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash
+            return "$($item.Length):$hash"
+          }
+
+          function Get-NsisPayloadReference {
+            param(
+              [Parameter(Mandatory)]
+              [string] $Source
+            )
+
+            # Tauri 2.11.4 patches this fixed-size marker before makensis reads the
+            # application, then restores the bare release binary after bundling.
+            # Reproduce that exact transform so the installed bytes are compared
+            # with the installer payload, not the deliberately restored binary.
+            # Source: tauri-apps/tauri tag tauri-cli-v2.11.4,
+            # crates/tauri-bundler/src/bundle.rs::patch_binary.
+            $unknownMarker = '__TAURI_BUNDLE_TYPE_VAR_UNK'
+            $nsisMarker = '__TAURI_BUNDLE_TYPE_VAR_NSS'
+            if ($unknownMarker.Length -ne $nsisMarker.Length) {
+              throw 'Tauri bundle markers must have the same byte length.'
+            }
+
+            $bytes = [System.IO.File]::ReadAllBytes($Source)
+            $asciiView = [System.Text.Encoding]::ASCII.GetString($bytes)
+            $markerOffset = $asciiView.IndexOf(
+              $unknownMarker,
+              [System.StringComparison]::Ordinal
+            )
+            if ($markerOffset -lt 0) {
+              throw 'The built application is missing the Tauri bundle marker.'
+            }
+            if (
+              $asciiView.IndexOf(
+                $unknownMarker,
+                $markerOffset + 1,
+                [System.StringComparison]::Ordinal
+              ) -ge 0
+            ) {
+              throw 'The built application contains multiple Tauri bundle markers.'
+            }
+
+            $replacement = [System.Text.Encoding]::ASCII.GetBytes($nsisMarker)
+            [System.Array]::Copy(
+              $replacement,
+              0,
+              $bytes,
+              $markerOffset,
+              $replacement.Length
+            )
+
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $hash = [System.BitConverter]::ToString(
+                $sha256.ComputeHash($bytes)
+              ).Replace('-', '')
+            } finally {
+              $sha256.Dispose()
+            }
+
+            return [pscustomobject]@{
+              Hash = $hash
+              Length = $bytes.LongLength
+            }
+          }
+
+          function Assert-CodexStateUnchanged {
+            param(
+              [Parameter(Mandatory)]
+              [string] $Phase,
+              [Parameter(Mandatory)]
+              [string[]] $Targets,
+              [Parameter(Mandatory)]
+              [hashtable] $FileStateBefore,
+              [Parameter(Mandatory)]
+              [hashtable] $PathStateBefore
+            )
+
+            foreach ($target in $Targets) {
+              $current = Get-FileFingerprint -LiteralPath $target
+              if ($current -cne $FileStateBefore[$target]) {
+                throw "Silent NSIS $Phase unexpectedly changed Codex CLI target: $target"
+              }
+            }
+
+            $currentUserPath = [Environment]::GetEnvironmentVariable(
+              'Path',
+              [System.EnvironmentVariableTarget]::User
+            )
+            if ($currentUserPath -cne $PathStateBefore.User) {
+              throw "Silent NSIS $Phase unexpectedly changed the user PATH."
+            }
+
+            $currentMachinePath = [Environment]::GetEnvironmentVariable(
+              'Path',
+              [System.EnvironmentVariableTarget]::Machine
+            )
+            if ($currentMachinePath -cne $PathStateBefore.Machine) {
+              throw "Silent NSIS $Phase unexpectedly changed the machine PATH."
+            }
+          }
+
+          $installer = @(Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter "*-setup.exe")
+          if ($installer.Count -ne 1) {
+            throw "Expected one NSIS installer, found $($installer.Count)"
+          }
+
+          $installRoot = Join-Path $env:RUNNER_TEMP 'codex-claude-usage-nsis-smoke'
+          if (Test-Path -LiteralPath $installRoot) {
+            throw 'The disposable NSIS smoke target was not clean.'
+          }
+
+          $codexTargets = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.cmd'),
+            (Join-Path $env:APPDATA 'npm\codex'),
+            (Join-Path $env:APPDATA 'npm\codex.cmd'),
+            (Join-Path $env:APPDATA 'npm\codex.ps1'),
+            (Join-Path $env:USERPROFILE '.local\bin\codex.exe'),
+            (Join-Path $env:USERPROFILE '.local\bin\codex.cmd')
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
+            $codexTargets += @(
+              (Join-Path $env:CODEX_INSTALL_DIR 'codex.exe'),
+              (Join-Path $env:CODEX_INSTALL_DIR 'codex.cmd'),
+              (Join-Path $env:CODEX_INSTALL_DIR 'codex.ps1')
+            )
+          }
+          $codexTargets = @($codexTargets | Sort-Object -Unique)
+
+          $before = @{}
+          foreach ($target in $codexTargets) {
+            $before[$target] = Get-FileFingerprint -LiteralPath $target
+          }
+          $pathBefore = @{
+            User = [Environment]::GetEnvironmentVariable(
+              'Path',
+              [System.EnvironmentVariableTarget]::User
+            )
+            Machine = [Environment]::GetEnvironmentVariable(
+              'Path',
+              [System.EnvironmentVariableTarget]::Machine
+            )
+          }
+
+          $uninstaller = Join-Path $installRoot 'uninstall.exe'
+          $application = Join-Path $installRoot 'codex-claude-usage.exe'
+          $builtApplication = (
+            Resolve-Path -LiteralPath 'src-tauri/target/release/codex-claude-usage.exe'
+          ).Path
+          $payloadReference = Get-NsisPayloadReference -Source $builtApplication
+          $builtApplicationBefore = Get-FileFingerprint -LiteralPath $builtApplication
+          $installerBefore = Get-FileFingerprint -LiteralPath $installer[0].FullName
+
+          $installError = $null
+          try {
+            Invoke-BoundedProcess `
+              -FilePath $installer[0].FullName `
+              -ArgumentList @('/S', "/D=$installRoot") `
+              -TimeoutSeconds 60 `
+              -Description 'Silent NSIS install'
+
+            foreach ($artifact in @($application, $uninstaller)) {
+              if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
+                throw "Silent NSIS install did not create required artifact: $artifact"
+              }
+              if ((Get-Item -LiteralPath $artifact).Length -le 0) {
+                throw "Silent NSIS install created an empty required artifact: $artifact"
+              }
+            }
+            $installedApplicationLength = (
+              Get-Item -LiteralPath $application
+            ).Length
+            if ($installedApplicationLength -ne $payloadReference.Length) {
+              throw (
+                'Installed application length differs from the NSIS payload reference. ' +
+                "Expected $($payloadReference.Length), got $installedApplicationLength."
+              )
+            }
+            $installedApplicationHash = (
+              Get-FileHash -LiteralPath $application -Algorithm SHA256
+            ).Hash
+            if ($installedApplicationHash -cne $payloadReference.Hash) {
+              throw (
+                'Installed application bytes differ from the NSIS payload reference. ' +
+                "Expected $($payloadReference.Hash), got $installedApplicationHash."
+              )
+            }
+            if (
+              (Get-FileFingerprint -LiteralPath $builtApplication) -cne
+              $builtApplicationBefore
+            ) {
+              throw 'Silent NSIS install unexpectedly changed the restored build application.'
+            }
+            if (
+              (Get-FileFingerprint -LiteralPath $installer[0].FullName) -cne
+              $installerBefore
+            ) {
+              throw 'Silent NSIS install unexpectedly changed the installer artifact.'
+            }
+
+            Assert-CodexStateUnchanged `
+              -Phase 'install' `
+              -Targets $codexTargets `
+              -FileStateBefore $before `
+              -PathStateBefore $pathBefore
+          } catch {
+            $installError = $_
+          }
+
+          $cleanupErrors = @()
+          try {
+            if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+              Invoke-BoundedProcess `
+                -FilePath $uninstaller `
+                -ArgumentList @('/S') `
+                -TimeoutSeconds 45 `
+                -Description 'Silent NSIS uninstall'
+
+              $deadline = (Get-Date).AddSeconds(30)
+              while ((Test-Path -LiteralPath $installRoot) -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 250
+              }
+              if (Test-Path -LiteralPath $installRoot) {
+                throw 'Silent NSIS uninstall did not remove the disposable install target.'
+              }
+            } elseif (Test-Path -LiteralPath $installRoot) {
+              throw 'Silent NSIS install left a partial target without an uninstaller.'
+            }
+          } catch {
+            $cleanupErrors += "uninstall: $($_.Exception.Message)"
+          }
+
+          try {
+            Assert-CodexStateUnchanged `
+              -Phase 'uninstall' `
+              -Targets $codexTargets `
+              -FileStateBefore $before `
+              -PathStateBefore $pathBefore
+          } catch {
+            $cleanupErrors += "Codex/PATH invariance: $($_.Exception.Message)"
+          }
+
+          try {
+            if (
+              (Get-FileFingerprint -LiteralPath $builtApplication) -cne
+              $builtApplicationBefore
+            ) {
+              throw 'Silent NSIS smoke unexpectedly changed the restored build application.'
+            }
+            if (
+              (Get-FileFingerprint -LiteralPath $installer[0].FullName) -cne
+              $installerBefore
+            ) {
+              throw 'Silent NSIS smoke unexpectedly changed the installer artifact.'
+            }
+          } catch {
+            $cleanupErrors += "build artifact invariance: $($_.Exception.Message)"
+          }
+
+          if ($null -ne $installError) {
+            if ($cleanupErrors.Count -gt 0) {
+              throw (
+                "Silent NSIS smoke failed: $($installError.Exception.Message) " +
+                "Cleanup validation also failed: $($cleanupErrors -join ' | ')"
+              )
+            }
+            throw $installError
+          }
+          if ($cleanupErrors.Count -gt 0) {
+            throw "Silent NSIS cleanup validation failed: $($cleanupErrors -join ' | ')"
+          }
+
+      - name: Smoke-test public 1.2.7 to candidate upgrade
+        shell: pwsh
+        timeout-minutes: 12
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = @(
+            Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*-setup.exe'
+          )
+          if ($installer.Count -ne 1) {
+            throw "Expected one candidate NSIS installer, found $($installer.Count)"
+          }
+          ./scripts/windows-upgrade-smoke.ps1 `
+            -CandidateInstaller $installer[0].FullName `
+            -CandidateApplication src-tauri/target/release/codex-claude-usage.exe `
+            -ExpectedVersion $version
+
       - name: Enforce lightweight installer budget
         shell: pwsh
         run: |
@@ -44,7 +399,7 @@ jobs:
           if ($installer[0].Length -gt 20MB) { throw "Installer exceeds 20 MB: $([math]::Round($installer[0].Length / 1MB, 2)) MB" }
 
       - name: Upload Windows installer artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-claude-usage-windows
           path: src-tauri/target/release/bundle/nsis/*-setup.exe

@@ -1,4 +1,5 @@
 mod analytics;
+mod codex_cli;
 mod collector;
 mod hook;
 mod storage;
@@ -6,35 +7,62 @@ mod update;
 mod usage;
 
 use crate::analytics::{STATUS_FRESHNESS_MS, build_analytics};
+use crate::codex_cli::{
+    AuthState as CodexAuthState, CandidateSource, ChildWindow, CliState as CodexCliState,
+    CodexSetupDto, CodexSetupError, InstallOperationDto, InstallOperationState, JobLifetime,
+    LoginOperationDto, LoginOperationState, OperationKind, OperationManager, ProcessTree,
+    ProvenanceConfidence, SelectedCodex, SetupSafeErrorCode, cancellation_requested,
+    capture_install_evidence, discover_codex_candidates_with_manual, probe_auth, probe_candidates,
+    ready_conflict_count, select_candidates, selected_login_command, setup_dto,
+    single_install_delta, spawn_in_process_tree,
+};
 use crate::collector::{
-    AuthProbe, CliState, capture_claude, capture_codex, claude_cli_state, codex_cli_state,
-    probe_claude_auth, probe_codex_auth, resolve_claude_command, resolve_codex_command,
+    AuthProbe as ClaudeAuthProbe, CliState as CollectorCliState, CodexCaptureError, capture_claude,
+    capture_codex_with, claude_cli_state, probe_claude_auth, resolve_claude_command,
 };
 use crate::storage::{data_dir, read_history, read_json, write_json};
 use serde_json::{Map, Value, json};
-use std::process::Command;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_notification::NotificationExt;
 
+#[derive(Clone)]
+struct CodexCandidateSelection {
+    path: PathBuf,
+    persistable: bool,
+}
+
 struct RuntimeState {
     refresh_guard: Mutex<()>,
     refresh: Mutex<Value>,
     window: Mutex<WindowState>,
     provider_auth: Mutex<ProviderAuthCache>,
+    codex_operations: OperationManager,
+    codex_selected: Mutex<Option<SelectedCodex>>,
+    codex_preferred_path: Mutex<Option<PathBuf>>,
+    codex_manual_path: Mutex<Option<PathBuf>>,
+    codex_tracked_install_path: Mutex<Option<PathBuf>>,
+    codex_candidate_paths: Mutex<BTreeMap<String, CodexCandidateSelection>>,
+    codex_preferred_fingerprint: Mutex<Option<String>>,
+    codex_status: Mutex<Option<Value>>,
     last_alert_signature: Mutex<String>,
     last_collection_ms: Mutex<i64>,
 }
 
 #[derive(Clone, Default)]
 struct ProviderAuthCache {
-    codex: Option<AuthProbe>,
-    claude: Option<AuthProbe>,
+    codex: Option<CodexAuthState>,
+    claude: Option<ClaudeAuthProbe>,
 }
 
 #[derive(Clone)]
@@ -45,6 +73,7 @@ struct WindowState {
 
 impl Default for RuntimeState {
     fn default() -> Self {
+        let (install_detached, login_detached) = detached_codex_operation_flags();
         Self {
             refresh_guard: Mutex::new(()),
             refresh: Mutex::new(json!({"state":"idle","completedAt":Value::Null,"errors":{}})),
@@ -53,6 +82,14 @@ impl Default for RuntimeState {
                 opacity: 0.96,
             }),
             provider_auth: Mutex::new(ProviderAuthCache::default()),
+            codex_operations: OperationManager::with_detached(install_detached, login_detached),
+            codex_selected: Mutex::new(None),
+            codex_preferred_path: Mutex::new(None),
+            codex_manual_path: Mutex::new(None),
+            codex_tracked_install_path: Mutex::new(None),
+            codex_candidate_paths: Mutex::new(BTreeMap::new()),
+            codex_preferred_fingerprint: Mutex::new(stored_codex_selection_fingerprint()),
+            codex_status: Mutex::new(None),
             last_alert_signature: Mutex::new(stored_notification_signature()),
             last_collection_ms: Mutex::new(0),
         }
@@ -223,10 +260,204 @@ fn update_hidden_provider(provider: &str, hidden: bool) -> Result<Vec<String>, S
     Ok(list)
 }
 
+#[derive(Clone)]
+struct CodexResolution {
+    dto: CodexSetupDto,
+    selected: Option<SelectedCodex>,
+    device_auth_supported: bool,
+}
+
+fn windows_path_identity(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_start_matches(r"\\?\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn same_windows_path(left: &Path, right: &Path) -> bool {
+    windows_path_identity(left) == windows_path_identity(right)
+}
+
+fn codex_selection_state_path() -> PathBuf {
+    data_dir().join("codex-selection.json")
+}
+
+fn valid_sha256_text(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn stored_codex_selection_fingerprint() -> Option<String> {
+    read_json(&codex_selection_state_path())
+        .and_then(|value| {
+            value
+                .get("selectedFingerprint")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .filter(|value| valid_sha256_text(value))
+}
+
+fn stored_codex_selection_salt() -> Option<String> {
+    read_json(&codex_selection_state_path())
+        .and_then(|value| value.get("salt").and_then(Value::as_str).map(str::to_owned))
+        .filter(|value| uuid::Uuid::parse_str(value).is_ok())
+}
+
+fn codex_path_fingerprint(salt: &str, path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"ai-usage-monitor/codex-selection/v1\0");
+    hasher.update(salt.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(windows_path_identity(path).as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn persist_codex_selection(app: &AppHandle, path: &Path) {
+    let salt = stored_codex_selection_salt().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let fingerprint = codex_path_fingerprint(&salt, path);
+    let value = json!({
+        "schemaVersion": 1,
+        "salt": salt,
+        "selectedFingerprint": fingerprint,
+        "updatedAt": chrono::Utc::now().to_rfc3339(),
+    });
+    if write_json(&codex_selection_state_path(), &value).is_ok() {
+        *app.state::<RuntimeState>()
+            .codex_preferred_fingerprint
+            .lock()
+            .expect("Codex preferred fingerprint lock") =
+            value["selectedFingerprint"].as_str().map(str::to_owned);
+    }
+}
+
+fn resolve_codex_setup(app: &AppHandle) -> CodexResolution {
+    let state = app.state::<RuntimeState>();
+    let manual_paths = state
+        .codex_manual_path
+        .lock()
+        .expect("Codex manual path lock")
+        .clone()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let preferred_path = state
+        .codex_preferred_path
+        .lock()
+        .expect("Codex preferred path lock")
+        .clone();
+    let preferred_fingerprint = state
+        .codex_preferred_fingerprint
+        .lock()
+        .expect("Codex preferred fingerprint lock")
+        .clone();
+    let selection_salt = stored_codex_selection_salt();
+    let tracked_path = state
+        .codex_tracked_install_path
+        .lock()
+        .expect("Codex tracked install path lock")
+        .clone();
+
+    let mut inventory = probe_candidates(discover_codex_candidates_with_manual(manual_paths));
+    if let Some(tracked_path) = tracked_path.as_deref() {
+        for candidate in &mut inventory.candidates {
+            if candidate.is_compatible()
+                && same_windows_path(candidate.command.path(), tracked_path)
+            {
+                candidate.provenance = ProvenanceConfidence::TrackedOfficialInstall;
+            }
+        }
+    }
+
+    let mut selection = select_candidates(&inventory);
+    let preferred_index = preferred_path
+        .as_deref()
+        .and_then(|preferred_path| {
+            inventory.candidates.iter().position(|candidate| {
+                candidate.is_compatible()
+                    && same_windows_path(candidate.command.path(), preferred_path)
+            })
+        })
+        .or_else(|| {
+            let salt = selection_salt.as_deref()?;
+            let fingerprint = preferred_fingerprint.as_deref()?;
+            inventory.candidates.iter().position(|candidate| {
+                candidate.is_compatible()
+                    && codex_path_fingerprint(salt, candidate.command.path()) == fingerprint
+            })
+        });
+    if let Some(index) = preferred_index {
+        selection.state = CodexCliState::Ready;
+        selection.selected_index = Some(index);
+        selection.conflict_count = ready_conflict_count(&inventory, index);
+        selection.safe_error_code = None;
+    }
+
+    let selected_index = selection.selected_index;
+    let selected = selected_index
+        .and_then(|index| inventory.candidates.get(index))
+        .map(|candidate| candidate.command.clone());
+    let device_auth_supported = selected_index
+        .and_then(|index| inventory.candidates.get(index))
+        .is_some_and(|candidate| candidate.capabilities.device_auth);
+    let auth = probe_auth(selected.as_ref());
+    // Candidate IDs are scoped to this exact discovery snapshot. Reusing ordinal IDs such as
+    // `candidate-1` lets a click from an older renderer snapshot select a different path after a
+    // concurrent refresh reorders candidates. A fresh opaque namespace makes stale selections
+    // fail closed without exposing the canonical path.
+    let dto = setup_dto(&inventory, &selection, &auth);
+    let candidate_paths = inventory
+        .candidates
+        .iter()
+        .zip(&dto.candidates)
+        .map(|(candidate, candidate_dto)| {
+            (
+                candidate_dto.candidate_id.clone(),
+                CodexCandidateSelection {
+                    path: candidate.command.path().to_path_buf(),
+                    persistable: candidate
+                        .discovered_from
+                        .iter()
+                        .any(|source| *source != CandidateSource::Manual),
+                },
+            )
+        })
+        .collect();
+
+    *state
+        .codex_selected
+        .lock()
+        .expect("Codex selected command lock") = selected.clone();
+    *state
+        .codex_candidate_paths
+        .lock()
+        .expect("Codex candidate path map lock") = candidate_paths;
+    state
+        .provider_auth
+        .lock()
+        .expect("provider auth state lock")
+        .codex = Some(auth.state);
+
+    CodexResolution {
+        dto,
+        selected,
+        device_auth_supported,
+    }
+}
+
 fn snapshot_value(app: &AppHandle) -> Value {
     let state = app.state::<RuntimeState>();
     let directory = data_dir();
-    let codex = read_json(&directory.join("status.json"));
+    let codex = state
+        .codex_status
+        .lock()
+        .expect("Codex status lock")
+        .clone()
+        .or_else(|| read_json(&directory.join("status.json")));
+    let codex_last_success = codex.as_ref().and_then(last_successful_codex_status);
     let claude = read_json(&directory.join("claude-status.json"));
     let analytics = read_json(&directory.join("analytics.json"));
     let window = state.window.lock().expect("window state lock").clone();
@@ -245,9 +476,10 @@ fn snapshot_value(app: &AppHandle) -> Value {
         "analytics": analytics,
         "codex": {
             "connected": codex.as_ref().and_then(|value| value.get("parse_status")).and_then(Value::as_str) == Some("ok"),
-            "ageMs": status_age_ms(codex.as_ref()),
+            "ageMs": status_age_ms(codex_last_success.as_ref()),
             "status": codex,
-            "limits": limits_by_type(codex.as_ref())
+            "lastSuccess": codex_last_success,
+            "limits": limits_by_type(codex_last_success.as_ref())
         },
         "claude": {
             "connected": claude.as_ref().and_then(|value| value.get("parse_status")).and_then(Value::as_str) == Some("ok"),
@@ -257,8 +489,8 @@ fn snapshot_value(app: &AppHandle) -> Value {
             "limits": limits_by_type(claude.as_ref())
         },
         "providers": {
-            "codex": {"authState": cached_auth_state(&provider_auth.codex), "hidden": is_hidden("codex")},
-            "claude": {"authState": cached_auth_state(&provider_auth.claude), "hidden": is_hidden("claude")}
+            "codex": {"authState": cached_codex_auth_state(provider_auth.codex), "hidden": is_hidden("codex")},
+            "claude": {"authState": cached_claude_auth_state(&provider_auth.claude), "hidden": is_hidden("claude")}
         },
         "hiddenProviders": hidden_providers(),
         "window": {"alwaysOnTop":window.always_on_top,"opacity":window.opacity},
@@ -267,54 +499,65 @@ fn snapshot_value(app: &AppHandle) -> Value {
 }
 
 fn setup_snapshot_value(app: &AppHandle) -> Value {
-    let codex_state = codex_cli_state();
+    let codex = resolve_codex_setup(app);
     let claude_state = claude_cli_state();
-    let (codex_auth, claude_auth) = std::thread::scope(|scope| {
-        let codex = scope.spawn(|| probe_codex_auth(Duration::from_secs(8)));
-        let claude = scope.spawn(|| probe_claude_auth(Duration::from_secs(8)));
-        (
-            codex.join().unwrap_or_else(|_| AuthProbe {
-                state: crate::collector::AuthState::Error,
-                error: Some("Codex 인증 확인 작업이 중단됐습니다.".into()),
-            }),
-            claude.join().unwrap_or_else(|_| AuthProbe {
-                state: crate::collector::AuthState::Error,
-                error: Some("Claude 인증 확인 작업이 중단됐습니다.".into()),
-            }),
-        )
-    });
+    let claude_auth = probe_claude_auth(Duration::from_secs(8));
     {
         let state = app.state::<RuntimeState>();
         let mut cached = state
             .provider_auth
             .lock()
             .expect("provider auth state lock");
-        cached.codex = Some(codex_auth.clone());
         cached.claude = Some(claude_auth.clone());
     }
+    let state = app.state::<RuntimeState>();
+    let mut codex_setup = serde_json::to_value(&codex.dto).expect("Codex setup DTO serialization");
+    let codex_setup_object = codex_setup.as_object_mut().expect("Codex setup DTO object");
+    codex_setup_object.insert(
+        "install".into(),
+        json!(state.codex_operations.install_snapshot()),
+    );
+    codex_setup_object.insert(
+        "login".into(),
+        json!(state.codex_operations.login_snapshot()),
+    );
     let mut snapshot = snapshot_value(app);
-    snapshot.as_object_mut().expect("snapshot object").insert("setup".into(), json!({
-        "codexCommand": codex_state == CliState::Ready,
-        "codexCommandState": codex_state.as_str(),
-        "codexAuth": auth_probe_value(&codex_auth),
-        "claudeCommand": claude_state == CliState::Ready,
-        "claudeCommandState": claude_state.as_str(),
-        "claudeAuth": auth_probe_value(&claude_auth),
-        "onboardingComplete": onboarding_complete(),
-        "hiddenProviders": hidden_providers(),
-        "hookCommand": format!("\"{}\" --claude-status-hook", std::env::current_exe().map(|path| path.display().to_string()).unwrap_or_default())
-    }));
+    snapshot.as_object_mut().expect("snapshot object").insert(
+        "setup".into(),
+        json!({
+            "codexSetup": codex_setup,
+            "codexCommand": codex.dto.cli_state == CodexCliState::Ready,
+            "codexCommandState": codex.dto.cli_state,
+            "codexAuth": codex.dto.auth,
+            "claudeCommand": claude_state == CollectorCliState::Ready,
+            "claudeCommandState": claude_state.as_str(),
+            "claudeAuth": claude_auth_probe_value(&claude_auth),
+            "onboardingComplete": onboarding_complete(),
+            "hiddenProviders": hidden_providers()
+        }),
+    );
     snapshot
 }
 
-fn auth_probe_value(probe: &AuthProbe) -> Value {
+fn claude_auth_probe_value(probe: &ClaudeAuthProbe) -> Value {
     json!({
         "state": probe.state.as_str(),
         "error": probe.error,
     })
 }
 
-fn cached_auth_state(probe: &Option<AuthProbe>) -> &'static str {
+fn cached_codex_auth_state(state: Option<CodexAuthState>) -> &'static str {
+    match state {
+        Some(CodexAuthState::Unavailable) => "unavailable",
+        Some(CodexAuthState::Checking) => "checking",
+        Some(CodexAuthState::Unauthenticated) => "unauthenticated",
+        Some(CodexAuthState::Authenticated) => "authenticated",
+        Some(CodexAuthState::Error) => "error",
+        None => "unknown",
+    }
+}
+
+fn cached_claude_auth_state(probe: &Option<ClaudeAuthProbe>) -> &'static str {
     probe
         .as_ref()
         .map(|value| value.state.as_str())
@@ -492,6 +735,110 @@ fn notify_alerts(app: &AppHandle, report: &Value) {
         .show();
 }
 
+fn safe_codex_reset_text(value: &Value) -> Option<&str> {
+    value.as_str().filter(|text| {
+        text.len() <= 64
+            && text.starts_with("resets ")
+            && text
+                .chars()
+                .all(|character| character.is_ascii_digit() || " resets/-:".contains(character))
+    })
+}
+
+fn sanitized_codex_limit(limit: &Value) -> Option<Value> {
+    let kind = limit.get("type").and_then(Value::as_str)?;
+    if !matches!(kind, "five_hour" | "weekly" | "monthly") {
+        return None;
+    }
+    let used_percent = limit.get("used_percent").and_then(Value::as_i64)?;
+    let remaining_percent = limit.get("remaining_percent").and_then(Value::as_i64)?;
+    Some(json!({
+        "type": kind,
+        "used_percent": used_percent.clamp(0, 100),
+        "remaining_percent": remaining_percent.clamp(0, 100),
+        "reset_text": limit.get("reset_text").and_then(safe_codex_reset_text),
+        "resets_at": limit.get("resets_at").and_then(Value::as_i64),
+        "window_duration_mins": limit.get("window_duration_mins").and_then(Value::as_i64),
+    }))
+}
+
+fn sanitized_codex_success(status: &Value) -> Option<Value> {
+    if status.get("parse_status").and_then(Value::as_str) != Some("ok") {
+        return None;
+    }
+    let captured_at = status.get("captured_at").and_then(Value::as_str)?;
+    chrono::DateTime::parse_from_rfc3339(captured_at).ok()?;
+    let limits = status
+        .get("limits")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(sanitized_codex_limit)
+        .collect::<Vec<_>>();
+    if limits.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "schema_version": 1,
+        "captured_at": captured_at,
+        "source": "codex_app_server",
+        "capture_method": "codex_app_server",
+        "parse_status": "ok",
+        "limits": limits,
+        "rate_limit_reset_credits": status
+            .get("rate_limit_reset_credits")
+            .and_then(Value::as_i64)
+            .map(|value| value.max(0)),
+        "spend_control_reached": status
+            .get("spend_control_reached")
+            .and_then(Value::as_bool),
+        "raw_status_text": "",
+        "capture": {
+            "state": "on_demand_ok",
+            "detail": "official Codex app-server account snapshot",
+            "heartbeat_at": captured_at,
+            "mode": "on_demand"
+        }
+    }))
+}
+
+fn last_successful_codex_status(status: &Value) -> Option<Value> {
+    sanitized_codex_success(status)
+        .or_else(|| status.get("last_success").and_then(sanitized_codex_success))
+}
+
+fn failed_codex_capture_status(error: CodexCaptureError, previous: Option<&Value>) -> Value {
+    let captured_at = chrono::Utc::now().to_rfc3339();
+    let last_success = previous.and_then(last_successful_codex_status);
+    json!({
+        "schema_version": 1,
+        "captured_at": captured_at,
+        "source": "codex_app_server",
+        "capture_method": "codex_app_server",
+        "parse_status": "failed",
+        "safe_error_code": error.safe_error_code(),
+        "limits": [],
+        "last_success": last_success,
+        "raw_status_text": "",
+        "capture": {
+            "state": "on_demand_failed",
+            "detail": "Codex usage capture failed",
+            "heartbeat_at": captured_at,
+            "mode": "on_demand"
+        }
+    })
+}
+
+fn capture_error_after_auth_probe(
+    error: CodexCaptureError,
+    auth_state: CodexAuthState,
+) -> CodexCaptureError {
+    if error.should_reprobe_auth() && auth_state == CodexAuthState::Unauthenticated {
+        CodexCaptureError::AuthenticationUnconfirmed
+    } else {
+        error
+    }
+}
+
 fn refresh_all(app: &AppHandle) -> Value {
     let state = app.state::<RuntimeState>();
     let _guard = state.refresh_guard.lock().expect("refresh lock");
@@ -501,22 +848,36 @@ fn refresh_all(app: &AppHandle) -> Value {
     let history_dir = directory.join("history");
     let codex_status = directory.join("status.json");
     let claude_status = directory.join("claude-status.json");
+    let previous_codex_status = state
+        .codex_status
+        .lock()
+        .expect("Codex status lock")
+        .clone()
+        .or_else(|| read_json(&codex_status));
     // 이 앱에서 숨긴 공급자는 CLI를 아예 실행하지 않는다.
-    let codex_ready = codex_cli_state() == CliState::Ready && !is_hidden("codex");
-    let claude_ready = claude_cli_state() == CliState::Ready && !is_hidden("claude");
+    let codex_resolution = (!is_hidden("codex")).then(|| resolve_codex_setup(app));
+    let codex_selected = codex_resolution
+        .as_ref()
+        .filter(|resolution| resolution.dto.cli_state == CodexCliState::Ready)
+        .and_then(|resolution| resolution.selected.clone());
+    let codex_ready = codex_selected.is_some();
+    let claude_ready = claude_cli_state() == CollectorCliState::Ready && !is_hidden("claude");
     let (codex_result, claude_result) = std::thread::scope(|scope| {
-        let codex = codex_ready.then(|| {
-            scope.spawn(|| capture_codex(&codex_status, &history_dir, Duration::from_secs(20)))
+        let codex = codex_selected.as_ref().map(|selected| {
+            scope.spawn(|| {
+                capture_codex_with(
+                    selected,
+                    &codex_status,
+                    &history_dir,
+                    Duration::from_secs(20),
+                )
+            })
         });
         let claude = claude_ready.then(|| {
             scope.spawn(|| capture_claude(&claude_status, &history_dir, Duration::from_secs(60)))
         });
         (
-            codex.map(|thread| {
-                thread
-                    .join()
-                    .unwrap_or_else(|_| Err("Codex 수집 작업이 중단됐습니다.".into()))
-            }),
+            codex.map(|thread| thread.join().unwrap_or(Err(CodexCaptureError::Shutdown))),
             claude.map(|thread| {
                 thread
                     .join()
@@ -525,8 +886,45 @@ fn refresh_all(app: &AppHandle) -> Value {
         )
     });
     let mut errors = Map::new();
-    if let Some(Err(error)) = codex_result {
-        errors.insert("codex".into(), Value::String(error));
+    let codex_result = codex_result.or_else(|| {
+        let resolution = codex_resolution.as_ref()?;
+        let had_success = previous_codex_status
+            .as_ref()
+            .and_then(last_successful_codex_status)
+            .is_some();
+        if resolution.dto.cli_state == CodexCliState::Unsupported {
+            Some(Err(CodexCaptureError::CapabilityMissing))
+        } else if had_success && resolution.selected.is_none() {
+            Some(Err(CodexCaptureError::Spawn))
+        } else {
+            None
+        }
+    });
+    match codex_result {
+        Some(Ok(status)) => {
+            *state.codex_status.lock().expect("Codex status lock") = Some(status);
+        }
+        Some(Err(mut error)) => {
+            if error.should_reprobe_auth()
+                && let Some(selected) = codex_selected.as_ref()
+            {
+                let auth = probe_auth(Some(selected));
+                error = capture_error_after_auth_probe(error, auth.state);
+                state
+                    .provider_auth
+                    .lock()
+                    .expect("provider auth state lock")
+                    .codex = Some(auth.state);
+            }
+            let failed = failed_codex_capture_status(error, previous_codex_status.as_ref());
+            *state.codex_status.lock().expect("Codex status lock") = Some(failed.clone());
+            let _ = write_json(&codex_status, &failed);
+            errors.insert(
+                "codex".into(),
+                Value::String("Codex 사용량을 안전하게 확인하지 못했습니다.".into()),
+            );
+        }
+        None => {}
     }
     if let Some(Err(error)) = claude_result {
         errors.insert("claude".into(), Value::String(error));
@@ -606,6 +1004,15 @@ async fn setup_snapshot(app: AppHandle) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || setup_snapshot_value(&app))
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn codex_operation_snapshot(app: AppHandle) -> Value {
+    let operations = &app.state::<RuntimeState>().codex_operations;
+    json!({
+        "install": operations.install_snapshot(),
+        "login": operations.login_snapshot(),
+    })
 }
 
 #[tauri::command]
@@ -972,6 +1379,794 @@ async fn show_window(app: AppHandle, label: String) -> Result<(), String> {
         .map_err(|error| error.to_string())?
 }
 
+const CODEX_OPERATION_LONG_RUNNING_AFTER: Duration = Duration::from_secs(10 * 60);
+const CODEX_INSTALL_SCRIPT_URL: &str = "https://chatgpt.com/codex/install.ps1";
+
+fn codex_operation_marker_path() -> PathBuf {
+    data_dir().join("codex-operation-state.json")
+}
+
+fn detached_codex_operation_flags() -> (bool, bool) {
+    let marker = read_json(&codex_operation_marker_path());
+    let flags = (
+        marker
+            .as_ref()
+            .and_then(|value| value.get("installActive"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        marker
+            .as_ref()
+            .and_then(|value| value.get("loginActive"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    );
+    if flags.0 || flags.1 {
+        let cleared = json!({
+            "schemaVersion": 1,
+            "installActive": false,
+            "loginActive": false,
+            "updatedAt": chrono::Utc::now().to_rfc3339(),
+        });
+        let _ = write_json(&codex_operation_marker_path(), &cleared);
+    }
+    flags
+}
+
+fn persist_codex_operation_active(kind: OperationKind, active: bool) {
+    let path = codex_operation_marker_path();
+    let mut marker = read_json(&path).unwrap_or_else(|| {
+        json!({
+            "schemaVersion": 1,
+            "installActive": false,
+            "loginActive": false,
+        })
+    });
+    let field = match kind {
+        OperationKind::Install => "installActive",
+        OperationKind::Login => "loginActive",
+    };
+    marker[field] = Value::Bool(active);
+    marker["updatedAt"] = Value::String(chrono::Utc::now().to_rfc3339());
+    let _ = write_json(&path, &marker);
+}
+
+struct CodexOperationMarkerGuard {
+    kind: OperationKind,
+}
+
+impl CodexOperationMarkerGuard {
+    fn begin(kind: OperationKind) -> Self {
+        persist_codex_operation_active(kind, true);
+        Self { kind }
+    }
+}
+
+impl Drop for CodexOperationMarkerGuard {
+    fn drop(&mut self) {
+        persist_codex_operation_active(self.kind, false);
+    }
+}
+
+enum TrackedChildOutcome {
+    Exited(ExitStatus),
+    Cancelled,
+    TrackingFailed,
+}
+
+fn tracked_cancel_outcome(process_tree_stopped: bool) -> TrackedChildOutcome {
+    if process_tree_stopped {
+        TrackedChildOutcome::Cancelled
+    } else {
+        TrackedChildOutcome::TrackingFailed
+    }
+}
+
+fn linearize_tracked_child_outcome(
+    manager: &OperationManager,
+    kind: OperationKind,
+    operation_id: &str,
+    outcome: TrackedChildOutcome,
+    child: &mut Child,
+    process_tree: &ProcessTree,
+) -> TrackedChildOutcome {
+    match (
+        outcome,
+        manager.close_cancellation_window(kind, operation_id),
+    ) {
+        (TrackedChildOutcome::Exited(status), Some(false)) => TrackedChildOutcome::Exited(status),
+        (TrackedChildOutcome::Exited(_), Some(true)) => {
+            tracked_cancel_outcome(process_tree.terminate_and_wait(child))
+        }
+        (TrackedChildOutcome::Cancelled, Some(true)) => TrackedChildOutcome::Cancelled,
+        (TrackedChildOutcome::TrackingFailed, Some(_)) => TrackedChildOutcome::TrackingFailed,
+        (TrackedChildOutcome::Exited(_), None) => {
+            let _ = process_tree.terminate_and_wait(child);
+            TrackedChildOutcome::TrackingFailed
+        }
+        (TrackedChildOutcome::Cancelled, None | Some(false))
+        | (TrackedChildOutcome::TrackingFailed, None) => TrackedChildOutcome::TrackingFailed,
+    }
+}
+
+fn safe_setup_error(code: SetupSafeErrorCode) -> String {
+    let error = CodexSetupError::new(code);
+    serde_json::to_value(error.safe_code())
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown_setup_error".into())
+}
+
+fn operation_is_long_running(started: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(started) >= CODEX_OPERATION_LONG_RUNNING_AFTER
+}
+
+#[cfg(windows)]
+fn configure_hidden_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_hidden_console(_command: &mut Command) {}
+
+fn wait_for_tracked_child(
+    child: &mut Child,
+    process_tree: &ProcessTree,
+    cancellation: &std::sync::atomic::AtomicBool,
+    mut mark_long_running: impl FnMut(),
+) -> TrackedChildOutcome {
+    let started = Instant::now();
+    let mut long_running_marked = false;
+    loop {
+        if cancellation_requested(cancellation) {
+            return tracked_cancel_outcome(process_tree.terminate_and_wait(child));
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => return TrackedChildOutcome::Exited(status),
+            Ok(None) => {
+                if !long_running_marked && operation_is_long_running(started, Instant::now()) {
+                    mark_long_running();
+                    long_running_marked = true;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(_) => {
+                let _ = process_tree.terminate_and_wait(child);
+                return TrackedChildOutcome::TrackingFailed;
+            }
+        }
+    }
+}
+
+type InstallEnvironment = BTreeMap<String, OsString>;
+type RegistryInstallEnvironments = (InstallEnvironment, InstallEnvironment);
+
+fn normalized_install_environment<I>(values: I) -> InstallEnvironment
+where
+    I: IntoIterator<Item = (OsString, OsString)>,
+{
+    values
+        .into_iter()
+        .filter_map(|(name, value)| {
+            let normalized = name.to_str()?.to_ascii_uppercase();
+            Some((normalized, value))
+        })
+        .collect()
+}
+
+fn effective_install_environment(
+    process: &InstallEnvironment,
+    user: &InstallEnvironment,
+    machine: &InstallEnvironment,
+) -> InstallEnvironment {
+    let mut effective = machine.clone();
+    effective.extend(user.clone());
+    effective.extend(process.clone());
+    effective
+}
+
+fn expand_install_environment_path(
+    raw: &OsStr,
+    environment: &InstallEnvironment,
+) -> Result<PathBuf, SetupSafeErrorCode> {
+    let mut current = raw
+        .to_str()
+        .ok_or(SetupSafeErrorCode::InstallTargetInvalid)?
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    if current.is_empty() {
+        return Err(SetupSafeErrorCode::InstallTargetInvalid);
+    }
+
+    let mut seen = BTreeSet::new();
+    for _ in 0..4 {
+        if !seen.insert(current.to_ascii_lowercase()) {
+            return Err(SetupSafeErrorCode::InstallTargetInvalid);
+        }
+
+        let mut expanded = String::with_capacity(current.len());
+        let mut cursor = 0;
+        let mut changed = false;
+        while let Some(relative_start) = current[cursor..].find('%') {
+            let start = cursor + relative_start;
+            expanded.push_str(&current[cursor..start]);
+            let Some(relative_end) = current[start + 1..].find('%') else {
+                return Err(SetupSafeErrorCode::InstallTargetInvalid);
+            };
+            let end = start + 1 + relative_end;
+            let name = &current[start + 1..end];
+            if name.is_empty() {
+                return Err(SetupSafeErrorCode::InstallTargetInvalid);
+            }
+            let replacement = environment
+                .get(&name.to_ascii_uppercase())
+                .and_then(|value| value.to_str())
+                .ok_or(SetupSafeErrorCode::InstallTargetInvalid)?;
+            expanded.push_str(replacement);
+            cursor = end + 1;
+            changed = true;
+        }
+        expanded.push_str(&current[cursor..]);
+        if !changed {
+            return Ok(PathBuf::from(current));
+        }
+        current = expanded;
+    }
+
+    if current.contains('%') {
+        Err(SetupSafeErrorCode::InstallTargetInvalid)
+    } else {
+        Ok(PathBuf::from(current))
+    }
+}
+
+fn validate_install_directory(path: PathBuf) -> Result<PathBuf, SetupSafeErrorCode> {
+    if !path.is_absolute() {
+        return Err(SetupSafeErrorCode::InstallTargetInvalid);
+    }
+    match std::fs::metadata(&path) {
+        Ok(metadata) if metadata.is_dir() => Ok(path),
+        Ok(_) => Err(SetupSafeErrorCode::InstallTargetInvalid),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path),
+        Err(_) => Err(SetupSafeErrorCode::InstallTargetInvalid),
+    }
+}
+
+#[cfg(windows)]
+fn read_registry_install_environment(
+    root: &winreg::RegKey,
+    subkey: &str,
+) -> Result<InstallEnvironment, SetupSafeErrorCode> {
+    use winreg::enums::{REG_EXPAND_SZ, REG_SZ};
+
+    let key = match root.open_subkey(subkey) {
+        Ok(key) => key,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(_) => return Err(SetupSafeErrorCode::InstallTargetInvalid),
+    };
+    let mut values = BTreeMap::new();
+    for value in key.enum_values() {
+        let (name, raw) = value.map_err(|_| SetupSafeErrorCode::InstallTargetInvalid)?;
+        let is_install_dir = name.eq_ignore_ascii_case("CODEX_INSTALL_DIR");
+        if !matches!(raw.vtype, REG_SZ | REG_EXPAND_SZ) {
+            if is_install_dir {
+                return Err(SetupSafeErrorCode::InstallTargetInvalid);
+            }
+            continue;
+        }
+        match key.get_value::<OsString, _>(&name) {
+            Ok(text) => {
+                values.insert(name.to_ascii_uppercase(), text);
+            }
+            Err(_) if is_install_dir => {
+                return Err(SetupSafeErrorCode::InstallTargetInvalid);
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(values)
+}
+
+#[cfg(windows)]
+fn registry_codex_install_environments() -> Result<RegistryInstallEnvironments, SetupSafeErrorCode>
+{
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    let user =
+        read_registry_install_environment(&RegKey::predef(HKEY_CURRENT_USER), "Environment")?;
+    let machine = read_registry_install_environment(
+        &RegKey::predef(HKEY_LOCAL_MACHINE),
+        "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+    )?;
+    Ok((user, machine))
+}
+
+#[cfg(not(windows))]
+fn registry_codex_install_environments() -> Result<RegistryInstallEnvironments, SetupSafeErrorCode>
+{
+    Ok((BTreeMap::new(), BTreeMap::new()))
+}
+
+fn resolved_codex_install_target_from(
+    process: &InstallEnvironment,
+    user: &InstallEnvironment,
+    machine: &InstallEnvironment,
+) -> Result<(PathBuf, Option<PathBuf>), SetupSafeErrorCode> {
+    let effective = effective_install_environment(process, user, machine);
+    let custom = process
+        .get("CODEX_INSTALL_DIR")
+        .or_else(|| user.get("CODEX_INSTALL_DIR"))
+        .or_else(|| machine.get("CODEX_INSTALL_DIR"));
+    if let Some(raw) = custom {
+        let custom = validate_install_directory(expand_install_environment_path(raw, &effective)?)?;
+        return Ok((custom.clone(), Some(custom)));
+    }
+    let local_app_data = effective
+        .get("LOCALAPPDATA")
+        .ok_or(SetupSafeErrorCode::InstallSpawnFailed)?;
+    let local_app_data =
+        validate_install_directory(expand_install_environment_path(local_app_data, &effective)?)?;
+    Ok((local_app_data.join("Programs/OpenAI/Codex/bin"), None))
+}
+
+fn resolved_codex_install_target() -> Result<(PathBuf, Option<PathBuf>), SetupSafeErrorCode> {
+    // Read both registry hives when install is requested so newly published environment values
+    // participate in expansion. Explicit process values retain Windows' normal precedence.
+    let process = normalized_install_environment(std::env::vars_os());
+    let (user, machine) = registry_codex_install_environments()?;
+    resolved_codex_install_target_from(&process, &user, &machine)
+}
+
+fn spawn_codex_installer(
+    custom_install_dir: Option<&Path>,
+) -> std::io::Result<(Child, ProcessTree)> {
+    let script = format!(
+        "$ErrorActionPreference='Stop'; Invoke-RestMethod '{}' | Invoke-Expression",
+        CODEX_INSTALL_SCRIPT_URL
+    );
+    let mut command = Command::new("powershell.exe");
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "ByPass",
+        "-Command",
+        &script,
+    ]);
+    command.env_remove("CODEX_NON_INTERACTIVE");
+    if let Some(custom_install_dir) = custom_install_dir {
+        command.env("CODEX_INSTALL_DIR", custom_install_dir);
+    } else {
+        command.env_remove("CODEX_INSTALL_DIR");
+    }
+    spawn_in_process_tree(command, ChildWindow::Visible, JobLifetime::DetachOnDrop)
+}
+
+fn spawn_codex_login(
+    selected: &SelectedCodex,
+    device_auth: bool,
+) -> std::io::Result<(Child, ProcessTree)> {
+    let command = selected_login_command(selected, device_auth)?;
+    if !selected.identity_unchanged() {
+        return Err(std::io::Error::other(
+            "selected Codex file identity changed",
+        ));
+    }
+    spawn_in_process_tree(command, ChildWindow::Visible, JobLifetime::DetachOnDrop)
+}
+
+fn manual_paths(app: &AppHandle) -> Vec<PathBuf> {
+    app.state::<RuntimeState>()
+        .codex_manual_path
+        .lock()
+        .expect("Codex manual path lock")
+        .clone()
+        .into_iter()
+        .collect()
+}
+
+fn compatible_codex_candidate_at(app: &AppHandle, path: &Path) -> bool {
+    probe_candidates(discover_codex_candidates_with_manual(manual_paths(app)))
+        .candidates
+        .iter()
+        .any(|candidate| {
+            candidate.is_compatible() && same_windows_path(candidate.command.path(), path)
+        })
+}
+
+#[tauri::command]
+fn start_codex_install(app: AppHandle) -> Result<InstallOperationDto, String> {
+    let (target, custom_install_dir) = resolved_codex_install_target().map_err(safe_setup_error)?;
+    let before = capture_install_evidence(&target);
+    let operation = app
+        .state::<RuntimeState>()
+        .codex_operations
+        .begin_install()
+        .map_err(safe_setup_error)?;
+    let initial = app
+        .state::<RuntimeState>()
+        .codex_operations
+        .install_snapshot();
+    let worker_app = app.clone();
+    // Persist the detached diagnostic before dispatch so an immediate app crash cannot leave an
+    // active operation with no marker. The guard is moved to the worker and clears on every exit.
+    let operation_marker = CodexOperationMarkerGuard::begin(OperationKind::Install);
+    thread::spawn(move || {
+        let _operation_marker = operation_marker;
+        let manager = &worker_app.state::<RuntimeState>().codex_operations;
+        let (mut child, process_tree) = match spawn_codex_installer(custom_install_dir.as_deref()) {
+            Ok(spawned) => spawned,
+            Err(_) => {
+                manager.mark_install(
+                    &operation.operation_id,
+                    InstallOperationState::Failed,
+                    Some(SetupSafeErrorCode::InstallSpawnFailed),
+                );
+                return;
+            }
+        };
+        manager.mark_install(
+            &operation.operation_id,
+            InstallOperationState::Running,
+            None,
+        );
+        let outcome =
+            wait_for_tracked_child(&mut child, &process_tree, &operation.cancellation, || {
+                manager.mark_install(
+                    &operation.operation_id,
+                    InstallOperationState::LongRunning,
+                    None,
+                );
+            });
+        let outcome = linearize_tracked_child_outcome(
+            manager,
+            OperationKind::Install,
+            &operation.operation_id,
+            outcome,
+            &mut child,
+            &process_tree,
+        );
+        // No KILL_ON_JOB_CLOSE: normal app/worker exit detaches provider helpers. Only the explicit
+        // cancel path above or a cancellation that wins at the exit boundary terminates the Job.
+        drop(process_tree);
+        let status = match outcome {
+            TrackedChildOutcome::Cancelled => {
+                manager.mark_install(
+                    &operation.operation_id,
+                    InstallOperationState::Cancelled,
+                    Some(SetupSafeErrorCode::InstallCancelled),
+                );
+                return;
+            }
+            TrackedChildOutcome::TrackingFailed => {
+                manager.mark_install(
+                    &operation.operation_id,
+                    InstallOperationState::Failed,
+                    Some(SetupSafeErrorCode::UnknownSetupError),
+                );
+                return;
+            }
+            TrackedChildOutcome::Exited(status) => status,
+        };
+
+        let after = capture_install_evidence(&target);
+        if let Some(delta_path) = single_install_delta(&before, &after)
+            && compatible_codex_candidate_at(&worker_app, &delta_path)
+        {
+            let state = worker_app.state::<RuntimeState>();
+            *state
+                .codex_tracked_install_path
+                .lock()
+                .expect("Codex tracked install path lock") = Some(delta_path.clone());
+            *state
+                .codex_preferred_path
+                .lock()
+                .expect("Codex preferred path lock") = Some(delta_path.clone());
+            persist_codex_selection(&worker_app, &delta_path);
+        }
+        let resolution = resolve_codex_setup(&worker_app);
+        let valid =
+            resolution.dto.cli_state == CodexCliState::Ready && resolution.selected.is_some();
+        match (status.success(), valid) {
+            (true, true) => manager.mark_install(
+                &operation.operation_id,
+                InstallOperationState::Succeeded,
+                None,
+            ),
+            (false, true) => manager.mark_install(
+                &operation.operation_id,
+                InstallOperationState::Succeeded,
+                Some(SetupSafeErrorCode::InstallExitNonzero),
+            ),
+            (true, false) => manager.mark_install(
+                &operation.operation_id,
+                InstallOperationState::Failed,
+                Some(SetupSafeErrorCode::InstallNoValidCli),
+            ),
+            (false, false) => manager.mark_install(
+                &operation.operation_id,
+                InstallOperationState::Failed,
+                Some(SetupSafeErrorCode::InstallExitNonzero),
+            ),
+        }
+    });
+    Ok(initial)
+}
+
+#[tauri::command]
+fn start_codex_login(app: AppHandle, device_auth: bool) -> Result<LoginOperationDto, String> {
+    let resolution = resolve_codex_setup(&app);
+    if resolution.dto.cli_state != CodexCliState::Ready {
+        return Err(safe_setup_error(
+            resolution
+                .dto
+                .safe_error_code
+                .unwrap_or(SetupSafeErrorCode::CodexNotFound),
+        ));
+    }
+    if device_auth && !resolution.device_auth_supported {
+        return Err(safe_setup_error(SetupSafeErrorCode::CandidateUnsupported));
+    }
+    let selected = resolution
+        .selected
+        .ok_or_else(|| safe_setup_error(SetupSafeErrorCode::CodexNotFound))?;
+    let operation = app
+        .state::<RuntimeState>()
+        .codex_operations
+        .begin_login()
+        .map_err(safe_setup_error)?;
+    let initial = app
+        .state::<RuntimeState>()
+        .codex_operations
+        .login_snapshot();
+    let worker_app = app.clone();
+    let operation_marker = CodexOperationMarkerGuard::begin(OperationKind::Login);
+    thread::spawn(move || {
+        let _operation_marker = operation_marker;
+        let manager = &worker_app.state::<RuntimeState>().codex_operations;
+        let (mut child, process_tree) = match spawn_codex_login(&selected, device_auth) {
+            Ok(spawned) => spawned,
+            Err(_) => {
+                manager.mark_login(
+                    &operation.operation_id,
+                    LoginOperationState::Failed,
+                    Some(SetupSafeErrorCode::LoginSpawnFailed),
+                );
+                return;
+            }
+        };
+        manager.mark_login(&operation.operation_id, LoginOperationState::Running, None);
+        let outcome =
+            wait_for_tracked_child(&mut child, &process_tree, &operation.cancellation, || {
+                manager.mark_login(
+                    &operation.operation_id,
+                    LoginOperationState::LongRunning,
+                    None,
+                );
+            });
+        let outcome = linearize_tracked_child_outcome(
+            manager,
+            OperationKind::Login,
+            &operation.operation_id,
+            outcome,
+            &mut child,
+            &process_tree,
+        );
+        drop(process_tree);
+        match outcome {
+            TrackedChildOutcome::Cancelled => {
+                manager.mark_login(
+                    &operation.operation_id,
+                    LoginOperationState::Cancelled,
+                    Some(SetupSafeErrorCode::LoginCancelled),
+                );
+            }
+            TrackedChildOutcome::TrackingFailed => {
+                manager.mark_login(
+                    &operation.operation_id,
+                    LoginOperationState::Failed,
+                    Some(SetupSafeErrorCode::UnknownSetupError),
+                );
+            }
+            TrackedChildOutcome::Exited(_) => {
+                worker_app
+                    .state::<RuntimeState>()
+                    .provider_auth
+                    .lock()
+                    .expect("provider auth state lock")
+                    .codex = Some(CodexAuthState::Checking);
+                let (auth_state, login_candidate_unchanged) = if selected.identity_unchanged() {
+                    // 로그인에 실제 사용한 동일 후보로만 결과를 확인한다. probe 자체도 실행
+                    // 직전에 identity를 다시 검사하므로 이 사이 교체는 auth error로 닫힌다.
+                    let auth = probe_auth(Some(&selected));
+                    worker_app
+                        .state::<RuntimeState>()
+                        .provider_auth
+                        .lock()
+                        .expect("provider auth state lock")
+                        .codex = Some(auth.state);
+                    (auth.state, true)
+                } else {
+                    // 로그인 도중 CLI가 교체·삭제됐으면 A의 성공으로 귀속하지 않는다. 전체
+                    // discovery로 현재 사실 상태만 재구성하고 login은 확인 실패로 남긴다.
+                    let resolution = resolve_codex_setup(&worker_app);
+                    (resolution.dto.auth.state, false)
+                };
+                let cancelled = cancellation_requested(&operation.cancellation);
+                let operation_state = if cancelled {
+                    LoginOperationState::Cancelled
+                } else {
+                    LoginOperationState::Exited
+                };
+                let safe_error = if cancelled {
+                    Some(SetupSafeErrorCode::LoginCancelled)
+                } else {
+                    (!login_candidate_unchanged || auth_state != CodexAuthState::Authenticated)
+                        .then_some(SetupSafeErrorCode::LoginUnconfirmed)
+                };
+                manager.mark_login(&operation.operation_id, operation_state, safe_error);
+            }
+        }
+    });
+    Ok(initial)
+}
+
+#[tauri::command]
+fn cancel_codex_operation(app: AppHandle, kind: String) -> Result<Value, String> {
+    let kind = match kind.as_str() {
+        "install" => OperationKind::Install,
+        "login" => OperationKind::Login,
+        _ => return Err(safe_setup_error(SetupSafeErrorCode::UnknownSetupError)),
+    };
+    let state = app.state::<RuntimeState>();
+    if !state.codex_operations.cancel(kind) {
+        return Err(safe_setup_error(SetupSafeErrorCode::UnknownSetupError));
+    }
+    Ok(match kind {
+        OperationKind::Install => json!(state.codex_operations.install_snapshot()),
+        OperationKind::Login => json!(state.codex_operations.login_snapshot()),
+    })
+}
+
+#[tauri::command]
+fn select_codex_candidate(app: AppHandle, candidate_id: String) -> Result<Value, String> {
+    let Some((namespace, ordinal)) = candidate_id
+        .strip_prefix("candidate-")
+        .and_then(|suffix| suffix.rsplit_once('-'))
+    else {
+        return Err(safe_setup_error(SetupSafeErrorCode::CandidateConflict));
+    };
+    if namespace.len() != 32
+        || !namespace.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || ordinal.is_empty()
+        || !ordinal.bytes().all(|byte| byte.is_ascii_digit())
+        || ordinal.starts_with('0')
+    {
+        return Err(safe_setup_error(SetupSafeErrorCode::CandidateConflict));
+    }
+    let candidate = app
+        .state::<RuntimeState>()
+        .codex_candidate_paths
+        .lock()
+        .expect("Codex candidate path map lock")
+        .get(&candidate_id)
+        .cloned()
+        .ok_or_else(|| safe_setup_error(SetupSafeErrorCode::CandidateConflict))?;
+    if !compatible_codex_candidate_at(&app, &candidate.path) {
+        return Err(safe_setup_error(SetupSafeErrorCode::CandidateNotExecutable));
+    }
+    if candidate.persistable {
+        persist_codex_selection(&app, &candidate.path);
+    }
+    *app.state::<RuntimeState>()
+        .codex_preferred_path
+        .lock()
+        .expect("Codex preferred path lock") = Some(candidate.path);
+    Ok(setup_snapshot_value(&app))
+}
+
+#[cfg(windows)]
+fn choose_manual_codex_path() -> Result<Option<PathBuf>, SetupSafeErrorCode> {
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = 'Select Codex CLI'
+$dialog.Filter = 'Codex CLI|codex.exe;codex.cmd;codex.bat;codex|All files|*.*'
+$dialog.CheckFileExists = $true
+$dialog.Multiselect = $false
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+  [Console]::Out.Write($dialog.FileName)
+}
+"#;
+    let mut command = Command::new("powershell.exe");
+    command
+        .args(["-NoLogo", "-NoProfile", "-Sta", "-Command", script])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    configure_hidden_console(&mut command);
+    let output = command
+        .output()
+        .map_err(|_| SetupSafeErrorCode::CandidateNotExecutable)?;
+    if !output.status.success() || output.stdout.len() > 32 * 1024 {
+        return Err(SetupSafeErrorCode::CandidateNotExecutable);
+    }
+    if output.stdout.is_empty() {
+        return Ok(None);
+    }
+    let text =
+        String::from_utf8(output.stdout).map_err(|_| SetupSafeErrorCode::CandidateNotExecutable)?;
+    if text.contains(['\r', '\n']) {
+        return Err(SetupSafeErrorCode::CandidateNotExecutable);
+    }
+    let path = PathBuf::from(text);
+    if !path.is_absolute() || !path.is_file() {
+        return Err(SetupSafeErrorCode::CandidateNotExecutable);
+    }
+    std::fs::canonicalize(path)
+        .map(Some)
+        .map_err(|_| SetupSafeErrorCode::CandidateNotExecutable)
+}
+
+#[cfg(not(windows))]
+fn choose_manual_codex_path() -> Result<Option<PathBuf>, SetupSafeErrorCode> {
+    Err(SetupSafeErrorCode::CandidateNotExecutable)
+}
+
+#[tauri::command]
+async fn browse_codex_candidate(app: AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = choose_manual_codex_path().map_err(safe_setup_error)? else {
+            return Ok(setup_snapshot_value(&app));
+        };
+        {
+            let state = app.state::<RuntimeState>();
+            *state
+                .codex_manual_path
+                .lock()
+                .expect("Codex manual path lock") = Some(path.clone());
+        }
+        if !compatible_codex_candidate_at(&app, &path) {
+            *app.state::<RuntimeState>()
+                .codex_manual_path
+                .lock()
+                .expect("Codex manual path lock") = None;
+            return Err(safe_setup_error(SetupSafeErrorCode::CandidateNotExecutable));
+        }
+        *app.state::<RuntimeState>()
+            .codex_preferred_path
+            .lock()
+            .expect("Codex preferred path lock") = Some(path);
+        let snapshot = setup_snapshot_value(&app);
+        let persistable_path = app
+            .state::<RuntimeState>()
+            .codex_candidate_paths
+            .lock()
+            .expect("Codex candidate path map lock")
+            .values()
+            .find(|candidate| {
+                candidate.persistable
+                    && app
+                        .state::<RuntimeState>()
+                        .codex_manual_path
+                        .lock()
+                        .expect("Codex manual path lock")
+                        .as_deref()
+                        .is_some_and(|manual| same_windows_path(&candidate.path, manual))
+            })
+            .map(|candidate| candidate.path.clone());
+        if let Some(path) = persistable_path {
+            persist_codex_selection(&app, &path);
+        }
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|_| safe_setup_error(SetupSafeErrorCode::UnknownSetupError))?
+}
+
 #[tauri::command]
 fn install_claude_hook(force: bool) -> Result<Value, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -981,19 +2176,6 @@ fn install_claude_hook(force: bool) -> Result<Value, String> {
 #[tauri::command]
 fn open_login_terminal(provider: String) -> Result<Value, String> {
     let (executable, arguments, display_command) = match provider.as_str() {
-        "codex" => (
-            resolve_codex_command().ok_or_else(|| {
-                if codex_cli_state() == CliState::DesktopBundleOnly {
-                    "Codex 데스크톱 앱의 보호된 실행 파일만 감지됐습니다. 독립 실행 Codex CLI를 설치하세요."
-                        .to_string()
-                } else {
-                    "Codex CLI를 찾을 수 없습니다. 공식 설치 안내에서 CLI를 먼저 설치하세요."
-                        .to_string()
-                }
-            })?,
-            &["login"][..],
-            "codex login",
-        ),
         "claude" => (
             resolve_claude_command().ok_or_else(|| {
                 "Claude Code를 찾을 수 없습니다. 공식 설치 안내에서 CLI를 먼저 설치하세요."
@@ -1016,10 +2198,6 @@ fn open_login_terminal(provider: String) -> Result<Value, String> {
 #[tauri::command]
 fn open_install_terminal(provider: String) -> Result<Value, String> {
     let (script, display_command) = match provider.as_str() {
-        "codex" => (
-            "irm https://chatgpt.com/codex/install.ps1 | iex",
-            "OpenAI Codex CLI 공식 설치 프로그램",
-        ),
         "claude" => (
             "irm https://claude.ai/install.ps1 | iex",
             "Anthropic Claude Code 공식 설치 프로그램",
@@ -1181,6 +2359,7 @@ pub fn run() {
             snapshot,
             refresh_snapshot,
             setup_snapshot,
+            codex_operation_snapshot,
             refresh_setup_snapshot,
             complete_onboarding,
             set_activity_monitoring,
@@ -1194,6 +2373,11 @@ pub fn run() {
             postpone_update,
             install_update,
             install_claude_hook,
+            start_codex_install,
+            start_codex_login,
+            cancel_codex_operation,
+            select_codex_candidate,
+            browse_codex_candidate,
             open_login_terminal,
             open_install_terminal,
             open_official_guide,
@@ -1389,6 +2573,219 @@ mod tests {
         assert_ne!(
             first,
             notification_payload(&next_cycle).expect("next episode").0
+        );
+    }
+
+    #[test]
+    fn codex_path_identity_and_selection_fingerprint_are_privacy_safe() {
+        let left = Path::new(r"\\?\C:\Users\Private\Codex\codex.exe");
+        let right = Path::new(r"c:/users/private/codex/codex.exe");
+        assert!(same_windows_path(left, right));
+        let first = codex_path_fingerprint("salt-a", left);
+        let same = codex_path_fingerprint("salt-a", right);
+        let other_install = codex_path_fingerprint("salt-b", right);
+        assert_eq!(first, same);
+        assert_ne!(first, other_install);
+        assert!(valid_sha256_text(&first));
+        assert!(!first.contains("Private"));
+        assert!(!first.contains("codex.exe"));
+    }
+
+    #[test]
+    fn tracked_operations_only_become_long_running_at_ten_minutes() {
+        let started = Instant::now();
+        assert!(!operation_is_long_running(
+            started,
+            started + CODEX_OPERATION_LONG_RUNNING_AFTER - Duration::from_millis(1)
+        ));
+        assert!(operation_is_long_running(
+            started,
+            started + CODEX_OPERATION_LONG_RUNNING_AFTER
+        ));
+    }
+
+    #[test]
+    fn operation_cancel_is_not_confirmed_when_tree_cleanup_fails() {
+        assert!(matches!(
+            tracked_cancel_outcome(true),
+            TrackedChildOutcome::Cancelled
+        ));
+        assert!(matches!(
+            tracked_cancel_outcome(false),
+            TrackedChildOutcome::TrackingFailed
+        ));
+    }
+
+    #[test]
+    fn setup_command_errors_serialize_as_safe_codes_only() {
+        assert_eq!(
+            safe_setup_error(SetupSafeErrorCode::LoginUnconfirmed),
+            "login_unconfirmed"
+        );
+        assert!(!safe_setup_error(SetupSafeErrorCode::CandidateNotExecutable).contains('\\'));
+        assert_eq!(
+            safe_setup_error(SetupSafeErrorCode::InstallTargetInvalid),
+            "install_target_invalid"
+        );
+    }
+
+    fn install_environment(values: &[(&str, OsString)]) -> BTreeMap<String, OsString> {
+        values
+            .iter()
+            .map(|(name, value)| (name.to_ascii_uppercase(), value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn install_target_uses_fresh_registry_values_for_nested_expansion() {
+        let root = std::env::temp_dir().join(format!(
+            "ai-usage-monitor-install-target-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let expanded = root.join("Codex Bin");
+        let nested = format!("%CUSTOM_ROOT%{}Codex Bin", std::path::MAIN_SEPARATOR);
+        let user = install_environment(&[
+            ("CUSTOM_ROOT", root.as_os_str().to_owned()),
+            ("CODEX_INSTALL_DIR", nested.into()),
+        ]);
+
+        let resolved =
+            resolved_codex_install_target_from(&BTreeMap::new(), &user, &BTreeMap::new())
+                .expect("fresh registry variables expand");
+
+        assert_eq!(resolved, (expanded.clone(), Some(expanded)));
+    }
+
+    #[test]
+    fn valid_absolute_process_custom_target_is_preserved() {
+        let custom = std::env::temp_dir();
+        let process = install_environment(&[("CODEX_INSTALL_DIR", custom.as_os_str().to_owned())]);
+
+        assert_eq!(
+            resolved_codex_install_target_from(&process, &BTreeMap::new(), &BTreeMap::new()),
+            Ok((custom.clone(), Some(custom)))
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_install_target_never_falls_back() {
+        let default_root = std::env::temp_dir();
+        let valid_machine_target = default_root.join("machine-codex-bin");
+        let process = install_environment(&[("LOCALAPPDATA", default_root.as_os_str().to_owned())]);
+        let machine = install_environment(&[(
+            "CODEX_INSTALL_DIR",
+            valid_machine_target.as_os_str().to_owned(),
+        )]);
+
+        for invalid in [
+            OsString::from(r"%UNRESOLVED_INSTALL_ROOT%\Codex"),
+            OsString::from(r"%CODEX_INSTALL_DIR%"),
+            OsString::from("relative-codex-bin"),
+            OsString::new(),
+        ] {
+            let user = install_environment(&[("CODEX_INSTALL_DIR", invalid)]);
+            assert_eq!(
+                resolved_codex_install_target_from(&process, &user, &machine),
+                Err(SetupSafeErrorCode::InstallTargetInvalid)
+            );
+        }
+    }
+
+    #[test]
+    fn existing_file_is_not_accepted_as_an_install_directory() {
+        let file = std::env::temp_dir().join(format!(
+            "ai-usage-monitor-install-target-file-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&file, b"not a directory").expect("file-valued target fixture");
+        let user = install_environment(&[("CODEX_INSTALL_DIR", file.as_os_str().to_owned())]);
+
+        assert_eq!(
+            resolved_codex_install_target_from(&BTreeMap::new(), &user, &BTreeMap::new()),
+            Err(SetupSafeErrorCode::InstallTargetInvalid)
+        );
+
+        std::fs::remove_file(file).expect("file-valued target fixture cleanup");
+    }
+
+    #[test]
+    fn default_install_target_is_preserved_without_an_explicit_custom_value() {
+        let local_app_data = std::env::temp_dir();
+        let process =
+            install_environment(&[("LOCALAPPDATA", local_app_data.as_os_str().to_owned())]);
+
+        assert_eq!(
+            resolved_codex_install_target_from(&process, &BTreeMap::new(), &BTreeMap::new()),
+            Ok((local_app_data.join("Programs/OpenAI/Codex/bin"), None))
+        );
+    }
+
+    #[test]
+    fn failed_codex_capture_cannot_leave_a_connected_or_raw_error_snapshot() {
+        let previous = json!({
+            "schema_version": 1,
+            "captured_at": "2026-07-30T10:00:00+09:00",
+            "source": "codex_app_server",
+            "capture_method": "codex_app_server",
+            "parse_status": "ok",
+            "limits": [{
+                "type": "five_hour",
+                "used_percent": 25,
+                "remaining_percent": 75,
+                "reset_text": "resets 07/30 15:00",
+                "resets_at": 1785381600,
+                "window_duration_mins": 300,
+                "private_path": r"C:\Users\private-user\codex.exe"
+            }],
+            "raw_status_text": r"C:\Users\private-user\codex.exe",
+            "rate_limit_reset_credits": 12,
+            "spend_control_reached": false,
+            "stderr": "private token"
+        });
+        let status = failed_codex_capture_status(CodexCaptureError::Timeout, Some(&previous));
+        assert_eq!(status["parse_status"], "failed");
+        assert_eq!(status["safe_error_code"], "usage_capture_timeout");
+        assert!(status["capture"].get("failure_kind").is_none());
+        assert_eq!(status["raw_status_text"], "");
+        assert!(status["limits"].as_array().is_some_and(Vec::is_empty));
+        assert_eq!(status["last_success"]["parse_status"], "ok");
+        assert_eq!(status["last_success"]["limits"][0]["remaining_percent"], 75);
+        assert_eq!(status["last_success"]["rate_limit_reset_credits"], 12);
+        assert_eq!(status["last_success"]["spend_control_reached"], false);
+        let serialized = status.to_string().to_ascii_lowercase();
+        assert!(!serialized.contains("stdout"));
+        assert!(!serialized.contains("stderr"));
+        assert!(!serialized.contains(r"c:\\users"));
+        assert!(!serialized.contains("private token"));
+
+        let repeated = failed_codex_capture_status(CodexCaptureError::Protocol, Some(&status));
+        assert_eq!(repeated["safe_error_code"], "usage_capture_failed");
+        assert_eq!(repeated["last_success"], status["last_success"]);
+        assert!(!repeated.to_string().contains("private-user"));
+    }
+
+    #[test]
+    fn capture_auth_reprobe_only_maps_confirmed_unauthenticated_to_login_unconfirmed() {
+        assert_eq!(
+            capture_error_after_auth_probe(
+                CodexCaptureError::Timeout,
+                CodexAuthState::Unauthenticated
+            ),
+            CodexCaptureError::AuthenticationUnconfirmed
+        );
+        assert_eq!(
+            capture_error_after_auth_probe(
+                CodexCaptureError::Timeout,
+                CodexAuthState::Authenticated
+            ),
+            CodexCaptureError::Timeout
+        );
+        assert_eq!(
+            capture_error_after_auth_probe(
+                CodexCaptureError::CapabilityMissing,
+                CodexAuthState::Unauthenticated
+            ),
+            CodexCaptureError::CapabilityMissing
         );
     }
 }

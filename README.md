@@ -46,6 +46,7 @@ The app processes usage locally. There is no developer-operated analytics server
 ## Guides
 
 - [How to check Codex usage limits on Windows](docs/CODEX_USAGE_LIMIT_WINDOWS.md) — official `/usage`, `/status`, and `/statusline` options, plus an always-visible Windows alternative.
+- [Codex CLI onboarding hardening specification](docs/codex-cli-onboarding/spec.md) — the canonical install, discovery, login, privacy, and Windows test contract, with its [implementation task plan](docs/codex-cli-onboarding/task.md).
 - [Korean installation and usage guide](docs/README.ko.md)
 - [Privacy and local data inventory](docs/PRIVACY.md)
 
@@ -64,7 +65,25 @@ The app processes usage locally. There is no developer-operated analytics server
 1. Download `Codex-Claude-Usage-Setup-<version>.exe` from the [latest GitHub Release](https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest).
 2. Compare its SHA-256 digest with the digest shown on the Release page.
 3. Run the installer. The first launch opens Setup, where either Codex CLI or Claude Code is enough to begin.
-4. Sign in through the tool's own CLI, then select **Check status again → Finish setup**.
+4. In Setup, approve the official Codex CLI installer if no usable CLI is found. The app rechecks the installed executable before enabling sign-in.
+5. Select **Codex sign in**. The app starts `codex login` on the validated CLI in a visible terminal; the Codex CLI opens the browser, and you enter the account, MFA, workspace, and approval yourself.
+6. Setup runs `codex login status` against that same executable. A confirmed sign-in from at least one provider you chose—Codex or Claude—enables **Finish setup**. If browser launch is blocked, **Device code sign-in** is shown only when that CLI supports it; the account or workspace must also allow device-code authentication.
+
+Release users do not need Node.js, npm, or Rust to run this app or the official standalone Codex CLI. Setup searches the current process PATH, fresh user and machine PATH values, the official default directory, `CODEX_INSTALL_DIR`, legacy npm, `.local/bin`, and a file selected through the native picker. Every candidate must pass bounded version and capability probes. Multiple equally ranked candidates stop at a privacy-safe selector; full local paths never enter the renderer.
+
+Installation, process tracking, login-state rules, remote Windows test tiers, and the manual OAuth boundary are recorded in the [Codex CLI onboarding hardening specification](docs/codex-cli-onboarding/spec.md), its [implementation task plan](docs/codex-cli-onboarding/task.md), and the [remote Windows T3 runbook](docs/codex-cli-onboarding/REMOTE_WINDOWS_TEST.md).
+
+`codex login status` returning success proves that the selected CLI has a credential. It does not by itself prove that the current credential or workspace can return subscription limits. The app reports current Codex usage as connected only after a fresh usage request succeeds; a usage error remains separate from sign-in status.
+
+### Codex setup troubleshooting
+
+| Situation | What the app checks | What to do |
+| --- | --- | --- |
+| Codex is installed in a nonstandard directory | Current process PATH, fresh HKCU/HKLM PATH, `CODEX_INSTALL_DIR`, known standalone/npm locations, then a native file picker | Select **Check status again**, then **Choose another CLI file**. An off-PATH manual choice lasts for the current app session; add its directory to PATH or set `CODEX_INSTALL_DIR` for persistent discovery. |
+| A legacy npm launcher is found but does not run | The installed launcher, its Codex package, Node.js version and architecture—not the npm client version used long ago | Prefer the official standalone installer. If keeping the legacy launcher, provide compatible Node.js on PATH; missing Node and incompatible Node are reported separately. |
+| Node.js, npm, or Rust is absent | Nothing extra for the release app or official standalone Codex | Do not install a development toolchain just for this app. Rust is never installed on a customer PC. Node.js is relevant only to a legacy package-manager launcher. |
+| Sign-in is confirmed but usage still fails | Credential status and the current `account/rateLimits/read` result are separate | Retry the usage check and review the safe error. An API-key or workspace credential may be valid for Codex while subscription limit access is unavailable. Do not paste auth output or account details into an issue. |
+| The Codex desktop app is present but Setup reports no CLI | Protected desktop resources and Windows App Execution Aliases are rejected | Install the independent standalone Codex CLI or select another real CLI file. |
 
 > [!WARNING]
 > The current Windows installer is **not Authenticode-signed**. The SignPath Foundation application was not approved on 2026-07-23 because the project does not yet have enough external adoption and independent references. Windows SmartScreen may therefore show **Unknown publisher**. This status is disclosed rather than hidden.
@@ -78,7 +97,7 @@ Before running an unsigned beta:
 - Review the [privacy policy](docs/PRIVACY.md), [security policy](SECURITY.md), and [code-signing policy](docs/CODE_SIGNING_POLICY.md).
 - If you prefer not to run an unsigned binary, [build from source](#build-from-source) or wait for a future signed release.
 
-The installer does not bundle Codex CLI or Claude Code. In interactive mode it can offer to run each provider's official installer only after separate opt-in confirmation. It does not download WebView2 automatically.
+The installer does not bundle Codex CLI or Claude Code. An interactive install may offer the official Codex installer with **No** as the default; silent installation performs no CLI prompt or CLI network request. The first-run Setup remains authoritative because it validates the actual executable after any installer process exits. It does not download WebView2 automatically.
 
 ### What portable distribution would mean
 
@@ -184,18 +203,21 @@ For the design rationale, formulas, confidence thresholds, anomaly rules, WebVie
 Requirements:
 
 - Windows 10 or later
-- Node.js 22.12 or later
-- Rust stable MSVC toolchain
+- Node.js **22.12.0** and npm **10.9.0**
+- Rust **1.97.1** with `rustfmt`, `clippy`, and `x86_64-pc-windows-msvc`
 - Microsoft C++ Build Tools and WebView2
 
 ```powershell
 git clone https://github.com/Kyuhan1230/ai-usage-monitor.git
 cd ai-usage-monitor
+npm run verify:toolchain
 npm ci
 npm test
 npm run app
 npm run dist
 ```
+
+Run `powershell -ExecutionPolicy Bypass -File scripts/check-dev-environment.ps1` for the full Windows preflight. The repository does not install Node.js or npm. If `rustup` is already installed, entering this repository and invoking a Rust command may download the pinned Rust toolchain and listed components when they are missing; without `rustup`, network access, or the required MSVC build tools, the preflight fails and explains what is missing. It does not change the global Rust default.
 
 The NSIS installer is written to `src-tauri/target/release/bundle/nsis/`.
 

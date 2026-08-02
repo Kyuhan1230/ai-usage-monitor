@@ -1,0 +1,651 @@
+name: Codex CLI official installer smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - labeled
+      - synchronize
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-cli-installer-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  official-installer:
+    name: T2 official installer (${{ matrix.install_mode }})
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'test:codex-t2')
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        install_mode:
+          - default
+          - custom
+    env:
+      CODEX_NON_INTERACTIVE: "1"
+      OPENAI_API_KEY: ""
+      CODEX_API_KEY: ""
+      AI_USAGE_MONITOR_T2_APP_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Initialize isolated T2 environment
+        id: initialize
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $mode = '${{ matrix.install_mode }}'
+          $checkedOutCommit = (git rev-parse HEAD).Trim()
+          if (
+            $env:AI_USAGE_MONITOR_T2_APP_COMMIT -notmatch '^[0-9a-fA-F]{40}$' -or
+            $checkedOutCommit -cne $env:AI_USAGE_MONITOR_T2_APP_COMMIT
+          ) {
+            throw 'The checked-out source did not match the exact T2 application commit.'
+          }
+          $codexHome = Join-Path $env:RUNNER_TEMP "codex-home-$mode"
+          $scriptPath = Join-Path $env:RUNNER_TEMP "codex-install-$mode.ps1"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "codex-install-$mode.stdout.log"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "codex-install-$mode.stderr.log"
+          $evidencePath = Join-Path $env:RUNNER_TEMP "codex-t2-evidence-$mode.json"
+          $harnessEvidencePath = Join-Path $env:RUNNER_TEMP "codex-t2-harness-$mode.json"
+
+          if ($mode -eq 'default') {
+            if (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
+              throw 'The default-location job inherited CODEX_INSTALL_DIR and is not isolated.'
+            }
+            $installTarget = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin'
+            $sourceKind = 'default_standalone_path'
+          } else {
+            $installTarget = Join-Path $env:RUNNER_TEMP 'Codex custom 한글 bin'
+            $sourceKind = 'custom_install_dir'
+          }
+
+          foreach ($sensitivePath in @(
+            $env:USERPROFILE,
+            $env:LOCALAPPDATA,
+            $env:RUNNER_TEMP,
+            $codexHome,
+            $installTarget
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($sensitivePath)) {
+              Write-Output "::add-mask::$sensitivePath"
+            }
+          }
+
+          "CODEX_HOME=$codexHome" >> $env:GITHUB_ENV
+          "CODEX_CHECKED_OUT_COMMIT=$checkedOutCommit" >> $env:GITHUB_ENV
+          "CODEX_INSTALL_SCRIPT=$scriptPath" >> $env:GITHUB_ENV
+          "CODEX_INSTALL_STDOUT=$stdoutPath" >> $env:GITHUB_ENV
+          "CODEX_INSTALL_STDERR=$stderrPath" >> $env:GITHUB_ENV
+          "CODEX_T2_EVIDENCE=$evidencePath" >> $env:GITHUB_ENV
+          "CODEX_HARNESS_EVIDENCE=$harnessEvidencePath" >> $env:GITHUB_ENV
+          "CODEX_EXPECTED_TARGET=$installTarget" >> $env:GITHUB_ENV
+          "CODEX_EXPECTED_SOURCE=$sourceKind" >> $env:GITHUB_ENV
+
+          if ($mode -eq 'custom') {
+            "CODEX_INSTALL_DIR=$installTarget" >> $env:GITHUB_ENV
+          }
+
+          $preexistingCommands = @(Get-Command codex -All -ErrorAction SilentlyContinue)
+          "CODEX_PREEXISTING_COMMAND_COUNT=$($preexistingCommands.Count)" >> $env:GITHUB_ENV
+
+          if (Test-Path -LiteralPath $installTarget) {
+            $targetEntries = @(Get-ChildItem -LiteralPath $installTarget -Force -ErrorAction Stop)
+            if ($targetEntries.Count -ne 0) {
+              throw 'The controlled install target was not empty before the official installer ran.'
+            }
+          }
+
+          if (Test-Path -LiteralPath $codexHome) {
+            $homeEntries = @(Get-ChildItem -LiteralPath $codexHome -Force -ErrorAction Stop)
+            if ($homeEntries.Count -ne 0) {
+              throw 'The isolated CODEX_HOME was not empty before the test.'
+            }
+          } else {
+            New-Item -ItemType Directory -Path $codexHome | Out-Null
+          }
+
+          "CODEX_TARGET_WAS_EMPTY=true" >> $env:GITHUB_ENV
+          "CODEX_HOME_WAS_EMPTY=true" >> $env:GITHUB_ENV
+
+      - name: Download the official installer script
+        id: download
+        if: steps.initialize.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $url = 'https://chatgpt.com/codex/install.ps1'
+          Invoke-WebRequest -Uri $url -OutFile $env:CODEX_INSTALL_SCRIPT -UseBasicParsing
+          if (-not (Test-Path -LiteralPath $env:CODEX_INSTALL_SCRIPT)) {
+            throw 'The official installer script was not downloaded.'
+          }
+          $scriptHash = (Get-FileHash -LiteralPath $env:CODEX_INSTALL_SCRIPT -Algorithm SHA256).Hash
+          if ($scriptHash -notmatch '^[A-F0-9]{64}$') {
+            throw 'The official installer script SHA-256 was not valid.'
+          }
+          "CODEX_INSTALL_SCRIPT_SHA256=$scriptHash" >> $env:GITHUB_ENV
+
+      - name: Run the official installer non-interactively
+        id: install
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $arguments = @(
+            '-NoLogo',
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            "`"$env:CODEX_INSTALL_SCRIPT`""
+          )
+          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $windowsPowerShellModules = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules'
+          if (
+            -not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $windowsPowerShellModules -PathType Container)
+          ) {
+            throw 'The Windows PowerShell 5.1 runtime or its system module directory was unavailable.'
+          }
+
+          # GitHub's pwsh host exports a PowerShell 7 PSModulePath. A nested
+          # powershell.exe inherits it, unlike the desktop app, and then cannot
+          # autoload built-in Windows PowerShell cmdlets such as Get-FileHash.
+          $originalModulePath = $env:PSModulePath
+          $documents = [Environment]::GetFolderPath('MyDocuments')
+          $windowsModulePaths = @(
+            if (-not [string]::IsNullOrWhiteSpace($documents)) {
+              Join-Path $documents 'WindowsPowerShell\Modules'
+            }
+            Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'
+            $windowsPowerShellModules
+          )
+          try {
+            $env:PSModulePath = $windowsModulePaths -join ';'
+            & $windowsPowerShell `
+              -NoLogo `
+              -NoProfile `
+              -NonInteractive `
+              -Command 'Get-Command Get-FileHash -ErrorAction Stop | Out-Null'
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Windows PowerShell could not autoload its built-in Get-FileHash cmdlet.'
+            }
+            "CODEX_WINDOWS_POWERSHELL_MODULE_PATH_NORMALIZED=true" >> $env:GITHUB_ENV
+
+            $process = Start-Process `
+              -FilePath $windowsPowerShell `
+              -ArgumentList $arguments `
+              -NoNewWindow `
+              -PassThru `
+              -RedirectStandardOutput $env:CODEX_INSTALL_STDOUT `
+              -RedirectStandardError $env:CODEX_INSTALL_STDERR
+            if (-not $process.WaitForExit(600000)) {
+              try { $process.Kill($true) } catch { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+              "CODEX_INSTALL_TIMED_OUT=true" >> $env:GITHUB_ENV
+              throw 'The official installer exceeded the 10-minute T2 timeout.'
+            }
+            $exitCode = $process.ExitCode
+          } finally {
+            $env:PSModulePath = $originalModulePath
+          }
+          "CODEX_INSTALL_TIMED_OUT=false" >> $env:GITHUB_ENV
+          "CODEX_INSTALL_EXIT_CODE=$exitCode" >> $env:GITHUB_ENV
+          if ($exitCode -ne 0) {
+            throw "The official installer returned a nonzero exit code: $exitCode"
+          }
+
+      - name: Emit sanitized installer failure diagnostics
+        if: steps.install.outcome == 'failure'
+        shell: pwsh
+        run: |
+          $diagnosticLines = @()
+          foreach ($path in @($env:CODEX_INSTALL_STDOUT, $env:CODEX_INSTALL_STDERR)) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              $diagnosticLines += Get-Content -LiteralPath $path -Tail 20 -ErrorAction SilentlyContinue
+            }
+          }
+          $diagnostic = @(
+            $diagnosticLines |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+              Select-Object -Last 8
+          ) -join "`n"
+          $diagnostic = $diagnostic.Trim()
+          if ([string]::IsNullOrWhiteSpace($diagnostic)) {
+            $diagnostic = 'The official installer returned no diagnostic output.'
+          }
+          foreach ($sensitivePath in @(
+            $env:USERPROFILE,
+            $env:LOCALAPPDATA,
+            $env:RUNNER_TEMP,
+            $env:GITHUB_WORKSPACE,
+            $env:CODEX_HOME,
+            $env:CODEX_INSTALL_DIR,
+            $env:CODEX_EXPECTED_TARGET
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($sensitivePath)) {
+              $diagnostic = $diagnostic.Replace($sensitivePath, '<REDACTED_PATH>')
+            }
+          }
+          $diagnostic = [regex]::Replace(
+            $diagnostic,
+            '(?i)(https?://[^\s?]+)\?[^\s]+',
+            '$1?<REDACTED_QUERY>'
+          )
+          $diagnostic = [regex]::Replace(
+            $diagnostic,
+            '(?i)(authorization\s*:\s*(?:bearer\s+)?)[^\s]+',
+            '$1<REDACTED>'
+          )
+          if ($diagnostic.Length -gt 4000) {
+            $diagnostic = $diagnostic.Substring($diagnostic.Length - 4000)
+          }
+          $annotation = $diagnostic.
+            Replace('%', '%25').
+            Replace("`r", '%0D').
+            Replace("`n", '%0A')
+          Write-Output "::error title=Official Codex installer failed::$annotation"
+          "CODEX_INSTALL_FAILURE_CATEGORY=installer_process_failed" >> $env:GITHUB_ENV
+          foreach ($entry in @(
+            @{ Name = 'CODEX_INSTALL_STDOUT_SHA256'; Path = $env:CODEX_INSTALL_STDOUT },
+            @{ Name = 'CODEX_INSTALL_STDERR_SHA256'; Path = $env:CODEX_INSTALL_STDERR }
+          )) {
+            if (Test-Path -LiteralPath $entry.Path -PathType Leaf) {
+              $hash = (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash
+              "$($entry.Name)=$hash" >> $env:GITHUB_ENV
+            }
+          }
+
+      - name: Validate the installed real Codex CLI without credentials
+        id: validate_cli
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $cli = Join-Path $env:CODEX_EXPECTED_TARGET 'codex.exe'
+          if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) {
+            throw 'The expected standalone codex.exe was not created in the controlled target.'
+          }
+          Write-Output "::add-mask::$cli"
+          "CODEX_EXPECTED_CLI=$cli" >> $env:GITHUB_ENV
+
+          function Invoke-CodexProbe {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string[]]$Arguments,
+              [int]$TimeoutMilliseconds = 60000
+            )
+
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $cli
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw 'The installed Codex CLI process did not start.'
+            }
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+              try { $process.Kill($true) } catch { $process.Kill() }
+              throw 'The installed Codex CLI probe exceeded its timeout.'
+            }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            [IO.File]::AppendAllText($env:CODEX_INSTALL_STDOUT, $stdout)
+            [IO.File]::AppendAllText($env:CODEX_INSTALL_STDERR, $stderr)
+            return [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              Stdout = $stdout
+            }
+          }
+
+          $versionProbe = Invoke-CodexProbe -Arguments @('--version')
+          $versionLines = @($versionProbe.Stdout -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          $versionExit = $versionProbe.ExitCode
+          if ($versionExit -ne 0 -or $versionLines.Count -eq 0) {
+            throw 'The installed Codex CLI did not return a version successfully.'
+          }
+          $versionLine = ([string]$versionLines[0]).Trim()
+          if ($versionLine -notmatch '^(?:codex-cli|codex)\s+v?(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
+            throw 'The Codex version output did not match the repository probe contract.'
+          }
+          $version = $Matches.version
+          "CODEX_VERSION_SAFE=$version" >> $env:GITHUB_ENV
+          "CODEX_VERSION_EXIT_CODE=$versionExit" >> $env:GITHUB_ENV
+
+          $loginHelpExit = (Invoke-CodexProbe -Arguments @('login', '--help')).ExitCode
+          "CODEX_LOGIN_HELP_EXIT_CODE=$loginHelpExit" >> $env:GITHUB_ENV
+          if ($loginHelpExit -ne 0) {
+            throw 'The installed Codex CLI did not support login --help.'
+          }
+
+          $appServerHelpExit = (Invoke-CodexProbe -Arguments @('app-server', '--help')).ExitCode
+          "CODEX_APP_SERVER_HELP_EXIT_CODE=$appServerHelpExit" >> $env:GITHUB_ENV
+          if ($appServerHelpExit -ne 0) {
+            throw 'The installed Codex CLI did not support app-server --help.'
+          }
+
+          $credentialFile = Join-Path $env:CODEX_HOME 'auth.json'
+          if (Test-Path -LiteralPath $credentialFile) {
+            throw 'The isolated CODEX_HOME unexpectedly contained an auth.json before the authentication probe.'
+          }
+
+          $authExit = (Invoke-CodexProbe -Arguments @('login', 'status')).ExitCode
+          "CODEX_LOGIN_STATUS_EXIT_CODE=$authExit" >> $env:GITHUB_ENV
+          if ($authExit -eq 0) {
+            throw 'The real Codex CLI unexpectedly reported an authenticated empty CODEX_HOME.'
+          }
+          "CODEX_EMPTY_HOME_AUTHENTICATED=false" >> $env:GITHUB_ENV
+
+          $userPathValue = (Get-ItemProperty -Path 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path
+          $expandedUserPath = [Environment]::ExpandEnvironmentVariables([string]$userPathValue)
+          $expectedFullPath = [IO.Path]::GetFullPath($env:CODEX_EXPECTED_TARGET).TrimEnd('\')
+          $pathRegistered = @($expandedUserPath -split ';') |
+            ForEach-Object { $_.Trim().Trim('"') } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object {
+              try { [IO.Path]::GetFullPath($_).TrimEnd('\') } catch { $null }
+            } |
+            Where-Object { $_ -and $_.Equals($expectedFullPath, [StringComparison]::OrdinalIgnoreCase) } |
+            Select-Object -First 1
+          $pathWasRegistered = $null -ne $pathRegistered
+          "CODEX_HKCU_PATH_REGISTERED=$($pathWasRegistered.ToString().ToLowerInvariant())" >> $env:GITHUB_ENV
+          if (-not $pathWasRegistered) {
+            throw 'The official installer did not register the controlled command directory in fresh HKCU PATH.'
+          }
+
+      - name: Require the repository live-harness contract
+        id: harness_contract
+        if: steps.validate_cli.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw -Encoding utf8 | ConvertFrom-Json
+          $harness = $package.scripts.'test:codex-live-install'
+          if ([string]::IsNullOrWhiteSpace([string]$harness)) {
+            throw 'Missing package script test:codex-live-install. T2 cannot claim repository resolver coverage.'
+          }
+          if (-not (Test-Path -LiteralPath 'rust-toolchain.toml' -PathType Leaf)) {
+            throw 'Missing rust-toolchain.toml. The live repository harness must not run on a floating Rust compiler.'
+          }
+
+      - name: Set up pinned Rust for the repository harness
+        id: setup_rust
+        if: steps.harness_contract.outcome == 'success'
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # pinned action, verified 2026-07-30
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+          targets: x86_64-pc-windows-msvc
+
+      - name: Set up pinned Node.js for the repository harness
+        id: setup_node
+        if: steps.setup_rust.outcome == 'success'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Run the repository resolver against the installed CLI
+        id: repository_harness
+        if: steps.setup_node.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:AI_USAGE_MONITOR_T2_CODEX_PATH = $env:CODEX_EXPECTED_CLI
+          $env:AI_USAGE_MONITOR_T2_CODEX_HOME = $env:CODEX_HOME
+          $env:AI_USAGE_MONITOR_T2_EXPECTED_SOURCE = $env:CODEX_EXPECTED_SOURCE
+          $env:AI_USAGE_MONITOR_T2_EVIDENCE_PATH = $env:CODEX_HARNESS_EVIDENCE
+          npm run verify:toolchain
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The pinned Node/npm/Rust toolchain contract failed before the repository live harness.'
+          }
+          npm ci
+          if ($LASTEXITCODE -ne 0) {
+            throw 'npm ci failed before the repository live harness.'
+          }
+          npm run test:codex-live-install
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The repository live harness rejected the real installed Codex CLI.'
+          }
+          if (-not (Test-Path -LiteralPath $env:CODEX_HARNESS_EVIDENCE -PathType Leaf)) {
+            throw 'The repository live harness did not write its required sanitized evidence JSON.'
+          }
+
+          $rawHarnessEvidence = Get-Content -LiteralPath $env:CODEX_HARNESS_EVIDENCE -Raw -Encoding utf8
+          if (
+            $rawHarnessEvidence -match '(?i)[A-Z]:\\' -or
+            $rawHarnessEvidence.Contains($env:USERPROFILE) -or
+            $rawHarnessEvidence.Contains($env:RUNNER_TEMP)
+          ) {
+            throw 'The repository live harness evidence contained a raw Windows path.'
+          }
+          $harnessEvidence = $rawHarnessEvidence | ConvertFrom-Json
+          $allowedFields = @(
+            'schema_version',
+            'selected_expected_candidate',
+            'selected_source',
+            'selected_version',
+            'provenance',
+            'auth_state',
+            'safe_error_code'
+          )
+          $unexpectedFields = @($harnessEvidence.PSObject.Properties.Name | Where-Object { $_ -notin $allowedFields })
+          if ($unexpectedFields.Count -ne 0) {
+            throw 'The repository live harness evidence contained fields outside the privacy-safe schema.'
+          }
+          foreach ($requiredField in $allowedFields[0..5]) {
+            if ($null -eq $harnessEvidence.$requiredField) {
+              throw "The repository live harness evidence omitted required field: $requiredField"
+            }
+          }
+          if ($harnessEvidence.schema_version -ne 1) {
+            throw 'The repository live harness evidence schema version was not supported.'
+          }
+          if (-not $harnessEvidence.selected_expected_candidate) {
+            throw 'The repository resolver did not select the exact T2-installed candidate.'
+          }
+          if ($harnessEvidence.selected_source -ne $env:CODEX_EXPECTED_SOURCE) {
+            throw 'The repository resolver source did not match the controlled install mode.'
+          }
+          if ($harnessEvidence.selected_version -ne $env:CODEX_VERSION_SAFE) {
+            throw 'The repository resolver version did not match the directly probed real CLI version.'
+          }
+          if ($harnessEvidence.auth_state -ne 'unauthenticated') {
+            throw 'The repository auth probe did not classify the empty isolated CODEX_HOME as unauthenticated.'
+          }
+          if ($null -ne $harnessEvidence.safe_error_code) {
+            throw 'The successful repository live harness returned a safe error code.'
+          }
+          $allowedProvenance = @('verified_publisher', 'tracked_official_install', 'unverified')
+          if ($harnessEvidence.provenance -notin $allowedProvenance) {
+            throw 'The repository live harness returned an unknown provenance confidence.'
+          }
+          "CODEX_HARNESS_SELECTED_SOURCE=$($harnessEvidence.selected_source)" >> $env:GITHUB_ENV
+          "CODEX_HARNESS_SELECTED_VERSION=$($harnessEvidence.selected_version)" >> $env:GITHUB_ENV
+          "CODEX_HARNESS_PROVENANCE=$($harnessEvidence.provenance)" >> $env:GITHUB_ENV
+          "CODEX_HARNESS_AUTH_STATE=$($harnessEvidence.auth_state)" >> $env:GITHUB_ENV
+          "CODEX_HARNESS_SAFE_ERROR_CODE=$($harnessEvidence.safe_error_code)" >> $env:GITHUB_ENV
+
+      - name: Write sanitized T2 evidence
+        id: evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $mode = '${{ matrix.install_mode }}'
+          $evidencePath = if ([string]::IsNullOrWhiteSpace($env:CODEX_T2_EVIDENCE)) {
+            Join-Path $env:RUNNER_TEMP "codex-t2-evidence-$mode.json"
+          } else {
+            $env:CODEX_T2_EVIDENCE
+          }
+
+          function Optional-Integer([string]$value) {
+            if ($value -match '^-?[0-9]+$') { return [int]$value }
+            return $null
+          }
+
+          $evidence = [ordered]@{
+            schema_version = 1
+            tier = 'T2'
+            install_mode = $mode
+            app_commit = $env:AI_USAGE_MONITOR_T2_APP_COMMIT
+            checked_out_commit = $env:CODEX_CHECKED_OUT_COMMIT
+            workflow_trigger_commit = '${{ github.sha }}'
+            workflow_run = 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            run_attempt = '${{ github.run_attempt }}'
+            runner = [ordered]@{
+              os = $env:ImageOS
+              image_version = $env:ImageVersion
+            }
+            installer = [ordered]@{
+              url = 'https://chatgpt.com/codex/install.ps1'
+              script_sha256 = $env:CODEX_INSTALL_SCRIPT_SHA256
+              process_exit_code = Optional-Integer $env:CODEX_INSTALL_EXIT_CODE
+              timed_out = $env:CODEX_INSTALL_TIMED_OUT -eq 'true'
+              target_was_empty = $env:CODEX_TARGET_WAS_EMPTY -eq 'true'
+              isolated_codex_home_was_empty = $env:CODEX_HOME_WAS_EMPTY -eq 'true'
+              preexisting_command_count = Optional-Integer $env:CODEX_PREEXISTING_COMMAND_COUNT
+              windows_powershell_module_path_normalized =
+                $env:CODEX_WINDOWS_POWERSHELL_MODULE_PATH_NORMALIZED -eq 'true'
+              failure_category = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_FAILURE_CATEGORY)) {
+                $null
+              } else {
+                $env:CODEX_INSTALL_FAILURE_CATEGORY
+              }
+              stdout_sha256 = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_STDOUT_SHA256)) {
+                $null
+              } else {
+                $env:CODEX_INSTALL_STDOUT_SHA256
+              }
+              stderr_sha256 = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_STDERR_SHA256)) {
+                $null
+              } else {
+                $env:CODEX_INSTALL_STDERR_SHA256
+              }
+            }
+            cli = [ordered]@{
+              source = $env:CODEX_EXPECTED_SOURCE
+              version = $env:CODEX_VERSION_SAFE
+              version_exit_code = Optional-Integer $env:CODEX_VERSION_EXIT_CODE
+              login_help_exit_code = Optional-Integer $env:CODEX_LOGIN_HELP_EXIT_CODE
+              app_server_help_exit_code = Optional-Integer $env:CODEX_APP_SERVER_HELP_EXIT_CODE
+              hkcu_path_registered = $env:CODEX_HKCU_PATH_REGISTERED -eq 'true'
+            }
+            authentication = [ordered]@{
+              credential_source = 'empty_isolated_CODEX_HOME'
+              login_status_exit_code = Optional-Integer $env:CODEX_LOGIN_STATUS_EXIT_CODE
+              reported_authenticated = $env:CODEX_EMPTY_HOME_AUTHENTICATED -eq 'true'
+              oauth_attempted = $false
+            }
+            repository_harness = [ordered]@{
+              contract = '${{ steps.harness_contract.outcome }}'
+              result = '${{ steps.repository_harness.outcome }}'
+              selected_source = $env:CODEX_HARNESS_SELECTED_SOURCE
+              selected_version = $env:CODEX_HARNESS_SELECTED_VERSION
+              provenance = $env:CODEX_HARNESS_PROVENANCE
+              auth_state = $env:CODEX_HARNESS_AUTH_STATE
+              safe_error_code = if ([string]::IsNullOrWhiteSpace($env:CODEX_HARNESS_SAFE_ERROR_CODE)) {
+                $null
+              } else {
+                $env:CODEX_HARNESS_SAFE_ERROR_CODE
+              }
+            }
+            step_outcomes = [ordered]@{
+              initialize = '${{ steps.initialize.outcome }}'
+              download = '${{ steps.download.outcome }}'
+              install = '${{ steps.install.outcome }}'
+              validate_cli = '${{ steps.validate_cli.outcome }}'
+              harness_contract = '${{ steps.harness_contract.outcome }}'
+              setup_rust = '${{ steps.setup_rust.outcome }}'
+              setup_node = '${{ steps.setup_node.outcome }}'
+              repository_harness = '${{ steps.repository_harness.outcome }}'
+            }
+          }
+
+          $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $evidencePath -Encoding utf8
+          "### Codex CLI T2 — $mode" >> $env:GITHUB_STEP_SUMMARY
+          "- Commit: $($env:AI_USAGE_MONITOR_T2_APP_COMMIT)" >> $env:GITHUB_STEP_SUMMARY
+          "- Official script SHA-256: $($env:CODEX_INSTALL_SCRIPT_SHA256)" >> $env:GITHUB_STEP_SUMMARY
+          "- Codex version: $($env:CODEX_VERSION_SAFE)" >> $env:GITHUB_STEP_SUMMARY
+          "- OAuth/account secrets used: no" >> $env:GITHUB_STEP_SUMMARY
+          "- Repository harness: ${{ steps.repository_harness.outcome }}" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload sanitized T2 evidence
+        id: upload_evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-cli-t2-${{ matrix.install_mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codex-t2-evidence-${{ matrix.install_mode }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove raw temporary output
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($file in @(
+            $env:CODEX_INSTALL_SCRIPT,
+            $env:CODEX_INSTALL_STDOUT,
+            $env:CODEX_INSTALL_STDERR,
+            $env:CODEX_HARNESS_EVIDENCE
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($file) -and (Test-Path -LiteralPath $file)) {
+              Remove-Item -LiteralPath $file -Force
+            }
+          }
+          foreach ($directory in @($env:CODEX_HOME, $(if ('${{ matrix.install_mode }}' -eq 'custom') { $env:CODEX_EXPECTED_TARGET }))) {
+            if (
+              -not [string]::IsNullOrWhiteSpace($directory) -and
+              (Test-Path -LiteralPath $directory) -and
+              [IO.Path]::GetFullPath($directory).StartsWith(
+                [IO.Path]::GetFullPath($env:RUNNER_TEMP),
+                [StringComparison]::OrdinalIgnoreCase
+              )
+            ) {
+              Remove-Item -LiteralPath $directory -Recurse -Force
+            }
+          }
+
+      - name: Enforce complete T2 result
+        if: always()
+        shell: pwsh
+        run: |
+          $required = [ordered]@{
+            initialize = '${{ steps.initialize.outcome }}'
+            download = '${{ steps.download.outcome }}'
+            install = '${{ steps.install.outcome }}'
+            validate_cli = '${{ steps.validate_cli.outcome }}'
+            harness_contract = '${{ steps.harness_contract.outcome }}'
+            setup_rust = '${{ steps.setup_rust.outcome }}'
+            setup_node = '${{ steps.setup_node.outcome }}'
+            repository_harness = '${{ steps.repository_harness.outcome }}'
+            evidence = '${{ steps.evidence.outcome }}'
+            upload_evidence = '${{ steps.upload_evidence.outcome }}'
+          }
+          $failed = @($required.GetEnumerator() | Where-Object { $_.Value -ne 'success' })
+          if ($failed.Count -ne 0) {
+            $summary = $failed | ForEach-Object { "$($_.Key)=$($_.Value)" }
+            throw "T2 is incomplete or failed: $($summary -join ', ')"
+          }

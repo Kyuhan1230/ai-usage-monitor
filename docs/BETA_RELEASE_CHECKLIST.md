@@ -5,6 +5,14 @@ Use this checklist for every public release until Authenticode code signing is a
 ## Required release evidence
 
 - [ ] CI, Rust tests, UI tests, and release-contract tests pass.
+- [ ] The `production-release` environment has at least one required reviewer, prevents self-review, and disables administrator bypass; the prepare job verifies these controls before updater signing secrets are used.
+- [ ] The exact release candidate passed the hosted Windows `1.2.7 -> 1.2.8` upgrade gate in both default and custom `CODEX_INSTALL_DIR` modes, preserving application data, Codex files, isolated credential bytes, process/user/machine PATH, install location, and post-uninstall provider state.
+- [ ] The `Codex CLI official installer smoke` T2 workflow passed for both `default` and `custom` install modes on this exact release commit.
+- [ ] Both T2 artifacts record the official installer-script SHA-256, actual Codex version, capability probes, isolated unauthenticated result, and successful repository live-harness result without raw paths or command output.
+- [ ] The T2 `default` and `custom` artifacts contain the same official installer-script SHA-256 and the same installed Codex CLI version.
+- [ ] A release owner completed the T3 Windows 11 desktop test for this exact commit, installer SHA-256, and `release-evidence.json` SHA-256; recorded a closed structured `PASS` issue covering real browser OAuth/MFA, first authenticated refresh, app restart, and Windows restart; and obtained an independent reviewer approval carrying the same digests.
+- [ ] Immediately before publication, the workflow revalidated the T3 issue state and approval label, tester/reviewer identities and associations, and the exact report and review-comment body hashes.
+- [ ] Repository release immutability is enabled, and the publication workflow confirmed `enabled=true` through GitHub's official immutable-releases endpoint without changing the setting.
 - [ ] The installer was produced by the repository's GitHub Actions release workflow.
 - [ ] Installer filename, byte size, and SHA-256 are recorded in the release notes.
 - [ ] Authenticode state is stated explicitly as either `Unsigned` or the verified publisher and status.
@@ -12,10 +20,20 @@ Use this checklist for every public release until Authenticode code signing is a
 - [ ] The release notes link to installation, removal, privacy, and known-issues instructions.
 - [ ] SmartScreen behavior was checked on a clean or representative Windows account.
 - [ ] A sanitized install and first-refresh smoke test passed for at least one supported provider.
-- [ ] Upgrade from the previous supported release preserves `~/.codex-usage-wrapper`.
+- [ ] The human T3 upgrade lane confirmed that an existing `1.2.7` installation receives no Codex-install prompt during `/P /UPDATE`, starts the candidate successfully, and preserves the existing user's settings, history, CLI selection, and authentication.
 - [ ] Rollback or manual reinstall behavior is documented if the release changes storage or updating.
+- [ ] Immediately after publication, the workflow re-downloaded and rehashed all five release assets, reverified updater evidence/signature, and confirmed the remote tag still resolves to the exact release commit.
 
 Community testers can use the [Windows install smoke report template](community/INSTALL_SMOKE_REPORT_TEMPLATE.md) without sharing account or session data.
+
+## Codex onboarding release gate
+
+T2 and T3 are separate, mandatory gates for a public release:
+
+- T2 is the credential-free GitHub-hosted Windows test in [`codex-cli-installer-smoke.yml`](../.github/workflows/codex-cli-installer-smoke.yml). It installs the current official Codex CLI into controlled default and custom locations and runs the repository probe against the exact installed `codex.exe`.
+- T3 is the human test in the [remote Windows runbook](codex-cli-onboarding/REMOTE_WINDOWS_TEST.md). The tester—not CI and not the app—completes browser OAuth/MFA on a Windows 11 desktop VM and verifies authenticated first use and restart persistence.
+
+Keep the release as a draft and mark it **No-Go** if either gate is missing, stale, failed, or belongs to a different commit, installer hash, or `release-evidence.json` hash. A green T2 run never substitutes for T3. Do not place ChatGPT credentials, OAuth tokens, cookies, MFA material, or `auth.json` in GitHub Actions secrets or artifacts.
 
 ## SHA-256
 
