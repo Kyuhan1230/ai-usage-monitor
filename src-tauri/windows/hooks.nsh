@@ -38,8 +38,5 @@
       "Codex CLI 설치를 완료하지 못했습니다. (종료 코드: $0)$\r$\n$\r$\n모니터 설치는 정상적으로 계속됩니다.$\r$\n첫 실행 Setup에서 다시 설치할 수 있습니다."
 
   cli_offer_done:
-    Pop $3
-    Pop $2
-    Pop $1
     Pop $0
 !macroend
