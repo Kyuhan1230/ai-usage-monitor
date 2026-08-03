@@ -1,5 +1,13 @@
 !macro NSIS_HOOK_POSTINSTALL
   Push $0
+  Push $1
+  Push $2
+  Push $3
+
+  ; Tauri updater의 passive NSIS 실행은 IfSilent만으로 업데이트를 구분할 수 없습니다.
+  ; 업데이트 중에는 Codex 설치나 PATH 변경을 절대 시도하지 않습니다.
+  StrCmp $UpdateMode "1" cli_offer_done
+  StrCmp $PassiveMode "1" cli_offer_done
 
   ; 무인 설치는 질문이나 네트워크 요청 없이 끝내야 합니다.
   IfSilent cli_offer_done
@@ -30,5 +38,8 @@
       "Codex CLI 설치를 완료하지 못했습니다. (종료 코드: $0)$\r$\n$\r$\n모니터 설치는 정상적으로 계속됩니다.$\r$\n첫 실행 Setup에서 다시 설치할 수 있습니다."
 
   cli_offer_done:
+    Pop $3
+    Pop $2
+    Pop $1
     Pop $0
 !macroend
