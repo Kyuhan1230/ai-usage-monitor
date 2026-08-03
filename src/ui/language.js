@@ -145,119 +145,9 @@
     "설치됨 · 로그인 상태를 확인하지 못했습니다. 상태를 다시 확인하세요.": "Installed · unable to verify sign-in. Check status again.",
     "로그인 완료": "Signed in",
     "Codex 설치": "Install Codex",
-    "독립 CLI 설치": "Install standalone CLI",
-    "공식 CLI 다시 설치": "Reinstall official CLI",
-    "standalone 설치": "Install standalone CLI",
-    "Codex 업데이트": "Update Codex",
     "Claude 설치": "Install Claude",
     "Codex 로그인": "Sign in to Codex",
-    "Device code 로그인": "Device code sign-in",
-    "다른 CLI 파일 선택": "Choose another CLI file",
-    "설치 진행 중": "Installation in progress",
-    "설치 취소": "Cancel installation",
-    "로그인 진행 중": "Sign-in in progress",
-    "로그인 취소": "Cancel sign-in",
-    "작업 취소": "Cancel operation",
     "Claude 로그인": "Sign in to Claude",
-    "독립 실행 Codex CLI를 찾지 못했습니다.": "The standalone Codex CLI was not found.",
-    "Codex 데스크톱 앱과 별도로 독립 실행 CLI가 필요합니다.": "A standalone CLI is required in addition to the Codex desktop app.",
-    "발견한 Codex 후보를 안전하게 실행할 수 없습니다.": "The discovered Codex candidate cannot be run safely.",
-    "Codex 후보의 버전을 확인하지 못했습니다.": "The Codex candidate version could not be verified.",
-    "설치된 Codex CLI가 필요한 명령을 지원하지 않습니다.": "The installed Codex CLI does not support the required commands.",
-    "사용 가능한 Codex CLI가 여러 개라 자동으로 선택하지 않았습니다.": "Multiple Codex CLIs are available, so none was selected automatically.",
-    "예전 npm 설치에 필요한 Node.js를 찾지 못했습니다.": "Node.js required by the legacy npm installation was not found.",
-    "예전 npm 설치와 현재 Node.js가 호환되지 않습니다.": "The legacy npm installation is incompatible with the current Node.js runtime.",
-    "Codex 후보의 게시자 확인에 실패해 실행을 차단했습니다.": "Publisher verification failed, so this Codex candidate was blocked.",
-    "Windows의 최신 CLI 경로를 확인하지 못했습니다.": "The latest Windows CLI paths could not be checked.",
-    "사용자 지정 Codex 설치 경로가 올바르지 않습니다.": "The custom Codex installation location is invalid.",
-    "Codex 설치 프로세스를 시작하지 못했습니다.": "The Codex installation process could not be started.",
-    "Codex 설치 프로세스가 정상적으로 끝나지 않았습니다.": "The Codex installation process did not exit successfully.",
-    "설치 뒤에도 실행 가능한 Codex CLI를 확인하지 못했습니다.": "No runnable Codex CLI was found after installation.",
-    "Codex 설치를 취소했습니다.": "Codex installation was cancelled.",
-    "Codex 로그인 프로세스를 시작하지 못했습니다.": "The Codex sign-in process could not be started.",
-    "Codex 로그인을 취소했습니다.": "Codex sign-in was cancelled.",
-    "로그인 프로세스는 끝났지만 인증 완료를 확인하지 못했습니다.": "The sign-in process exited, but authentication could not be confirmed.",
-    "Codex 로그인 상태 확인 시간이 초과됐습니다.": "Checking Codex sign-in status timed out.",
-    "Codex 로그인 상태를 안전하게 판정하지 못했습니다.": "Codex sign-in status could not be determined safely.",
-    "이 Codex CLI에서는 사용량 확인 명령을 사용할 수 없습니다.": "This Codex CLI does not provide the usage command.",
-    "Codex 사용량을 확인하지 못했습니다.": "Codex usage could not be checked.",
-    "Codex 사용량 확인 시간이 초과됐습니다.": "Checking Codex usage timed out.",
-    "이미 Codex 작업이 진행 중입니다.": "A Codex operation is already in progress.",
-    "Codex 설정 상태를 확인하지 못했습니다.": "Codex setup status could not be checked.",
-    "현재 PATH": "Current PATH",
-    "사용자 PATH": "User PATH",
-    "시스템 PATH": "System PATH",
-    "기본 standalone 경로": "Default standalone location",
-    "npm 전역 launcher": "Global npm launcher",
-    ".local launcher": ".local launcher",
-    "사용자 local bin": "User local bin",
-    "사용자 지정 설치 경로": "Custom installation location",
-    "직접 선택한 CLI": "Manually selected CLI",
-    "직접 선택한 Codex CLI": "Manually selected Codex CLI",
-    "게시자 확인": "Publisher verified",
-    "이 앱에서 시작한 공식 설치": "Official installation started by this app",
-    "공급자 출처 미확인": "Publisher provenance unverified",
-    "게시자 확인 실패": "Publisher verification failed",
-    "Codex CLI 후보를 확인하는 중입니다.": "Checking Codex CLI candidates.",
-    "독립 실행 Codex CLI가 없습니다.": "The standalone Codex CLI is not installed.",
-    "Codex로 보이는 파일을 실행하거나 버전을 확인할 수 없습니다.": "A Codex-like file was found, but it could not be run or version-checked.",
-    "예전 npm Codex 설치가 있지만 필요한 Node.js가 없습니다.": "A legacy npm Codex installation exists, but its required Node.js runtime is missing.",
-    "예전 npm Codex 설치와 현재 Node.js가 호환되지 않습니다.": "The legacy npm Codex installation is incompatible with the current Node.js runtime.",
-    "설치된 Codex CLI가 로그인 또는 사용량 확인에 필요한 명령을 지원하지 않습니다.": "The installed Codex CLI does not support the required sign-in or usage commands.",
-    "사용 가능한 Codex CLI가 여러 개입니다. 사용할 CLI를 아래에서 직접 선택하세요.": "Multiple Codex CLIs are available. Select the one to use below.",
-    "Codex CLI 상태를 안전하게 판정하지 못했습니다.": "Codex CLI status could not be determined safely.",
-    "Codex CLI 확인 완료": "Codex CLI ready",
-    "로그인 확인 완료": "Sign-in confirmed",
-    "로그인 상태 확인 중": "Checking sign-in status",
-    "로그인이 필요합니다": "Sign-in required",
-    "Codex 로그인 상태를 확인하지 못했습니다.": "Codex sign-in status could not be checked.",
-    "Codex 설치가 오래 걸리고 있습니다. PowerShell 진행 상황을 확인하거나 취소할 수 있습니다.": "Codex installation is taking longer than expected. Check PowerShell progress or cancel the operation.",
-    "Codex 공식 설치 프로그램을 실행하고 있습니다.": "Running the official Codex installer.",
-    "Codex 설치 작업의 실행·취소 결과와 설치된 CLI를 검증하는 중입니다.": "Checking the Codex installation or cancellation result and validating the installed CLI.",
-    "로그인이 오래 걸리고 있습니다. 브라우저 인증을 완료하거나 작업을 취소할 수 있습니다.": "Sign-in is taking longer than expected. Complete browser authentication or cancel the operation.",
-    "Codex가 연 브라우저에서 로그인을 완료하세요. 계정과 MFA는 사용자가 직접 입력합니다.": "Complete sign-in in the browser opened by Codex. You enter the account and MFA details yourself.",
-    "로그인 작업의 실행·취소 결과와 같은 Codex CLI의 인증 상태를 확인하는 중입니다.": "Checking the sign-in or cancellation result and authentication state of the same Codex CLI.",
-    "로그인 명령이 끝났습니다. Codex 인증 상태를 다시 확인하는 중입니다.": "The sign-in command exited. Checking Codex authentication again.",
-    "Codex 설치를 완료하지 못했습니다.": "Codex installation could not be completed.",
-    "Codex 설치 프로세스는 비정상 종료했지만, 앱이 실행 가능한 Codex CLI를 별도로 확인했습니다.": "The Codex installer process exited abnormally, but the app separately verified a runnable Codex CLI.",
-    "이전 설치 작업의 추적이 끊겼습니다. 현재 CLI 상태를 다시 확인하세요.": "Tracking for the previous installation was lost. Check the current CLI status again.",
-    "이전 로그인 작업의 추적이 끊겼습니다. 현재 로그인 상태를 다시 확인하세요.": "Tracking for the previous sign-in was lost. Check the current sign-in status again.",
-    "앱은 선택된 Codex CLI에서 로그인 명령까지만 시작합니다. 브라우저의 계정 입력, MFA와 승인은 사용자가 직접 완료합니다.": "The app only starts the sign-in command using the selected Codex CLI. You complete account entry, MFA, and approval in the browser.",
-    "사용할 Codex CLI를 선택하세요. 전체 경로는 앱에 표시되지 않습니다.": "Select the Codex CLI to use. Full paths are not displayed in the app.",
-    "Codex CLI 후보 목록": "Codex CLI candidate list",
-    "Codex CLI 작업": "Codex CLI actions",
-    "사용할 Claude Code에 로그인하세요.": "Sign in to the Claude Code installation you want to use.",
-    "Codex CLI에 로그인하거나 Claude Code를 사용할 도구로 선택하세요.": "Sign in to Codex CLI or select Claude Code as the tool to use.",
-    "10분 동안 자동 확인했습니다. 작업은 종료하지 않았습니다. PowerShell을 확인하거나 상태를 다시 확인하세요.": "Automatic checks stopped after 10 minutes. The operation was not terminated. Check PowerShell or refresh the status.",
-    "Codex 작업 상태를 자동으로 확인하지 못했습니다. 상태를 다시 확인하세요.": "The Codex operation could not be checked automatically. Refresh the status.",
-    "Codex 설치를 시작하지 않았습니다.": "Codex installation was not started.",
-    "Codex 설치를 시작했습니다. 이 앱이 종료 결과와 설치된 CLI를 다시 확인합니다.": "Codex installation was started. The app will check the exit result and installed CLI.",
-    "Device code 로그인을 시작했습니다. 터미널의 안내에 따라 사용자가 직접 인증하세요.": "Device code sign-in was started. Follow the terminal instructions to authenticate yourself.",
-    "Codex 로그인을 시작했습니다. 브라우저의 계정 입력, MFA와 승인은 사용자가 직접 완료하세요.": "Codex sign-in was started. Complete account entry, MFA, and approval yourself in the browser.",
-    "Codex 설치 프로세스를 시작하지 못했습니다. 상태를 다시 확인하세요.": "The Codex installation process could not be started. Refresh the status.",
-    "Codex 로그인 프로세스를 시작하지 못했습니다. 상태를 다시 확인하세요.": "The Codex sign-in process could not be started. Refresh the status.",
-    "선택한 Codex CLI를 다시 검증하는 중입니다.": "Revalidating the selected Codex CLI.",
-    "Codex CLI 후보를 선택했습니다. 같은 CLI의 로그인 상태를 다시 확인했습니다.": "The Codex CLI candidate was selected and its sign-in status was checked again.",
-    "Codex CLI 후보를 선택하지 못했습니다. 상태를 다시 확인하세요.": "The Codex CLI candidate could not be selected. Refresh the status.",
-    "선택한 Codex CLI 파일을 앱 안에서 다시 검증하는 중입니다.": "Validating the selected Codex CLI file inside the app.",
-    "파일 선택 창을 닫고 현재 Codex 상태를 확인했습니다. 선택한 파일이 있으면 같은 경로로 검증했습니다.": "Closed the file picker and checked the current Codex status. If you selected a file, it was validated using that same path.",
-    "선택한 파일을 Codex CLI로 검증하지 못했습니다. 상태를 다시 확인하세요.": "The selected file could not be validated as Codex CLI. Refresh the status.",
-    "Codex 설치 취소를 요청하는 중입니다.": "Requesting cancellation of the Codex installation.",
-    "Codex 로그인 취소를 요청하는 중입니다.": "Requesting cancellation of Codex sign-in.",
-    "Codex 설치 취소를 요청했습니다.": "Codex installation cancellation was requested.",
-    "Codex 로그인 취소를 요청했습니다.": "Codex sign-in cancellation was requested.",
-    "Codex 작업을 취소하지 못했습니다. PowerShell과 현재 상태를 확인하세요.": "The Codex operation could not be cancelled. Check PowerShell and the current status.",
-    [`OpenAI Codex CLI 공식 설치 프로그램을 실행할까요?
-
-출처: https://chatgpt.com/codex/install.ps1
-인터넷에서 CLI를 내려받고 사용자 PATH를 변경할 수 있습니다.
-CLI는 이 앱에 포함되지 않으며 일반 사용자는 Node.js, npm 또는 Rust를 설치할 필요가 없습니다.
-실행 중에는 이 화면에서 취소를 요청할 수 있으며, 종료 확인 단계에 들어가면 취소할 수 없습니다.`]: `Run the official OpenAI Codex CLI installer?
-
-Source: https://chatgpt.com/codex/install.ps1
-The installer downloads the CLI from the internet and may update your user PATH.
-The CLI is not bundled with this app, and regular users do not need to install Node.js, npm, or Rust.
-You can request cancellation from this screen while it is running; cancellation is unavailable after final verification begins.`,
     "CLI 설치를 취소했습니다.": "CLI installation was cancelled.",
     "정상: 별도 서버 없이 로컬 세션 파일에서 모델·날짜별 토큰을 표시합니다.": "Ready: model and daily token totals come from local session files without a separate server.",
     "켜짐: 앱만 시작하며 사용량 CLI는 상주시켜 두지 않습니다.": "On: starts only the app; usage CLIs do not stay running.",
@@ -314,12 +204,6 @@ You can request cancellation from this screen while it is running; cancellation 
   };
 
   const RULES = [
-    [/^현재 PATH #(\d+)$/, "Current PATH #$1"],
-    [/^사용자 PATH #(\d+)$/, "User PATH #$1"],
-    [/^시스템 PATH #(\d+)$/, "System PATH #$1"],
-    [/^Codex CLI 후보 (\d+)$/, "Codex CLI candidate $1"],
-    [/^사용 가능한 Codex CLI (\d+)개가 충돌합니다\. 사용할 CLI를 아래에서 직접 선택하세요\.$/, "$1 Codex CLI candidates conflict. Select the CLI to use below."],
-    [/^추가 Codex 후보 (\d+)개는 우선순위가 낮아 선택하지 않았습니다\. 호환 가능한 다른 설치이거나 예전 npm 설치일 수 있으므로 원치 않으면 업데이트하거나 제거하세요\.$/, "$1 additional Codex CLI candidate(s) were not selected because they have lower priority. They may be another compatible installation or a legacy npm installation; update or remove them if unwanted."],
     [/^(\d+)% 남음$/, "$1% remaining"],
     [/^시간당 ([\d.]+)%p$/, "$1%p/hour"],
     [/^(\d+)분 전 갱신$/, "Updated $1m ago"],
@@ -398,19 +282,12 @@ You can request cancellation from this screen while it is running; cancellation 
     return readLanguage() === "en" ? "en-US" : "ko-KR";
   }
 
-  function translateUnit(value) {
-    return EN[value] || RULES.reduce((result, [pattern, replacement]) => (
-      result === value && pattern.test(value) ? value.replace(pattern, replacement) : result
-    ), value);
-  }
-
   function translateText(value) {
     const trimmed = value.trim();
     if (!trimmed) return value;
-    let translated = translateUnit(trimmed);
-    if (translated === trimmed && trimmed.includes(" · ")) {
-      translated = trimmed.split(" · ").map(translateUnit).join(" · ");
-    }
+    const translated = EN[trimmed] || RULES.reduce((result, [pattern, replacement]) => (
+      result === trimmed && pattern.test(trimmed) ? trimmed.replace(pattern, replacement) : result
+    ), trimmed);
     return value.replace(trimmed, translated);
   }
 

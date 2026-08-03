@@ -132,7 +132,7 @@ function staleProviders(snapshot, providers) {
   return new Set(providers.filter((provider) => {
     const state = snapshot[provider];
     const freshness = snapshot.capture[`${provider}FreshnessMs`];
-    return !state.connected || !Number.isFinite(state.ageMs) || state.ageMs > freshness;
+    return state.connected && Number.isFinite(state.ageMs) && state.ageMs > freshness;
   }));
 }
 
@@ -183,9 +183,6 @@ function render(snapshot) {
       staleText: "지연",
       captureState: snapshot.codex.status && snapshot.codex.status.capture
         ? snapshot.codex.status.capture.state
-        : null,
-      safeErrorCode: snapshot.codex.status
-        ? snapshot.codex.status.safe_error_code
         : null,
       freshnessMs: snapshot.capture.codexFreshnessMs,
     });

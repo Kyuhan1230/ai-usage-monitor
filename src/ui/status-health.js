@@ -20,12 +20,6 @@
     "session_exited",
   ]);
   const UPDATING_STATES = new Set(["capturing", "session_starting"]);
-  const SAFE_FAILURE_COPY = Object.freeze({
-    login_unconfirmed: "로그인 프로세스는 끝났지만 인증 완료를 확인하지 못했습니다.",
-    usage_capability_missing: "이 Codex CLI에서는 사용량 확인 명령을 사용할 수 없습니다.",
-    usage_capture_failed: "Codex 사용량을 확인하지 못했습니다.",
-    usage_capture_timeout: "Codex 사용량 확인 시간이 초과됐습니다.",
-  });
 
   function freshnessLimitMs(pollIntervalMs) {
     if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
@@ -38,17 +32,7 @@
     return Number.isFinite(ageMs) && ageMs <= freshnessLimitMs(pollIntervalMs);
   }
 
-  function stateText({
-    connected,
-    ageMs,
-    staleText,
-    captureState,
-    freshnessMs,
-    safeErrorCode,
-  }) {
-    if (!connected && Object.hasOwn(SAFE_FAILURE_COPY, safeErrorCode)) {
-      return SAFE_FAILURE_COPY[safeErrorCode];
-    }
+  function stateText({ connected, ageMs, staleText, captureState, freshnessMs }) {
     if (RETRYING_STATES.has(captureState)) {
       return "재시도";
     }

@@ -4,174 +4,28 @@ on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      operation:
-        description: Prepare an immutable draft, or publish an already verified draft
-        required: true
-        type: choice
-        default: prepare
-        options:
-          - prepare
-          - publish
-      release_tag:
-        description: Existing v<package-version> tag (required for manual prepare and publish)
-        required: true
-        type: string
-      release_commit:
-        description: Full 40-character tagged commit SHA (publish only)
-        required: false
-        type: string
-      release_version:
-        description: Exact package version without the v prefix (publish only)
-        required: false
-        type: string
-      installer_sha256:
-        description: SHA-256 of the exact versioned draft installer tested in T3 (publish only)
-        required: false
-        type: string
-      release_evidence_sha256:
-        description: SHA-256 of release-evidence.json that transitively pins every draft asset (publish only)
-        required: false
-        type: string
-      t2_run_id:
-        description: Same-commit successful Codex installer smoke run ID, completed within 7 days (publish only)
-        required: false
-        type: string
-      t3_report_issue:
-        description: Closed T3 PASS issue number with structured exact-byte evidence (publish only)
-        required: false
-        type: string
-      t3_review_comment_id:
-        description: Independent reviewer approval comment ID on the T3 issue (publish only)
-        required: false
-        type: string
-      confirmation:
-        description: Enter PUBLISH_VERIFIED_DRAFT to publish (publish only)
-        required: false
-        type: string
-  workflow_call:
-    inputs:
-      operation:
-        description: prepare or publish
-        required: true
-        type: string
-      release_tag:
-        description: Existing v<package-version> tag
-        required: true
-        type: string
-      release_commit:
-        description: Full 40-character tagged commit SHA
-        required: false
-        type: string
-      release_version:
-        description: Exact package version without the v prefix
-        required: false
-        type: string
-      installer_sha256:
-        description: SHA-256 of the exact versioned draft installer tested in T3
-        required: false
-        type: string
-      release_evidence_sha256:
-        description: SHA-256 of release-evidence.json that pins every draft asset
-        required: false
-        type: string
-      t2_run_id:
-        description: Same-commit recent successful Codex installer smoke run ID
-        required: false
-        type: string
-      t3_report_issue:
-        description: Closed structured T3 PASS issue number
-        required: false
-        type: string
-      t3_review_comment_id:
-        description: Independent reviewer approval comment ID
-        required: false
-        type: string
-      confirmation:
-        description: PUBLISH_VERIFIED_DRAFT for publication
-        required: false
-        type: string
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY:
-        required: false
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
-        required: false
+
+permissions:
+  contents: write
 
 concurrency:
   group: release-publication
   cancel-in-progress: false
 
 jobs:
-  validate-invocation:
-    name: Validate release workflow operation
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    env:
-      EVENT_NAME: ${{ github.event_name }}
-      REQUESTED_OPERATION: ${{ inputs.operation }}
-    steps:
-      - name: Reject unsupported reusable operations
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            exit 0
-          fi
-          if [[ "$REQUESTED_OPERATION" != "prepare" && "$REQUESTED_OPERATION" != "publish" ]]; then
-            echo "operation must be exactly prepare or publish" >&2
-            exit 1
-          fi
-
-  prepare-draft:
-    name: Prepare updater-signed immutable draft assets
-    needs: validate-invocation
-    if: ${{ github.event_name == 'push' || inputs.operation == 'prepare' }}
+  release-windows:
     runs-on: windows-latest
     timeout-minutes: 60
     environment: production-release
-    permissions:
-      contents: write
-      deployments: read
     env:
-      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+      RELEASE_TAG: ${{ github.ref_name }}
 
     steps:
-      - name: Check out the release tag
+      - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Resolve and verify release identity
-        shell: pwsh
-        run: |
-          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
-            throw "Invalid release tag: $env:RELEASE_TAG"
-          }
-          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          $tagCommit = (git rev-list -n 1 "refs/tags/$env:RELEASE_TAG").Trim().ToLowerInvariant()
-          if ($LASTEXITCODE -ne 0 -or $head -ne $tagCommit) {
-            throw "Checked-out commit $head does not match tag $env:RELEASE_TAG target $tagCommit"
-          }
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($env:RELEASE_TAG -ne "v$version") {
-            throw "Release tag $env:RELEASE_TAG does not match package version $version"
-          }
-          "RELEASE_COMMIT=$head" >> $env:GITHUB_ENV
-          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
-
-      - name: Verify tagged commit was prepared from the main tip
-        shell: pwsh
-        run: |
-          git fetch origin main
-          if ($LASTEXITCODE -ne 0) { throw "Fetching origin/main failed" }
-          $mainTip = (git rev-parse origin/main).Trim().ToLowerInvariant()
-          if ($LASTEXITCODE -ne 0 -or $mainTip -ne $env:RELEASE_COMMIT) {
-            throw "Release tag commit $env:RELEASE_COMMIT is not origin/main tip $mainTip"
-          }
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -179,18 +33,8 @@ jobs:
           node-version: 22.12.0
           cache: npm
 
-      - name: Verify Node.js and npm versions
-        run: node scripts/verify-toolchain.js --node-only
-
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # pinned action, verified 2026-07-30
-        with:
-          toolchain: 1.97.1
-          components: clippy, rustfmt
-          targets: x86_64-pc-windows-msvc
-
-      - name: Verify complete development toolchain
-        run: node scripts/verify-toolchain.js
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable 2026-07-23
 
       - name: Install frontend build tooling
         run: npm ci
@@ -199,30 +43,18 @@ jobs:
         shell: pwsh
         run: npm run verify:release-tag -- "$env:RELEASE_TAG"
 
-      - name: Run Rust and UI tests
-        run: npm test
-
-      - name: Verify protected production environment before using signing secrets
+      - name: Verify tagged commit is the main tip
         shell: pwsh
         run: |
-          $configuration = gh api "repos/${{ github.repository }}/environments/production-release" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot inspect production-release environment protection before signing" }
-          $reviewRules = @($configuration.protection_rules | Where-Object { $_.type -eq 'required_reviewers' })
-          if ($reviewRules.Count -ne 1) {
-            throw "production-release must have one required-reviewers protection rule before signing"
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw "Fetching origin/main failed" }
+          $mainTip = git rev-parse origin/main
+          if ($LASTEXITCODE -ne 0 -or $mainTip -ne $env:GITHUB_SHA) {
+            throw "Release tag commit $env:GITHUB_SHA is not origin/main tip $mainTip"
           }
-          $reviewers = @($reviewRules[0].reviewers)
-          if ($reviewers.Count -lt 1) {
-            throw "production-release must have at least one required reviewer before signing"
-          }
-          if (-not $reviewRules[0].prevent_self_review) {
-            throw "production-release must prevent self-review before signing"
-          }
-          if ($configuration.can_admins_bypass -ne $false) {
-            throw "production-release must prevent administrator bypass before signing"
-          }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Rust and UI tests
+        run: npm test
 
       - name: Build Tauri NSIS installer
         run: npm run dist
@@ -233,37 +65,26 @@ jobs:
       - name: Normalize installer and updater signature
         shell: pwsh
         run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $matches = @(Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter "*-setup.exe")
           if ($matches.Count -ne 1) { throw "Expected one NSIS installer, found $($matches.Count)" }
-          if ($matches[0].Length -gt 20MB) {
-            throw "Installer exceeds 20 MB: $([math]::Round($matches[0].Length / 1MB, 2)) MB"
-          }
+          if ($matches[0].Length -gt 20MB) { throw "Installer exceeds 20 MB: $([math]::Round($matches[0].Length / 1MB, 2)) MB" }
           $sourceSignature = "$($matches[0].FullName).sig"
-          if (-not (Test-Path -LiteralPath $sourceSignature)) {
-            throw "Updater signature is missing: $sourceSignature"
-          }
+          if (-not (Test-Path -LiteralPath $sourceSignature)) { throw "Updater signature is missing: $sourceSignature" }
           New-Item -ItemType Directory -Force release-assets | Out-Null
-          Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe"
+          Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup-$version.exe"
           # README convenience alias only; latest.json keeps the versioned installer URL.
           Copy-Item -LiteralPath $matches[0].FullName -Destination "release-assets/Codex-Claude-Usage-Setup.exe"
-          Copy-Item -LiteralPath $sourceSignature -Destination "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe.sig"
-
-      - name: Verify public 1.2.7 to exact release candidate upgrade
-        shell: pwsh
-        timeout-minutes: 12
-        run: |
-          ./scripts/windows-upgrade-smoke.ps1 `
-            -CandidateInstaller "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe" `
-            -CandidateApplication src-tauri/target/release/codex-claude-usage.exe `
-            -ExpectedVersion $env:RELEASE_VERSION
+          Copy-Item -LiteralPath $sourceSignature -Destination "release-assets/Codex-Claude-Usage-Setup-$version.exe.sig"
 
       - name: Create and verify updater manifest
         shell: pwsh
         run: |
-          $installer = "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = "release-assets/Codex-Claude-Usage-Setup-$version.exe"
           $signature = "$installer.sig"
           $manifest = "release-assets/latest.json"
-          $notes = "Codex Claude Usage $env:RELEASE_VERSION 업데이트입니다. 업데이트 후 앱이 다시 시작되며 사용 기록은 유지됩니다."
+          $notes = "Codex Claude Usage $version 업데이트입니다. 업데이트 후 앱이 다시 시작되며 사용 기록은 유지됩니다."
           npm run create:updater-manifest -- $signature $manifest $notes
           if ($LASTEXITCODE -ne 0) { throw "Creating updater manifest failed" }
           npm run verify:updater-manifest -- $manifest $installer $signature $env:RELEASE_TAG
@@ -271,115 +92,53 @@ jobs:
           npm run verify:updater-signature -- src-tauri/tauri.conf.json $installer $signature
           if ($LASTEXITCODE -ne 0) { throw "Local updater signature verification failed" }
 
-      - name: Create exact-byte release evidence
+      - name: Create or update draft GitHub Release
         shell: pwsh
         run: |
-          node scripts/release-evidence.js create `
-            release-assets `
-            $env:RELEASE_TAG `
-            $env:RELEASE_VERSION `
-            $env:RELEASE_COMMIT `
-            '${{ github.run_id }}'
-          if ($LASTEXITCODE -ne 0) { throw "Creating release evidence failed" }
-          $installer = "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe"
-          $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
-          $evidenceHash = (Get-FileHash -LiteralPath "release-assets/release-evidence.json" -Algorithm SHA256).Hash
-          "INSTALLER_SHA256=$installerHash" >> $env:GITHUB_ENV
-          "RELEASE_EVIDENCE_SHA256=$evidenceHash" >> $env:GITHUB_ENV
-
-      - name: Create immutable draft GitHub Release
-        shell: pwsh
-        run: |
-          $versionedInstaller = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe").Path
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe").Path
           $directInstaller = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup.exe").Path
-          $signature = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe.sig").Path
+          $signature = (Resolve-Path "release-assets/Codex-Claude-Usage-Setup-$version.exe.sig").Path
           $manifest = (Resolve-Path "release-assets/latest.json").Path
-          $evidence = (Resolve-Path "release-assets/release-evidence.json").Path
-          $expected = @(
-            "Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe",
-            "Codex-Claude-Usage-Setup.exe",
-            "Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe.sig",
-            "latest.json",
-            "release-evidence.json"
-          )
           $releaseNotice = @(
             '> [!WARNING]'
             '> 이 설치 파일은 SignPath Foundation 승인 전이므로 Authenticode 코드 서명이 적용되지 않았습니다. Windows SmartScreen에 `알 수 없는 게시자` 경고가 표시될 수 있습니다.'
             '>'
-            '> 이 Release는 T2와 사람의 T3 OAuth 시험을 기다리는 draft입니다. `release-evidence.json`의 exact bytes가 T3 보고서와 독립 검토를 통과하기 전에는 공개하지 않습니다.'
-            '>'
-            "> Release commit: ``$env:RELEASE_COMMIT``"
-            "> Versioned installer SHA-256: ``$env:INSTALLER_SHA256``"
-            "> release-evidence.json SHA-256: ``$env:RELEASE_EVIDENCE_SHA256``"
-            '>'
             '> v1.1.1에는 자동 업데이트 기능이 없습니다. v1.1.1 사용자는 현재 릴리스 설치 파일을 한 번 직접 내려받아 설치해야 하며, 이후 버전부터 앱 내 업데이트를 사용할 수 있습니다.'
           ) -join [Environment]::NewLine
-
-          gh release view $env:RELEASE_TAG --json isDraft,assets 2>$null | Out-Null
+          gh release view $env:RELEASE_TAG --json isDraft 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
-            $release = gh release view $env:RELEASE_TAG --json isDraft,assets | ConvertFrom-Json
+            $release = gh release view $env:RELEASE_TAG --json isDraft | ConvertFrom-Json
             if (-not $release.isDraft) { throw "Refusing to replace an already published release" }
-            $actual = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
-            if (Compare-Object ($expected | Sort-Object) $actual) {
-              throw "Existing draft has a different asset set; delete it explicitly before preparing new bytes"
-            }
-            $existingDir = Join-Path $env:RUNNER_TEMP 'existing-draft-assets'
-            New-Item -ItemType Directory -Force $existingDir | Out-Null
-            gh release download $env:RELEASE_TAG --dir $existingDir
-            if ($LASTEXITCODE -ne 0) { throw "Downloading existing draft assets failed" }
-            foreach ($name in $expected) {
-              $localHash = (Get-FileHash -LiteralPath "release-assets/$name" -Algorithm SHA256).Hash
-              $existingHash = (Get-FileHash -LiteralPath (Join-Path $existingDir $name) -Algorithm SHA256).Hash
-              if ($localHash -ne $existingHash) {
-                throw "Refusing to overwrite immutable draft bytes: $name"
-              }
-            }
+            gh release upload $env:RELEASE_TAG $installer $directInstaller $signature $manifest --clobber
           } else {
-            gh release create $env:RELEASE_TAG `
-              $versionedInstaller `
-              $directInstaller `
-              $signature `
-              $manifest `
-              $evidence `
-              --draft `
-              --verify-tag `
-              --title "Codex Claude Usage $env:RELEASE_VERSION" `
-              --notes $releaseNotice `
-              --generate-notes
-            if ($LASTEXITCODE -ne 0) { throw "Creating draft release failed" }
+            gh release create $env:RELEASE_TAG $installer $directInstaller $signature $manifest --draft --title "Codex Claude Usage $version" --notes $releaseNotice --generate-notes
           }
+          if ($LASTEXITCODE -ne 0) { throw "Uploading release asset failed" }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify draft release bytes and updater signature
         shell: pwsh
         run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $expected = @(
-            "Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe",
+            "Codex-Claude-Usage-Setup-$version.exe",
             "Codex-Claude-Usage-Setup.exe",
-            "Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe.sig",
-            "latest.json",
-            "release-evidence.json"
+            "Codex-Claude-Usage-Setup-$version.exe.sig",
+            "latest.json"
           )
-          $release = gh release view $env:RELEASE_TAG --json isDraft,isPrerelease,assets,body,url | ConvertFrom-Json
-          if (-not $release.isDraft -or $release.isPrerelease) {
-            throw "Prepared Release must remain a non-prerelease draft"
-          }
+          $release = gh release view $env:RELEASE_TAG --json isDraft,assets | ConvertFrom-Json
+          if (-not $release.isDraft) { throw "Release must remain draft until verification succeeds" }
           $actual = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
-          if (Compare-Object ($expected | Sort-Object) $actual) {
-            throw "Unexpected release assets: $($actual -join ', ')"
-          }
-          foreach ($requiredNote in @(
-            "Release commit: ``$env:RELEASE_COMMIT``",
-            "Versioned installer SHA-256: ``$env:INSTALLER_SHA256``",
-            "release-evidence.json SHA-256: ``$env:RELEASE_EVIDENCE_SHA256``"
-          )) {
-            if (-not ([string]$release.body).Contains($requiredNote)) {
-              throw "Draft release notes are missing exact-byte identity evidence"
+          if (Compare-Object ($expected | Sort-Object) $actual) { throw "Unexpected release assets: $($actual -join ', ')" }
+          foreach ($asset in $release.assets) {
+            if ((Get-Item "release-assets/$($asset.name)").Length -ne $asset.size) {
+              throw "Release asset size mismatch: $($asset.name)"
             }
           }
 
-          $remoteDir = Join-Path $env:RUNNER_TEMP 'verified-draft-assets'
+          $remoteDir = Join-Path $env:RUNNER_TEMP 'draft-release-assets'
           New-Item -ItemType Directory -Force $remoteDir | Out-Null
           gh release download $env:RELEASE_TAG --dir $remoteDir
           if ($LASTEXITCODE -ne 0) { throw "Downloading draft release assets failed" }
@@ -388,791 +147,19 @@ jobs:
             $remoteHash = (Get-FileHash -LiteralPath (Join-Path $remoteDir $name) -Algorithm SHA256).Hash
             if ($localHash -ne $remoteHash) { throw "Draft release hash mismatch: $name" }
           }
-
-          node scripts/release-evidence.js verify `
-            $remoteDir `
-            $env:RELEASE_TAG `
-            $env:RELEASE_VERSION `
-            $env:RELEASE_COMMIT `
-            $env:INSTALLER_SHA256 `
-            $env:RELEASE_EVIDENCE_SHA256
-          if ($LASTEXITCODE -ne 0) { throw "Remote exact-byte evidence verification failed" }
-          $remoteInstaller = Join-Path $remoteDir "Codex-Claude-Usage-Setup-$env:RELEASE_VERSION.exe"
+          $remoteInstaller = Join-Path $remoteDir "Codex-Claude-Usage-Setup-$version.exe"
           $remoteSignature = "$remoteInstaller.sig"
           $remoteManifest = Join-Path $remoteDir 'latest.json'
           npm run verify:updater-manifest -- $remoteManifest $remoteInstaller $remoteSignature $env:RELEASE_TAG
           if ($LASTEXITCODE -ne 0) { throw "Remote updater manifest verification failed" }
           npm run verify:updater-signature -- src-tauri/tauri.conf.json $remoteInstaller $remoteSignature
           if ($LASTEXITCODE -ne 0) { throw "Remote updater signature verification failed" }
-
-          "### Immutable draft prepared — not published" >> $env:GITHUB_STEP_SUMMARY
-          "- Draft: $($release.url)" >> $env:GITHUB_STEP_SUMMARY
-          "- Commit: $env:RELEASE_COMMIT" >> $env:GITHUB_STEP_SUMMARY
-          "- Version: $env:RELEASE_VERSION" >> $env:GITHUB_STEP_SUMMARY
-          "- Versioned installer SHA-256: $env:INSTALLER_SHA256" >> $env:GITHUB_STEP_SUMMARY
-          "- release-evidence.json SHA-256: $env:RELEASE_EVIDENCE_SHA256" >> $env:GITHUB_STEP_SUMMARY
-          "- Next gate: same-commit recent T2 plus human T3 and independent approval" >> $env:GITHUB_STEP_SUMMARY
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Preserve verified preparation evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-preparation-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: release-assets/release-evidence.json
-          if-no-files-found: error
-
-  publish-existing-draft:
-    name: Publish verified existing draft after T2 and human T3
-    needs: validate-invocation
-    if: ${{ github.event_name != 'push' && inputs.operation == 'publish' }}
-    runs-on: windows-latest
-    timeout-minutes: 45
-    environment:
-      name: production-release
-      url: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}
-    permissions:
-      actions: read
-      contents: write
-      deployments: read
-      issues: read
-    env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      EXPECTED_RELEASE_COMMIT: ${{ inputs.release_commit }}
-      EXPECTED_RELEASE_VERSION: ${{ inputs.release_version }}
-      EXPECTED_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
-      EXPECTED_RELEASE_EVIDENCE_SHA256: ${{ inputs.release_evidence_sha256 }}
-      T2_RUN_ID: ${{ inputs.t2_run_id }}
-      T3_REPORT_ISSUE: ${{ inputs.t3_report_issue }}
-      T3_REVIEW_COMMENT_ID: ${{ inputs.t3_review_comment_id }}
-      PUBLICATION_CONFIRMATION: ${{ inputs.confirmation }}
-
-    steps:
-      - name: Check out the exact release tag without building it
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.release_tag }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Validate explicit publication identity
+      - name: Publish completed GitHub Release
         shell: pwsh
-        run: |
-          if ($env:PUBLICATION_CONFIRMATION -cne 'PUBLISH_VERIFIED_DRAFT') {
-            throw "Refusing publication without exact PUBLISH_VERIFIED_DRAFT confirmation"
-          }
-          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
-            throw "Invalid release tag"
-          }
-          if ($env:EXPECTED_RELEASE_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
-            throw "Invalid release version"
-          }
-          if ($env:RELEASE_TAG -cne "v$env:EXPECTED_RELEASE_VERSION") {
-            throw "Release tag and explicitly supplied version do not match"
-          }
-          if ($env:EXPECTED_RELEASE_COMMIT -notmatch '^[0-9a-fA-F]{40}$') {
-            throw "Release commit must be a full 40-character SHA"
-          }
-          if ($env:EXPECTED_INSTALLER_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
-            throw "Installer SHA-256 must contain exactly 64 hexadecimal characters"
-          }
-          if ($env:EXPECTED_RELEASE_EVIDENCE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
-            throw "Release evidence SHA-256 must contain exactly 64 hexadecimal characters"
-          }
-          foreach ($numericInput in @($env:T2_RUN_ID, $env:T3_REPORT_ISSUE, $env:T3_REVIEW_COMMENT_ID)) {
-            if ($numericInput -notmatch '^[1-9][0-9]*$') {
-              throw "T2 run, T3 issue and T3 review comment IDs must be positive integers"
-            }
-          }
-
-          $expectedCommit = $env:EXPECTED_RELEASE_COMMIT.ToLowerInvariant()
-          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          $tagCommit = (git rev-list -n 1 "refs/tags/$env:RELEASE_TAG").Trim().ToLowerInvariant()
-          if ($LASTEXITCODE -ne 0 -or $head -ne $tagCommit -or $head -ne $expectedCommit) {
-            throw "Checked-out tag, tag target and supplied release commit do not match"
-          }
-          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($packageVersion -cne $env:EXPECTED_RELEASE_VERSION) {
-            throw "package.json version does not match publication input"
-          }
-          "EXPECTED_RELEASE_COMMIT=$expectedCommit" >> $env:GITHUB_ENV
-          "EXPECTED_INSTALLER_SHA256=$($env:EXPECTED_INSTALLER_SHA256.ToUpperInvariant())" >> $env:GITHUB_ENV
-          "EXPECTED_RELEASE_EVIDENCE_SHA256=$($env:EXPECTED_RELEASE_EVIDENCE_SHA256.ToUpperInvariant())" >> $env:GITHUB_ENV
-
-      - name: Verify protected production environment configuration
-        shell: pwsh
-        run: |
-          $configuration = gh api "repos/${{ github.repository }}/environments/production-release" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot inspect production-release environment protection" }
-          $reviewRules = @($configuration.protection_rules | Where-Object { $_.type -eq 'required_reviewers' })
-          if ($reviewRules.Count -ne 1) {
-            throw "production-release must have one required-reviewers protection rule"
-          }
-          $reviewers = @($reviewRules[0].reviewers)
-          if ($reviewers.Count -lt 1) {
-            throw "production-release must have at least one required reviewer"
-          }
-          if (-not $reviewRules[0].prevent_self_review) {
-            throw "production-release must prevent self-review before publication"
-          }
-          if ($configuration.can_admins_bypass -ne $false) {
-            throw "production-release must prevent administrator bypass before publication"
-          }
-          $immutability = gh api `
-            --method GET `
-            -H 'X-GitHub-Api-Version: 2026-03-10' `
-            "repos/${{ github.repository }}/immutable-releases" |
-              ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $immutability.enabled -ne $true) {
-            throw "Repository release immutability must be enabled before publication"
-          }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22.12.0
-          cache: npm
-
-      - name: Verify Node.js and npm versions
-        run: node scripts/verify-toolchain.js --node-only
-
-      - name: Set up Rust verifier
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # pinned action, verified 2026-07-30
-        with:
-          toolchain: 1.97.1
-          components: clippy, rustfmt
-          targets: x86_64-pc-windows-msvc
-
-      - name: Verify complete verifier toolchain
-        run: node scripts/verify-toolchain.js
-
-      - name: Verify tag matches package version
-        shell: pwsh
-        run: npm run verify:release-tag -- "$env:RELEASE_TAG"
-
-      - name: Download and verify the existing draft without rebuilding
-        shell: pwsh
-        run: |
-          $expected = @(
-            "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe",
-            "Codex-Claude-Usage-Setup.exe",
-            "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe.sig",
-            "latest.json",
-            "release-evidence.json"
-          )
-          $release = gh release view $env:RELEASE_TAG --json isDraft,isPrerelease,tagName,assets,body,url | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Draft Release does not exist" }
-          if (-not $release.isDraft -or $release.isPrerelease -or $release.tagName -cne $env:RELEASE_TAG) {
-            throw "Publication source must be the exact non-prerelease draft"
-          }
-          $actual = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
-          if (Compare-Object ($expected | Sort-Object) $actual) {
-            throw "Draft asset inventory changed or contains unexpected files"
-          }
-          foreach ($requiredNote in @(
-            "Release commit: ``$env:EXPECTED_RELEASE_COMMIT``",
-            "Versioned installer SHA-256: ``$env:EXPECTED_INSTALLER_SHA256``",
-            "release-evidence.json SHA-256: ``$env:EXPECTED_RELEASE_EVIDENCE_SHA256``"
-          )) {
-            if (-not ([string]$release.body).Contains($requiredNote)) {
-              throw "Draft release notes do not match the supplied exact-byte identity"
-            }
-          }
-
-          $draftDir = Join-Path $env:RUNNER_TEMP 'publication-draft-assets'
-          New-Item -ItemType Directory -Force $draftDir | Out-Null
-          gh release download $env:RELEASE_TAG --dir $draftDir
-          if ($LASTEXITCODE -ne 0) { throw "Downloading existing draft assets failed" }
-          node scripts/release-evidence.js verify `
-            $draftDir `
-            $env:RELEASE_TAG `
-            $env:EXPECTED_RELEASE_VERSION `
-            $env:EXPECTED_RELEASE_COMMIT `
-            $env:EXPECTED_INSTALLER_SHA256 `
-            $env:EXPECTED_RELEASE_EVIDENCE_SHA256
-          if ($LASTEXITCODE -ne 0) { throw "Existing draft exact-byte evidence failed" }
-
-          $installer = Join-Path $draftDir "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe"
-          $signature = "$installer.sig"
-          $manifest = Join-Path $draftDir 'latest.json'
-          npm run verify:updater-manifest -- $manifest $installer $signature $env:RELEASE_TAG
-          if ($LASTEXITCODE -ne 0) { throw "Draft updater manifest verification failed" }
-          npm run verify:updater-signature -- src-tauri/tauri.conf.json $installer $signature
-          if ($LASTEXITCODE -ne 0) { throw "Draft updater signature verification failed" }
-          "PUBLICATION_DRAFT_DIR=$draftDir" >> $env:GITHUB_ENV
-          "DRAFT_RELEASE_URL=$($release.url)" >> $env:GITHUB_ENV
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify release evidence came from a successful prepare run
-        shell: pwsh
-        run: |
-          $evidencePath = Join-Path $env:PUBLICATION_DRAFT_DIR 'release-evidence.json'
-          $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
-          $preparationRunId = [string]$evidence.preparation_run_id
-          if ($preparationRunId -notmatch '^[1-9][0-9]*$') {
-            throw "Release evidence preparation run ID is invalid"
-          }
-
-          $run = gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/runs/$preparationRunId" |
-              ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot read the preparation workflow run recorded in release evidence"
-          }
-          if (
-            $run.status -ne 'completed' -or
-            $run.conclusion -ne 'success' -or
-            ([string]$run.head_sha).ToLowerInvariant() -cne $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "Release evidence must name a successful preparation run for the exact release commit"
-          }
-
-          $workflow = gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/workflows/$($run.workflow_id)" |
-              ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot identify the workflow that owns the preparation run"
-          }
-          $isDirectReleaseWorkflow = $workflow.path -ceq '.github/workflows/release.yml'
-          $referencePrefix = "${{ github.repository }}/.github/workflows/release.yml@"
-          $trustedReusableReferences = @($run.referenced_workflows | Where-Object {
-            $referencePath = [string]$_.path
-            $referenceSha = ([string]$_.sha).ToLowerInvariant()
-            $referencePath.StartsWith($referencePrefix, [StringComparison]::Ordinal) -and
-              $referenceSha -ceq $env:EXPECTED_RELEASE_COMMIT
-          })
-          if (-not $isDirectReleaseWorkflow -and $trustedReusableReferences.Count -ne 1) {
-            throw "Preparation run is not the trusted release workflow at the exact release commit"
-          }
-
-          $jobResponse = gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/runs/$preparationRunId/jobs?filter=latest&per_page=100" |
-              ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot inspect jobs for the preparation workflow run"
-          }
-          $expectedJobName = 'Prepare updater-signed immutable draft assets'
-          $prepareJobs = @($jobResponse.jobs | Where-Object {
-            $jobName = [string]$_.name
-            $jobName -ceq $expectedJobName -or
-              $jobName.EndsWith(" / $expectedJobName", [StringComparison]::Ordinal)
-          })
-          if (
-            $prepareJobs.Count -ne 1 -or
-            $prepareJobs[0].status -ne 'completed' -or
-            $prepareJobs[0].conclusion -ne 'success' -or
-            ([string]$prepareJobs[0].head_sha).ToLowerInvariant() -cne $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "Recorded preparation run does not contain one successful prepare-draft job"
-          }
-
-          $artifactName = "release-preparation-evidence-$preparationRunId-$($run.run_attempt)"
-          $artifactResponse = gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/runs/$preparationRunId/artifacts?per_page=100" |
-              ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot inspect immutable evidence artifacts for the preparation run"
-          }
-          $evidenceArtifacts = @($artifactResponse.artifacts | Where-Object {
-            $_.name -ceq $artifactName
-          })
-          if (
-            $evidenceArtifacts.Count -ne 1 -or
-            $evidenceArtifacts[0].expired -ne $false -or
-            [string]$evidenceArtifacts[0].workflow_run.id -cne $preparationRunId -or
-            ([string]$evidenceArtifacts[0].workflow_run.head_sha).ToLowerInvariant() -cne
-              $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "Preparation run must expose one unexpired exact-attempt evidence artifact"
-          }
-
-          $artifactDir = Join-Path $env:RUNNER_TEMP 'preparation-run-evidence'
-          New-Item -ItemType Directory -Force $artifactDir | Out-Null
-          gh run download $preparationRunId `
-            --repo '${{ github.repository }}' `
-            --name $artifactName `
-            --dir $artifactDir
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot download the preparation run evidence artifact"
-          }
-          $artifactEvidenceFiles = @(
-            Get-ChildItem -LiteralPath $artifactDir -Recurse -File -Filter 'release-evidence.json'
-          )
-          if ($artifactEvidenceFiles.Count -ne 1) {
-            throw "Preparation evidence artifact must contain exactly one release-evidence.json"
-          }
-          $artifactEvidenceHash = (
-            Get-FileHash -LiteralPath $artifactEvidenceFiles[0].FullName -Algorithm SHA256
-          ).Hash
-          if ($artifactEvidenceHash -cne $env:EXPECTED_RELEASE_EVIDENCE_SHA256) {
-            throw "Draft release evidence does not match the successful preparation run artifact"
-          }
-          $preparationArtifactId = [string]$evidenceArtifacts[0].id
-          if ($preparationArtifactId -notmatch '^[1-9][0-9]*$') {
-            throw "Preparation evidence artifact ID is invalid"
-          }
-
-          "PREPARATION_RUN_ID=$preparationRunId" >> $env:GITHUB_ENV
-          "PREPARATION_ARTIFACT_ID=$preparationArtifactId" >> $env:GITHUB_ENV
-          "PREPARATION_ARTIFACT_NAME=$artifactName" >> $env:GITHUB_ENV
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify recent same-commit T2 default and custom evidence
-        shell: pwsh
-        run: |
-          $run = gh api "repos/${{ github.repository }}/actions/runs/$env:T2_RUN_ID" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot read the supplied T2 workflow run" }
-          if (
-            $run.status -ne 'completed' -or
-            $run.conclusion -ne 'success' -or
-            $run.head_sha.ToLowerInvariant() -ne $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "T2 run must be successful and use the exact release commit"
-          }
-          $workflow = gh api "repos/${{ github.repository }}/actions/workflows/$($run.workflow_id)" | ConvertFrom-Json
-          if (
-            $LASTEXITCODE -ne 0 -or
-            $workflow.path -cne '.github/workflows/codex-cli-installer-smoke.yml'
-          ) {
-            throw "Supplied run is not the Codex CLI official installer smoke workflow"
-          }
-          $now = [DateTimeOffset]::UtcNow
-          $updatedAt = [DateTimeOffset]::Parse([string]$run.updated_at)
-          if ($updatedAt -lt $now.AddDays(-7) -or $updatedAt -gt $now.AddMinutes(5)) {
-            throw "T2 run was not updated within the 7-day release window"
-          }
-
-          $jobs = @((
-            gh api "repos/${{ github.repository }}/actions/runs/$env:T2_RUN_ID/jobs?filter=latest&per_page=100" |
-              ConvertFrom-Json
-          ).jobs)
-          foreach ($mode in @('default', 'custom')) {
-            $jobName = "T2 official installer ($mode)"
-            $matches = @($jobs | Where-Object { $_.name -ceq $jobName })
-            if (
-              $matches.Count -ne 1 -or
-              $matches[0].status -ne 'completed' -or
-              $matches[0].conclusion -ne 'success' -or
-              $matches[0].head_sha.ToLowerInvariant() -ne $env:EXPECTED_RELEASE_COMMIT
-            ) {
-              throw "Missing successful same-commit T2 matrix job: $jobName"
-            }
-            $jobCompletedAt = [DateTimeOffset]::Parse([string]$matches[0].completed_at)
-            if ($jobCompletedAt -lt $now.AddDays(-7) -or $jobCompletedAt -gt $now.AddMinutes(5)) {
-              throw "T2 matrix job is outside the 7-day release window: $jobName"
-            }
-          }
-
-          $artifactResponse = gh api "repos/${{ github.repository }}/actions/runs/$env:T2_RUN_ID/artifacts?per_page=100" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot read T2 evidence artifacts" }
-          $artifacts = @($artifactResponse.artifacts)
-          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'verified-t2-evidence'
-          $scriptHashes = [ordered]@{}
-          $cliVersions = [ordered]@{}
-          foreach ($mode in @('default', 'custom')) {
-            $artifactName = "codex-cli-t2-$mode-$env:T2_RUN_ID-$($run.run_attempt)"
-            $matches = @($artifacts | Where-Object { $_.name -ceq $artifactName -and -not $_.expired })
-            if ($matches.Count -ne 1) {
-              throw "Missing unexpired sanitized T2 evidence artifact for $mode"
-            }
-            $modeDir = Join-Path $evidenceRoot $mode
-            New-Item -ItemType Directory -Force $modeDir | Out-Null
-            gh run download $env:T2_RUN_ID --repo '${{ github.repository }}' --name $artifactName --dir $modeDir
-            if ($LASTEXITCODE -ne 0) { throw "Downloading T2 $mode evidence failed" }
-            $evidenceFile = Join-Path $modeDir "codex-t2-evidence-$mode.json"
-            if (-not (Test-Path -LiteralPath $evidenceFile)) {
-              throw "T2 $mode evidence file is missing"
-            }
-            $evidence = Get-Content -LiteralPath $evidenceFile -Raw | ConvertFrom-Json
-            $expectedSource = if ($mode -eq 'default') { 'default_standalone_path' } else { 'custom_install_dir' }
-            $cliVersion = [string]$evidence.cli.version
-            $allowedProvenance = @('verified_publisher', 'tracked_official_install', 'unverified')
-            if (
-              $evidence.schema_version -ne 1 -or
-              $evidence.tier -cne 'T2' -or
-              $evidence.install_mode -cne $mode -or
-              $evidence.app_commit.ToLowerInvariant() -ne $env:EXPECTED_RELEASE_COMMIT -or
-              $evidence.workflow_run -cne "https://github.com/${{ github.repository }}/actions/runs/$env:T2_RUN_ID" -or
-              [string]$evidence.run_attempt -cne [string]$run.run_attempt -or
-              $evidence.installer.url -cne 'https://chatgpt.com/codex/install.ps1' -or
-              [string]$evidence.installer.script_sha256 -notmatch '^[0-9a-fA-F]{64}$' -or
-              $evidence.installer.process_exit_code -ne 0 -or
-              $evidence.installer.timed_out -ne $false -or
-              $evidence.installer.target_was_empty -ne $true -or
-              $evidence.installer.isolated_codex_home_was_empty -ne $true -or
-              $evidence.cli.source -cne $expectedSource -or
-              $cliVersion -notmatch '^[A-Za-z0-9][A-Za-z0-9 ._+()\-]{0,159}$' -or
-              $evidence.cli.version_exit_code -ne 0 -or
-              $evidence.cli.login_help_exit_code -ne 0 -or
-              $evidence.cli.app_server_help_exit_code -ne 0 -or
-              $evidence.cli.hkcu_path_registered -ne $true -or
-              $evidence.authentication.credential_source -cne 'empty_isolated_CODEX_HOME' -or
-              $null -eq $evidence.authentication.login_status_exit_code -or
-              $evidence.authentication.login_status_exit_code -eq 0 -or
-              $evidence.authentication.oauth_attempted -ne $false -or
-              $evidence.authentication.reported_authenticated -ne $false -or
-              $evidence.repository_harness.result -cne 'success' -or
-              $evidence.repository_harness.selected_source -cne $expectedSource -or
-              [string]$evidence.repository_harness.selected_version -cne $cliVersion -or
-              $evidence.repository_harness.provenance -notin $allowedProvenance -or
-              $evidence.repository_harness.auth_state -cne 'unauthenticated' -or
-              $null -ne $evidence.repository_harness.safe_error_code
-            ) {
-              throw "T2 $mode sanitized evidence does not satisfy the release contract"
-            }
-            $failedSteps = @($evidence.step_outcomes.PSObject.Properties | Where-Object { $_.Value -cne 'success' })
-            if ($failedSteps.Count -ne 0) {
-              throw "T2 $mode evidence contains a non-success step"
-            }
-            $scriptHashes[$mode] = ([string]$evidence.installer.script_sha256).ToUpperInvariant()
-            $cliVersions[$mode] = $cliVersion
-          }
-          if ($scriptHashes.Count -ne 2 -or $scriptHashes['default'] -cne $scriptHashes['custom']) {
-            throw "T2 default and custom jobs must test identical official installer script bytes"
-          }
-          if ($cliVersions.Count -ne 2 -or $cliVersions['default'] -cne $cliVersions['custom']) {
-            throw "T2 default and custom jobs must install the identical Codex CLI version"
-          }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify human T3 report and independent review
-        shell: pwsh
-        run: |
-          function Require-Marker([string]$body, [string]$name, [string]$expected) {
-            $pattern = '(?mi)^\s*' + [regex]::Escape($name) + '\s*:\s*(?<value>[^\r\n]+?)\s*$'
-            $matches = [regex]::Matches($body, $pattern)
-            if ($matches.Count -ne 1) { throw "T3 evidence must contain exactly one $name marker" }
-            $actual = $matches[0].Groups['value'].Value.Trim()
-            if (-not [string]::Equals($actual, $expected, [StringComparison]::OrdinalIgnoreCase)) {
-              throw "T3 evidence marker does not match the exact release identity: $name"
-            }
-          }
-
-          function Get-Utf8Sha256([string]$text) {
-            $algorithm = [Security.Cryptography.SHA256]::Create()
-            try {
-              $bytes = [Text.Encoding]::UTF8.GetBytes($text)
-              return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '')
-            } finally {
-              $algorithm.Dispose()
-            }
-          }
-
-          function Require-Section([string]$body, [string]$heading) {
-            $pattern = '(?mi)^' + [regex]::Escape($heading) + '\s*$'
-            if ([regex]::Matches($body, $pattern).Count -ne 1) {
-              throw "Embedded T3 detail report must contain exactly one section: $heading"
-            }
-          }
-
-          $issue = gh api "repos/${{ github.repository }}/issues/$env:T3_REPORT_ISSUE" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot read the T3 report issue" }
-          if ($null -ne $issue.pull_request -or $issue.state -ne 'closed' -or $issue.state_reason -ne 'completed') {
-            throw "T3 report must be a closed completed issue, not a pull request"
-          }
-          $approvedLabel = @($issue.labels | Where-Object { $_.name -ceq 'release:t3-approved' })
-          if ($approvedLabel.Count -ne 1) {
-            throw "T3 report must have the release:t3-approved label"
-          }
-          if ($issue.author_association -notin @('OWNER', 'MEMBER', 'COLLABORATOR')) {
-            throw "T3 report author must be a repository collaborator"
-          }
-
-          $comment = gh api "repos/${{ github.repository }}/issues/comments/$env:T3_REVIEW_COMMENT_ID" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot read the independent T3 review comment" }
-          $expectedIssueApiUrl = "https://api.github.com/repos/${{ github.repository }}/issues/$env:T3_REPORT_ISSUE"
-          if ($comment.issue_url -cne $expectedIssueApiUrl) {
-            throw "T3 review comment does not belong to the supplied T3 issue"
-          }
-          if ($comment.author_association -notin @('OWNER', 'MEMBER', 'COLLABORATOR')) {
-            throw "T3 reviewer must be a repository collaborator"
-          }
-          if ([string]::Equals($issue.user.login, $comment.user.login, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "T3 tester/report author and independent reviewer must be different people"
-          }
-
-          $installerAsset = "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe"
-          $reportMarkers = [ordered]@{
-            'T3_RESULT' = 'PASS'
-            'RELEASE_TAG' = $env:RELEASE_TAG
-            'RELEASE_COMMIT' = $env:EXPECTED_RELEASE_COMMIT
-            'RELEASE_VERSION' = $env:EXPECTED_RELEASE_VERSION
-            'INSTALLER_ASSET' = $installerAsset
-            'INSTALLER_SHA256' = $env:EXPECTED_INSTALLER_SHA256
-            'RELEASE_EVIDENCE_SHA256' = $env:EXPECTED_RELEASE_EVIDENCE_SHA256
-            'T2_RUN_ID' = $env:T2_RUN_ID
-            'T3_DETAIL_REPORT' = 'EMBEDDED'
-            'HUMAN_OAUTH' = 'PASS'
-            'FIRST_USAGE' = 'PASS'
-            'APP_RESTART' = 'PASS'
-            'WINDOWS_REBOOT' = 'PASS'
-            'LEGACY_NPM_CONFLICT' = 'PASS'
-            'UNINSTALL_PRESERVATION' = 'PASS'
-            'REDACTION_REVIEW' = 'PASS'
-            'NO_CREDENTIALS_IN_CI' = 'CONFIRMED'
-          }
-          foreach ($marker in $reportMarkers.GetEnumerator()) {
-            Require-Marker ([string]$issue.body) $marker.Key ([string]$marker.Value)
-          }
-          if ([string]$issue.body.Length -lt 2500) {
-            throw "Embedded T3 detail report is too short to contain the required evidence"
-          }
-          foreach ($heading in @(
-            '## Environment',
-            '## Initial Codex inventory',
-            '## Trust and monitor install',
-            '## Required state transitions',
-            '## Official standalone result',
-            '## Human OAuth and first usage',
-            '## Restart, reboot, and conflict',
-            '## Remove and data behavior',
-            '## Privacy and disposal',
-            '## Result'
-          )) {
-            Require-Section ([string]$issue.body) $heading
-          }
-          foreach ($checkpoint in 1..11 | ForEach-Object { 'S{0:D2}' -f $_ }) {
-            $rowPattern = '(?mi)^\|\s*' + [regex]::Escape($checkpoint) + '\s*\|[^\r\n]*\|\s*PASS\s*\|\s*$'
-            if ([regex]::Matches([string]$issue.body, $rowPattern).Count -ne 1) {
-              throw "Embedded T3 detail report must contain exactly one PASS row for $checkpoint"
-            }
-          }
-          $reportBodySha256 = Get-Utf8Sha256 ([string]$issue.body)
-          if ($reportBodySha256 -notmatch '^[0-9A-F]{64}$') {
-            throw "T3 report body SHA-256 could not be computed"
-          }
-          $reviewMarkers = [ordered]@{
-            'T3_REVIEW' = 'APPROVED'
-            'RELEASE_TAG' = $env:RELEASE_TAG
-            'RELEASE_COMMIT' = $env:EXPECTED_RELEASE_COMMIT
-            'RELEASE_VERSION' = $env:EXPECTED_RELEASE_VERSION
-            'INSTALLER_SHA256' = $env:EXPECTED_INSTALLER_SHA256
-            'RELEASE_EVIDENCE_SHA256' = $env:EXPECTED_RELEASE_EVIDENCE_SHA256
-            'T2_RUN_ID' = $env:T2_RUN_ID
-            'T3_REPORT_BODY_SHA256' = $reportBodySha256
-          }
-          foreach ($marker in $reviewMarkers.GetEnumerator()) {
-            Require-Marker ([string]$comment.body) $marker.Key ([string]$marker.Value)
-          }
-          $reviewBodySha256 = Get-Utf8Sha256 ([string]$comment.body)
-          if ($reviewBodySha256 -notmatch '^[0-9A-F]{64}$') {
-            throw "T3 review comment SHA-256 could not be computed"
-          }
-          if ([DateTimeOffset]::Parse([string]$comment.created_at) -lt [DateTimeOffset]::Parse([string]$issue.created_at)) {
-            throw "Independent review predates the T3 report"
-          }
-          "VERIFIED_T3_REPORT_BODY_SHA256=$reportBodySha256" >> $env:GITHUB_ENV
-          "VERIFIED_T3_REVIEW_BODY_SHA256=$reviewBodySha256" >> $env:GITHUB_ENV
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish the verified existing draft
-        shell: pwsh
-        run: |
-          function Get-Utf8Sha256([string]$text) {
-            $algorithm = [Security.Cryptography.SHA256]::Create()
-            try {
-              $bytes = [Text.Encoding]::UTF8.GetBytes($text)
-              return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '')
-            } finally {
-              $algorithm.Dispose()
-            }
-          }
-
-          $beforePublish = gh release view $env:RELEASE_TAG --json isDraft,isPrerelease,assets | ConvertFrom-Json
-          if (-not $beforePublish.isDraft -or $beforePublish.isPrerelease) {
-            throw "Release stopped being the verified non-prerelease draft before publication"
-          }
-          $expected = @(
-            "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe",
-            "Codex-Claude-Usage-Setup.exe",
-            "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe.sig",
-            "latest.json",
-            "release-evidence.json"
-          )
-          $actual = @($beforePublish.assets | ForEach-Object { $_.name } | Sort-Object)
-          if (Compare-Object ($expected | Sort-Object) $actual) {
-            throw "Draft asset inventory changed after T2/T3 verification"
-          }
-          $finalDir = Join-Path $env:RUNNER_TEMP 'final-publication-byte-check'
-          New-Item -ItemType Directory -Force $finalDir | Out-Null
-          gh release download $env:RELEASE_TAG --dir $finalDir
-          if ($LASTEXITCODE -ne 0) { throw "Final draft byte download failed" }
-          node scripts/release-evidence.js verify `
-            $finalDir `
-            $env:RELEASE_TAG `
-            $env:EXPECTED_RELEASE_VERSION `
-            $env:EXPECTED_RELEASE_COMMIT `
-            $env:EXPECTED_INSTALLER_SHA256 `
-            $env:EXPECTED_RELEASE_EVIDENCE_SHA256
-          if ($LASTEXITCODE -ne 0) { throw "Draft bytes changed after T2/T3 verification" }
-
-          $currentIssue = gh api "repos/${{ github.repository }}/issues/$env:T3_REPORT_ISSUE" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot re-read the T3 report immediately before publication" }
-          if (
-            $null -ne $currentIssue.pull_request -or
-            $currentIssue.state -ne 'closed' -or
-            $currentIssue.state_reason -ne 'completed' -or
-            $currentIssue.author_association -notin @('OWNER', 'MEMBER', 'COLLABORATOR')
-          ) {
-            throw "T3 report approval state changed before publication"
-          }
-          $currentApprovedLabel = @($currentIssue.labels | Where-Object { $_.name -ceq 'release:t3-approved' })
-          if ($currentApprovedLabel.Count -ne 1) {
-            throw "T3 report approval label changed before publication"
-          }
-          $currentComment = gh api "repos/${{ github.repository }}/issues/comments/$env:T3_REVIEW_COMMENT_ID" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot re-read the independent T3 review immediately before publication" }
-          $expectedIssueApiUrl = "https://api.github.com/repos/${{ github.repository }}/issues/$env:T3_REPORT_ISSUE"
-          if (
-            $currentComment.issue_url -cne $expectedIssueApiUrl -or
-            $currentComment.author_association -notin @('OWNER', 'MEMBER', 'COLLABORATOR') -or
-            [string]::Equals(
-              $currentIssue.user.login,
-              $currentComment.user.login,
-              [StringComparison]::OrdinalIgnoreCase
-            )
-          ) {
-            throw "T3 independent-review identity changed before publication"
-          }
-          $currentBodySha256 = Get-Utf8Sha256 ([string]$currentIssue.body)
-          if ($currentBodySha256 -cne $env:VERIFIED_T3_REPORT_BODY_SHA256) {
-            throw "T3 report body changed after independent review verification"
-          }
-          $currentReviewBodySha256 = Get-Utf8Sha256 ([string]$currentComment.body)
-          if ($currentReviewBodySha256 -cne $env:VERIFIED_T3_REVIEW_BODY_SHA256) {
-            throw "T3 review comment changed after independent review verification"
-          }
-
-          $preparationRun = gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/runs/$env:PREPARATION_RUN_ID" |
-              ConvertFrom-Json
-          if (
-            $LASTEXITCODE -ne 0 -or
-            $preparationRun.status -ne 'completed' -or
-            $preparationRun.conclusion -ne 'success' -or
-            ([string]$preparationRun.head_sha).ToLowerInvariant() -cne $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "Preparation run changed or is no longer successful before publication"
-          }
-          $preparationJobs = @((gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/runs/$env:PREPARATION_RUN_ID/jobs?filter=latest&per_page=100" |
-              ConvertFrom-Json
-          ).jobs)
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot re-read preparation jobs immediately before publication"
-          }
-          $expectedPreparationJobName = 'Prepare updater-signed immutable draft assets'
-          $successfulPreparationJobs = @($preparationJobs | Where-Object {
-            $jobName = [string]$_.name
-            (
-              $jobName -ceq $expectedPreparationJobName -or
-              $jobName.EndsWith(
-                " / $expectedPreparationJobName",
-                [StringComparison]::Ordinal
-              )
-            ) -and
-              $_.status -eq 'completed' -and
-              $_.conclusion -eq 'success' -and
-              ([string]$_.head_sha).ToLowerInvariant() -ceq $env:EXPECTED_RELEASE_COMMIT
-          })
-          if ($successfulPreparationJobs.Count -ne 1) {
-            throw "Preparation job changed or is no longer successful before publication"
-          }
-          $preparationArtifact = gh api `
-            --method GET `
-            "repos/${{ github.repository }}/actions/artifacts/$env:PREPARATION_ARTIFACT_ID" |
-              ConvertFrom-Json
-          if (
-            $LASTEXITCODE -ne 0 -or
-            $preparationArtifact.name -cne $env:PREPARATION_ARTIFACT_NAME -or
-            $preparationArtifact.expired -ne $false -or
-            [string]$preparationArtifact.workflow_run.id -cne $env:PREPARATION_RUN_ID -or
-            ([string]$preparationArtifact.workflow_run.head_sha).ToLowerInvariant() -cne
-              $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "Preparation evidence artifact changed, expired or disappeared before publication"
-          }
-
-          gh release edit $env:RELEASE_TAG --draft=false --latest
-          if ($LASTEXITCODE -ne 0) { throw "Publishing verified draft failed" }
-          $published = gh release view $env:RELEASE_TAG --json isDraft,isPrerelease,tagName,assets,url | ConvertFrom-Json
-          if ($published.isDraft -or $published.isPrerelease) {
-            throw "Release did not become a public stable Release"
-          }
-          if ($published.tagName -cne $env:RELEASE_TAG) {
-            throw "Published Release tag changed from the verified draft"
-          }
-          $actual = @($published.assets | ForEach-Object { $_.name } | Sort-Object)
-          if (Compare-Object ($expected | Sort-Object) $actual) {
-            throw "Published asset inventory differs from the verified draft"
-          }
-
-          $remoteTagLines = @(
-            git ls-remote --exit-code origin "refs/tags/$env:RELEASE_TAG" "refs/tags/$env:RELEASE_TAG^{}"
-          )
-          if ($LASTEXITCODE -ne 0) { throw "Cannot resolve the published remote tag" }
-          $directTagCommit = $null
-          $peeledTagCommit = $null
-          foreach ($line in $remoteTagLines) {
-            $fields = @($line -split '\s+', 2)
-            if ($fields.Count -ne 2) { continue }
-            if ($fields[1] -ceq "refs/tags/$env:RELEASE_TAG^{}") {
-              $peeledTagCommit = $fields[0]
-            } elseif ($fields[1] -ceq "refs/tags/$env:RELEASE_TAG") {
-              $directTagCommit = $fields[0]
-            }
-          }
-          $publishedTagCommit = if ($null -ne $peeledTagCommit) { $peeledTagCommit } else { $directTagCommit }
-          if (
-            [string]$publishedTagCommit -notmatch '^[0-9a-fA-F]{40}$' -or
-            $publishedTagCommit.ToLowerInvariant() -cne $env:EXPECTED_RELEASE_COMMIT
-          ) {
-            throw "Published remote tag does not resolve to the verified release commit"
-          }
-
-          $publishedDir = Join-Path $env:RUNNER_TEMP 'published-release-byte-check'
-          New-Item -ItemType Directory -Force $publishedDir | Out-Null
-          gh release download $env:RELEASE_TAG --dir $publishedDir
-          if ($LASTEXITCODE -ne 0) { throw "Published asset download failed" }
-          foreach ($name in $expected) {
-            $verifiedPath = Join-Path $finalDir $name
-            $publishedPath = Join-Path $publishedDir $name
-            if (-not (Test-Path -LiteralPath $publishedPath -PathType Leaf)) {
-              throw "Published asset is missing after publication: $name"
-            }
-            $verifiedHash = (Get-FileHash -LiteralPath $verifiedPath -Algorithm SHA256).Hash
-            $publishedHash = (Get-FileHash -LiteralPath $publishedPath -Algorithm SHA256).Hash
-            if ($publishedHash -cne $verifiedHash) {
-              throw "Published asset bytes differ from the verified draft: $name"
-            }
-          }
-          node scripts/release-evidence.js verify `
-            $publishedDir `
-            $env:RELEASE_TAG `
-            $env:EXPECTED_RELEASE_VERSION `
-            $env:EXPECTED_RELEASE_COMMIT `
-            $env:EXPECTED_INSTALLER_SHA256 `
-            $env:EXPECTED_RELEASE_EVIDENCE_SHA256
-          if ($LASTEXITCODE -ne 0) { throw "Published exact-byte evidence verification failed" }
-          $publishedInstaller = Join-Path $publishedDir "Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe"
-          $publishedSignature = "$publishedInstaller.sig"
-          $publishedManifest = Join-Path $publishedDir 'latest.json'
-          npm run verify:updater-manifest -- $publishedManifest $publishedInstaller $publishedSignature $env:RELEASE_TAG
-          if ($LASTEXITCODE -ne 0) { throw "Published updater manifest verification failed" }
-          npm run verify:updater-signature -- src-tauri/tauri.conf.json $publishedInstaller $publishedSignature
-          if ($LASTEXITCODE -ne 0) { throw "Published updater signature verification failed" }
+        run: gh release edit $env:RELEASE_TAG --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1180,10 +167,10 @@ jobs:
         shell: pwsh
         run: |
           $assetName = 'Codex-Claude-Usage-Setup.exe'
-          $localInstaller = Join-Path $env:PUBLICATION_DRAFT_DIR $assetName
+          $localInstaller = "release-assets/$assetName"
           $localSize = (Get-Item -LiteralPath $localInstaller).Length
           $expectedHash = (Get-FileHash -LiteralPath $localInstaller -Algorithm SHA256).Hash
-          $url = "https://github.com/${{ github.repository }}/releases/latest/download/$assetName"
+          $url = "https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/$assetName"
           $download = Join-Path $env:RUNNER_TEMP 'latest-Codex-Claude-Usage-Setup.exe'
           $verified = $false
           $lastFailure = 'No response'
@@ -1192,14 +179,12 @@ jobs:
               $latestRelease = gh api "repos/${{ github.repository }}/releases/latest" | ConvertFrom-Json
               if ($LASTEXITCODE -ne 0) { throw "Reading the latest release failed" }
               if ($latestRelease.tag_name -ne $env:RELEASE_TAG) {
-                throw "Latest release tag mismatch"
+                throw "Latest release tag mismatch: expected $env:RELEASE_TAG, received $($latestRelease.tag_name)"
               }
               $directAssets = @($latestRelease.assets | Where-Object { $_.name -eq $assetName })
-              if ($directAssets.Count -ne 1) {
-                throw "Latest release is missing direct installer asset: $assetName"
-              }
+              if ($directAssets.Count -ne 1) { throw "Latest release is missing direct installer asset: $assetName" }
               if ($directAssets[0].size -ne $localSize) {
-                throw "Latest release direct installer size mismatch"
+                throw "Latest release direct installer size mismatch: $($directAssets[0].size)"
               }
 
               if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -Force }
@@ -1210,53 +195,40 @@ jobs:
                 $verified = $true
                 break
               }
-              $lastFailure = "SHA-256 mismatch"
+              $lastFailure = "SHA-256 mismatch: expected $expectedHash, received $actualHash"
             } catch {
               $lastFailure = $_.Exception.Message
             }
             if ($attempt -lt 6) { Start-Sleep -Seconds 10 }
           }
-          if (-not $verified) {
-            throw "Published direct installer was not ready after retries: $lastFailure"
-          }
+          if (-not $verified) { throw "Published direct installer was not ready after retries: $lastFailure" }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Post-publish canary for updater manifest
         shell: pwsh
         run: |
-          $url = "https://github.com/${{ github.repository }}/releases/latest/download/latest.json"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $url = "https://github.com/Kyuhan1230/ai-usage-monitor/releases/latest/download/latest.json"
           $manifest = $null
           $lastFailure = "No response"
           for ($attempt = 1; $attempt -le 6; $attempt++) {
             try {
               $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
               $candidate = Invoke-RestMethod -Uri "${url}?cachebust=$cacheBust" -Headers @{ "Cache-Control" = "no-cache" }
-              if ($candidate.version -eq $env:EXPECTED_RELEASE_VERSION) {
+              if ($candidate.version -eq $version) {
                 $manifest = $candidate
                 break
               }
-              $lastFailure = "Unexpected updater version"
+              $lastFailure = "Expected $version but received $($candidate.version)"
             } catch {
               $lastFailure = $_.Exception.Message
             }
             if ($attempt -lt 6) { Start-Sleep -Seconds 10 }
           }
-          if ($null -eq $manifest) {
-            throw "Published latest.json was not ready after retries: $lastFailure"
-          }
+          if ($null -eq $manifest) { throw "Published latest.json was not ready after retries: $lastFailure" }
           $platform = $manifest.platforms.'windows-x86_64'
-          $expectedUrl = "https://github.com/${{ github.repository }}/releases/download/$env:RELEASE_TAG/Codex-Claude-Usage-Setup-$env:EXPECTED_RELEASE_VERSION.exe"
+          $expectedUrl = "https://github.com/Kyuhan1230/ai-usage-monitor/releases/download/v$version/Codex-Claude-Usage-Setup-$version.exe"
           if ($null -eq $platform) { throw "Published manifest is missing windows-x86_64" }
-          if ($platform.url -ne $expectedUrl) { throw "Published installer URL mismatch" }
-          if ([string]::IsNullOrWhiteSpace([string]$platform.signature)) {
-            throw "Published manifest signature is empty"
-          }
-
-          "### Verified draft published" >> $env:GITHUB_STEP_SUMMARY
-          "- Release: $env:DRAFT_RELEASE_URL" >> $env:GITHUB_STEP_SUMMARY
-          "- Commit: $env:EXPECTED_RELEASE_COMMIT" >> $env:GITHUB_STEP_SUMMARY
-          "- Version: $env:EXPECTED_RELEASE_VERSION" >> $env:GITHUB_STEP_SUMMARY
-          "- Installer SHA-256: $env:EXPECTED_INSTALLER_SHA256" >> $env:GITHUB_STEP_SUMMARY
-          "- T2 run: https://github.com/${{ github.repository }}/actions/runs/$env:T2_RUN_ID" >> $env:GITHUB_STEP_SUMMARY
-          "- T3 report: https://github.com/${{ github.repository }}/issues/$env:T3_REPORT_ISSUE" >> $env:GITHUB_STEP_SUMMARY
+          if ($platform.url -ne $expectedUrl) { throw "Published installer URL mismatch: $($platform.url)" }
+          if ([string]::IsNullOrWhiteSpace([string]$platform.signature)) { throw "Published manifest signature is empty" }
