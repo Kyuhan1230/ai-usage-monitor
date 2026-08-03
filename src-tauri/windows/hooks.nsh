@@ -1,5 +1,13 @@
 !macro NSIS_HOOK_POSTINSTALL
   Push $0
+  Push $1
+  Push $2
+  Push $3
+
+  ; Tauri updater의 passive NSIS 실행은 IfSilent만으로 업데이트를 구분할 수 없습니다.
+  ; 업데이트 중에는 Codex 설치나 PATH 변경을 절대 시도하지 않습니다.
+  StrCmp $UpdateMode "1" cli_offer_done
+  StrCmp $PassiveMode "1" cli_offer_done
 
   ; 무인 설치는 질문이나 네트워크 요청 없이 끝내야 합니다.
   IfSilent cli_offer_done
