@@ -34,9 +34,11 @@
     if (authState === "authenticated") {
       return true;
     }
-    if (authState === "unauthenticated" || authState === "unavailable") {
+    if (authState === "unauthenticated") {
       return false;
     }
+    // 인증 확인이 실패해도 기존에 정상 수집된 상태가 있으면 Compact 카드를 유지한다.
+    // Codex Desktop 번들은 독립 CLI로 확인할 수 없지만, 저장된 상태는 stale 표시로 안내한다.
     return Boolean(snapshot && snapshot[provider] && snapshot[provider].connected);
   }
 

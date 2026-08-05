@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+## 1.2.10 - 2026-08-05
+
+### Fixed
+
+- Keep a previously collected Codex card visible in Compact when Codex Desktop cannot expose an independent CLI authentication probe; the card now reports stale data instead of disappearing.
+- Preserve the existing updater-safe installer behavior while shipping the Compact visibility fix.
+
 ## 1.2.9 - 2026-08-03
 
 ### Fixed
