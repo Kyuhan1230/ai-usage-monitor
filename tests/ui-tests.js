@@ -31,7 +31,7 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.9");
+assert.strictEqual(packageJson.version, "1.2.10");
 assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
@@ -204,7 +204,7 @@ assert.deepStrictEqual(activeProviders(activeOnlyCodex), ["codex"]);
 assert.deepStrictEqual(detailProviders(activeOnlyCodex), ["codex", "claude"], "과거 Claude 토큰 행은 상세 화면에서 보존해야 합니다.");
 assert.deepStrictEqual(
   activeProviders({
-    providers: { codex: { authState: "unknown" }, claude: { authState: "unavailable" } },
+    providers: { codex: { authState: "unavailable" }, claude: { authState: "unauthenticated" } },
     codex: { connected: true },
     claude: { connected: true },
   }),
