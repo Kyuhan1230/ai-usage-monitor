@@ -147,14 +147,20 @@ function providerStatus(provider, commandState, auth, connected, ageMs) {
       : "사용량 미수집";
     return { kind: "ok", text: `설치됨 · 로그인 완료 · ${usage}` };
   }
+  // 판정 근거를 함께 밝힌다. 근거가 없으면 사용자는 앱의 결론을 검증할 수 없다.
+  const detail = auth && auth.detail ? ` (${auth.detail})` : "";
   if (authState === "unauthenticated") {
-    return { kind: "warning", text: "설치됨 · 로그인이 필요합니다." };
+    return { kind: "warning", text: `설치됨 · 로그인이 필요합니다.${detail}` };
   }
   return {
     kind: "error",
-    text: "설치됨 · 로그인 상태를 확인하지 못했습니다. 상태를 다시 확인하세요.",
+    text: `설치됨 · 로그인 상태를 확인하지 못했습니다. 상태를 다시 확인하세요.${detail}`,
   };
 }
+
+// 확인에 반복해서 실패하면 재확인만 권할 수 없다.
+// 실제로 로그아웃한 사용자가 로그인에 도달할 길을 남겨 둔다.
+const indeterminateSeen = { codex: 0, claude: 0 };
 
 function configureProviderButton(button, provider, commandReady, authState) {
   button.dataset.provider = provider;
@@ -170,6 +176,19 @@ function configureProviderButton(button, provider, commandReady, authState) {
     button.disabled = true;
     return;
   }
+  // 확인에 실패한 상태를 미로그인으로 단정하지 않는다.
+  // 이미 로그인한 사용자에게 로그인을 반복해서 요구하면 앱을 신뢰할 수 없게 된다.
+  if (authState !== "unauthenticated") {
+    indeterminateSeen[provider] += 1;
+    if (indeterminateSeen[provider] < 2) {
+      button.dataset.action = "recheck";
+      button.textContent = "상태 다시 확인";
+      button.disabled = false;
+      return;
+    }
+  } else {
+    indeterminateSeen[provider] = 0;
+  }
   button.dataset.action = "login";
   button.textContent = provider === "codex" ? "Codex 로그인" : "Claude 로그인";
   button.disabled = false;
@@ -179,6 +198,10 @@ async function runProviderAction(button) {
   const provider = button.dataset.provider;
   const action = button.dataset.action;
   if (action === "complete") {
+    return;
+  }
+  if (action === "recheck") {
+    await refresh(false);
     return;
   }
   button.disabled = true;

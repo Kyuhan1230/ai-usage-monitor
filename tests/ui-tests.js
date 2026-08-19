@@ -31,9 +31,16 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.10");
+assert.strictEqual(packageJson.version, "1.2.11");
 assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
+// Cargo.toml 버전은 앱이 스스로 보고하는 버전에 섞여 들어간다.
+// 한 곳만 올리면 사용자가 보는 버전과 실제 배포본이 조용히 어긋난다.
+assert.strictEqual(
+  (cargoToml.match(/^version = "([^"]+)"/m) || [])[1],
+  packageJson.version,
+  "Cargo.toml 버전을 package.json과 함께 올려야 합니다.",
+);
 assert.strictEqual(tauriConfig.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.build.frontendDist, "../src/ui");
 assert.deepStrictEqual(tauriConfig.app.windows, [], "백그라운드 시작 시 WebView를 만들면 안 됩니다.");
@@ -164,6 +171,9 @@ const {
   detailProviders,
   visibleRecommendations,
   providerDecisionCopy,
+  providerPresentation,
+  providerAuthNotice,
+  degradedProviders,
 } = require(path.join(ui, "provider-view.js"));
 assert.doesNotThrow(
   () => new vm.Script([bridgeScript, providerViewScript, insightsScript].join("\n")),
@@ -193,7 +203,8 @@ const activeOnlyCodex = {
     claude: { authState: "unauthenticated" },
   },
   codex: { connected: true },
-  claude: { connected: true },
+  // 미로그인이고 수집 결과도 없다. Compact에 보여줄 값이 없는 공급자다.
+  claude: { connected: false },
   analytics: {
     usage: {
       rows: [{ provider: "claude", totalTokens: 10 }],
@@ -206,10 +217,99 @@ assert.deepStrictEqual(
   activeProviders({
     providers: { codex: { authState: "unavailable" }, claude: { authState: "unauthenticated" } },
     codex: { connected: true },
-    claude: { connected: true },
+    claude: { connected: false },
   }),
   ["codex"],
   "인증 확인 전에는 성공적으로 수집한 기존 공급자만 안전하게 표시합니다.",
+);
+// Setup을 여는 것만으로 인증 프로브가 돌고, 그 결과가 잘못되면 Compact 카드가 사라지던 회귀를 막는다.
+// 프로브는 종료 코드만 보므로 "로그인 안 됨"과 "확인 실패"를 구분하지 못한다.
+const codexProbeSaysLoggedOut = {
+  providers: { codex: { authState: "unauthenticated" }, claude: { authState: "authenticated" } },
+  codex: { connected: true },
+  claude: { connected: true },
+};
+assert.deepStrictEqual(
+  activeProviders(codexProbeSaysLoggedOut),
+  ["codex", "claude"],
+  "수집에 성공한 기록이 있으면 인증 프로브 판정만으로 카드를 지우면 안 됩니다.",
+);
+assert.strictEqual(
+  providerPresentation(codexProbeSaysLoggedOut, "codex").degraded,
+  true,
+  "확인하지 못한 공급자는 표시하되 경고 상태여야 합니다.",
+);
+assert.strictEqual(
+  providerPresentation(codexProbeSaysLoggedOut, "claude").degraded,
+  false,
+  "인증이 확인된 공급자에는 경고를 붙이면 안 됩니다.",
+);
+assert.deepStrictEqual(
+  degradedProviders(codexProbeSaysLoggedOut),
+  ["codex"],
+  "경고 대상은 확인에 실패한 공급자로 한정합니다.",
+);
+for (const reason of ["auth_lost", "auth_uncheckable"]) {
+  assert(providerAuthNotice("codex", reason).length > 0, `${reason} 상태는 사용자에게 이유를 설명해야 합니다.`);
+}
+// 수집 기록이 없으면 경고할 대상도 없으므로 조용히 감춘다.
+assert.deepStrictEqual(
+  activeProviders({
+    providers: { codex: { authState: "unauthenticated" }, claude: { authState: "authenticated" } },
+    codex: { connected: false },
+    claude: { connected: true },
+  }),
+  ["claude"],
+  "수집 기록이 없는 미로그인 공급자는 표시하지 않습니다.",
+);
+// 평상시에는 인증 캐시가 비어 있다. 이때 모든 카드를 경고로 칠하면 경고가 무의미해진다.
+assert.strictEqual(
+  providerPresentation(
+    { providers: { codex: { authState: "unknown" } }, codex: { connected: true } },
+    "codex",
+  ).degraded,
+  false,
+  "확인한 적 없는 상태는 경고가 아니라 평상시 표시입니다.",
+);
+// 숨긴 공급자는 경고 대상이 아니다.
+assert.strictEqual(
+  providerPresentation(
+    {
+      hiddenProviders: ["codex"],
+      providers: { codex: { authState: "unauthenticated" } },
+      codex: { connected: true },
+    },
+    "codex",
+  ).visible,
+  false,
+  "숨긴 공급자는 경고도 표시하지 않습니다.",
+);
+assert(
+  compactScript.includes("renderAuthNotice"),
+  "Compact는 인증을 확인하지 못한 카드를 숨기지 말고 이유를 표시해야 합니다.",
+);
+assert(
+  compactHtml.includes('id="codex-auth-notice"') && compactHtml.includes('id="claude-auth-notice"'),
+  "Compact 카드마다 인증 경고 슬롯이 필요합니다.",
+);
+// 앱이 "확인하지 못했다"고 말하면서 동시에 로그인을 요구하면 안 된다.
+assert(
+  setupScript.includes('button.dataset.action = "recheck"'),
+  "Setup은 확인 실패 상태에서 로그인 대신 재확인을 권해야 합니다.",
+);
+assert(
+  setupScript.includes('if (authState !== "unauthenticated")'),
+  "Setup 버튼은 확인 실패와 미로그인을 구분해야 합니다.",
+);
+assert(
+  setupScript.includes("indeterminateSeen"),
+  "확인이 반복 실패해도 실제 로그아웃 사용자가 로그인에 도달할 수 있어야 합니다.",
+);
+const libRs = fs.readFileSync(path.join(root, "src-tauri", "src", "lib.rs"), "utf8");
+assert(
+  /const AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/.test(libRs)
+    && Number(libRs.match(/const AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/)[1]) >= 20,
+  "느린 환경의 CLI 첫 실행을 미로그인으로 오판하지 않을 만큼 타임아웃이 길어야 합니다.",
 );
 assert(providerViewScript.includes("visibleRecommendations(analytics, [provider])"), "Compact 우선 문구는 현재 공급자로 걸러야 합니다.");
 assert(insightsScript.includes("visibleRecommendations(analytics, providers)"), "Insights 권장 문구는 인증된 공급자로 걸러야 합니다.");

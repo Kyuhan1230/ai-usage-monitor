@@ -60,6 +60,7 @@ impl Default for RuntimeState {
 }
 
 const ACTIVITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(25);
 const AUTO_REFRESH_COOLDOWN_MS: i64 = 5 * 60 * 1000;
 const UPDATE_MONITOR_MAX_SLEEP: Duration = Duration::from_secs(60 * 60);
 const UPDATE_MONITOR_BUSY_SLEEP: Duration = Duration::from_secs(60);
@@ -270,16 +271,20 @@ fn setup_snapshot_value(app: &AppHandle) -> Value {
     let codex_state = codex_cli_state();
     let claude_state = claude_cli_state();
     let (codex_auth, claude_auth) = std::thread::scope(|scope| {
-        let codex = scope.spawn(|| probe_codex_auth(Duration::from_secs(8)));
-        let claude = scope.spawn(|| probe_claude_auth(Duration::from_secs(8)));
+        // 8초는 백신·EDR이 CLI 첫 실행을 검사하는 환경에서 부족해 오탐을 만든다.
+        // 확인이 늦는 것보다 확인하지 못했다고 잘못 단정하는 쪽이 해롭다.
+        let codex = scope.spawn(|| probe_codex_auth(AUTH_PROBE_TIMEOUT));
+        let claude = scope.spawn(|| probe_claude_auth(AUTH_PROBE_TIMEOUT));
         (
             codex.join().unwrap_or_else(|_| AuthProbe {
                 state: crate::collector::AuthState::Error,
                 error: Some("Codex 인증 확인 작업이 중단됐습니다.".into()),
+                detail: Some("확인 작업이 중단됐습니다.".into()),
             }),
             claude.join().unwrap_or_else(|_| AuthProbe {
                 state: crate::collector::AuthState::Error,
                 error: Some("Claude 인증 확인 작업이 중단됐습니다.".into()),
+                detail: Some("확인 작업이 중단됐습니다.".into()),
             }),
         )
     });
@@ -311,6 +316,7 @@ fn auth_probe_value(probe: &AuthProbe) -> Value {
     json!({
         "state": probe.state.as_str(),
         "error": probe.error,
+        "detail": probe.detail,
     })
 }
 

@@ -26,24 +26,63 @@
     return Boolean(providers && providers[provider] && providers[provider].hidden);
   }
 
-  function isActiveProvider(snapshot, provider) {
+  // 사용량 수집은 인증 없이는 불가능하다. 수집에 성공한 기록이 있다는 것은
+  // 그 시점에 인증이 살아 있었다는 직접 증거다.
+  function hasCollectedUsage(snapshot, provider) {
+    return Boolean(snapshot && snapshot[provider] && snapshot[provider].connected);
+  }
+
+  // 인증 프로브 결과 하나로 카드를 삭제하지 않는다.
+  // 프로브는 종료 코드만 보므로 "로그인 안 됨"과 "확인 자체가 실패"를 구분하지 못한다.
+  // 잘못된 판정으로 멀쩡한 카드가 말없이 사라지면 사용자는 원인을 알 방법이 없으므로,
+  // 수집 기록이 있으면 카드를 남기고 경고 상태로 전환해 직접 조치할 수 있게 한다.
+  function providerPresentation(snapshot, provider) {
     if (isHiddenProvider(snapshot, provider)) {
-      return false;
+      return { visible: false, degraded: false, reason: "hidden" };
     }
     const authState = providerAuthState(snapshot, provider);
     if (authState === "authenticated") {
-      return true;
+      return { visible: true, degraded: false, reason: "authenticated" };
     }
-    if (authState === "unauthenticated") {
-      return false;
+    if (!hasCollectedUsage(snapshot, provider)) {
+      // 보여줄 수집 결과가 없으면 경고할 대상도 없다.
+      return { visible: false, degraded: false, reason: "no_data" };
     }
-    // 인증 확인이 실패해도 기존에 정상 수집된 상태가 있으면 Compact 카드를 유지한다.
-    // Codex Desktop 번들은 독립 CLI로 확인할 수 없지만, 저장된 상태는 stale 표시로 안내한다.
-    return Boolean(snapshot && snapshot[provider] && snapshot[provider].connected);
+    if (authState === "unknown") {
+      // 아직 인증을 확인한 적이 없다. Setup을 연 적 없는 평상시 상태이므로 경고하지 않는다.
+      return { visible: true, degraded: false, reason: "unchecked" };
+    }
+    return {
+      visible: true,
+      degraded: true,
+      // unauthenticated는 로그인 만료일 수도, 프로브 실패일 수도 있어 단정하지 않는다.
+      reason: authState === "unauthenticated" ? "auth_lost" : "auth_uncheckable",
+    };
+  }
+
+  function isActiveProvider(snapshot, provider) {
+    return providerPresentation(snapshot, provider).visible;
   }
 
   function activeProviders(snapshot) {
     return PROVIDERS.filter((provider) => isActiveProvider(snapshot, provider));
+  }
+
+  function degradedProviders(snapshot) {
+    return PROVIDERS.filter((provider) => providerPresentation(snapshot, provider).degraded);
+  }
+
+  // 확인 실패와 로그인 만료를 다른 문구로 안내한다. 앱이 모르는 것을 안다고 말하지 않는다.
+  function providerAuthNotice(provider, reason) {
+    const label = providerLabel(provider);
+    // Compact는 세로 공간이 좁다. 카드를 덮지 않도록 한 줄로 유지한다.
+    if (reason === "auth_lost") {
+      return `${label} 로그인 만료 가능성 · 아래는 마지막 수집값`;
+    }
+    if (reason === "auth_uncheckable") {
+      return `${label} 로그인 상태 확인 불가 · 아래는 마지막 수집값`;
+    }
+    return "";
   }
 
   function providersWithUsageRows(snapshot) {
@@ -195,6 +234,9 @@
     PROVIDERS,
     providerAuthState,
     isHiddenProvider,
+    providerPresentation,
+    providerAuthNotice,
+    degradedProviders,
     isActiveProvider,
     activeProviders,
     providersWithUsageRows,

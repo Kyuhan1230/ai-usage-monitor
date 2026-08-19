@@ -3,12 +3,20 @@
 // 백엔드 구현과 무관하게 동일한 snapshot 계약만 사용한다.
 
 const { stateText } = window.usageStatusHealth;
-const { activeProviders, providerDecisionCopy } = window.usageProviderView;
+const {
+  activeProviders,
+  providerDecisionCopy,
+  providerPresentation,
+  providerAuthNotice,
+} = window.usageProviderView;
 
 const ids = [
   "meters",
   "no-provider",
   "codex-state",
+  "codex-auth-notice",
+  "codex-auth-notice-text",
+  "codex-auth-notice-action",
   "codex-decision",
   "codex-decision-status",
   "codex-decision-action",
@@ -21,6 +29,9 @@ const ids = [
   "codex-reset",
   "codex-stamp",
   "claude-state",
+  "claude-auth-notice",
+  "claude-auth-notice-text",
+  "claude-auth-notice-action",
   "claude-decision",
   "claude-decision-status",
   "claude-decision-action",
@@ -146,12 +157,25 @@ function renderProviderDecision(provider, analytics, stale) {
   action.textContent = copy.action;
 }
 
+// 인증 판정이 흔들려도 카드를 지우지 않는다. 대신 무엇을 확인하지 못했는지 카드 안에서 밝힌다.
+function renderAuthNotice(snapshot, provider) {
+  const { degraded, reason } = providerPresentation(snapshot, provider);
+  const card = document.querySelector(`[data-tool="${provider}"]`);
+  el[`${provider}-auth-notice`].hidden = !degraded;
+  card.dataset.degraded = degraded ? "true" : "false";
+  if (degraded) {
+    el[`${provider}-auth-notice-text`].textContent = providerAuthNotice(provider, reason);
+  }
+}
+
 function render(snapshot) {
   const providers = activeProviders(snapshot);
   const hasCodex = providers.includes("codex");
   const hasClaude = providers.includes("claude");
   document.querySelector('[data-tool="codex"]').hidden = !hasCodex;
   document.querySelector('[data-tool="claude"]').hidden = !hasClaude;
+  renderAuthNotice(snapshot, "codex");
+  renderAuthNotice(snapshot, "claude");
   el.meters.hidden = !providers.length;
   el["no-provider"].hidden = providers.length > 0;
   // 열 수는 표시 대상 공급자 수에서 파생한다. 한쪽이 빈 2열 그리드를 남기지 않는다.
@@ -264,6 +288,9 @@ el["resize-grip"].addEventListener("pointerdown", (event) => {
 });
 el.refresh.addEventListener("click", () => refresh(true));
 el["open-setup"].addEventListener("click", () => window.usageApp.openSetup());
+// 경고를 봤을 때 바로 조치할 수 있어야 한다. 로그인은 Setup에서만 실행한다.
+el["codex-auth-notice-action"].addEventListener("click", () => window.usageApp.openSetup());
+el["claude-auth-notice-action"].addEventListener("click", () => window.usageApp.openSetup());
 el["open-insights"].addEventListener("click", () => window.usageApp.openInsights());
 el["open-details"].addEventListener("click", () => window.usageApp.openDetails());
 for (const provider of ["codex", "claude"]) {
