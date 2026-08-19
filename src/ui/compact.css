@@ -193,6 +193,41 @@ h1 {
   font: 11px Consolas, "Cascadia Mono", monospace;
 }
 
+/* 인증을 확인하지 못한 카드. 값을 지우지 않고 신뢰도만 낮춰 보여준다. */
+.auth-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: var(--compact-card-header-gap);
+  padding: 6px 8px;
+  border: 1px solid var(--warn);
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.auth-notice[hidden] { display: none; }
+
+.auth-notice-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.auth-notice-action:hover { background: var(--hover); }
+.auth-notice-action:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* 확인되지 않은 값이라는 사실을 수치 자체에도 반영한다. */
+.meter[data-degraded="true"] .limit-bars { opacity: 0.72; }
+
 .limit-bars { display: grid; gap: var(--compact-limit-gap); min-width: 0; }
 .limit-bar { display: grid; gap: var(--compact-limit-item-gap); }
 

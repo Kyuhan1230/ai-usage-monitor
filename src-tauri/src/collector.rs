@@ -43,6 +43,9 @@ impl AuthState {
 pub struct AuthProbe {
     pub state: AuthState,
     pub error: Option<String>,
+    /// 판정 근거를 사람이 읽을 수 있게 남긴다. 종료 코드만 담으므로
+    /// 계정 정보가 섞일 수 있는 stdout/stderr는 그대로 버린다.
+    pub detail: Option<String>,
 }
 
 impl CliState {
@@ -232,6 +235,18 @@ fn auth_state_from_success(success: bool) -> AuthState {
     }
 }
 
+/// 종료 코드는 계정 정보를 담지 않으면서 판정 근거를 설명한다.
+/// 이 값이 없으면 사용자는 왜 로그인이 필요하다고 나오는지 확인할 방법이 없다.
+fn exit_detail(status: std::process::ExitStatus) -> Option<String> {
+    if status.success() {
+        return None;
+    }
+    Some(match status.code() {
+        Some(code) => format!("종료 코드 {code}"),
+        None => "비정상 종료".to_string(),
+    })
+}
+
 fn probe_auth_command(
     executable: Option<PathBuf>,
     arguments: &[&str],
@@ -241,6 +256,7 @@ fn probe_auth_command(
         return AuthProbe {
             state: AuthState::Unavailable,
             error: None,
+            detail: Some("실행 파일을 찾지 못했습니다.".to_string()),
         };
     };
     let mut command = executable_command(&executable);
@@ -250,9 +266,11 @@ fn probe_auth_command(
             // 계정 이메일이나 조직명이 포함될 수 있는 stdout/stderr는 판정 후 즉시 버립니다.
             state: auth_state_from_success(output.status.success()),
             error: None,
+            detail: exit_detail(output.status),
         },
         Err(error) => AuthProbe {
             state: AuthState::Error,
+            detail: Some(error.clone()),
             error: Some(error),
         },
     }
@@ -633,6 +651,33 @@ mod tests {
         assert_eq!(limits[0]["remaining_percent"], 58);
         assert_eq!(limits[0]["reset_text"], "resets 07/18 21:30");
         assert_eq!(limits[1]["remaining_percent"], 29);
+    }
+
+    // 사용자가 앱의 판정을 직접 검증하려면 근거가 필요하다.
+    // 종료 코드는 계정 정보를 담지 않으므로 그대로 보여줄 수 있다.
+    #[test]
+    fn failed_auth_probe_reports_its_exit_code() {
+        let mut failing = Command::new("cmd.exe");
+        failing.args(["/D", "/C", "exit 3"]);
+        let output = command_output_with_timeout(failing, Duration::from_secs(10))
+            .expect("명령이 실행돼야 합니다");
+        assert_eq!(exit_detail(output.status).as_deref(), Some("종료 코드 3"));
+    }
+
+    #[test]
+    fn successful_auth_probe_reports_no_failure_detail() {
+        let mut succeeding = Command::new("cmd.exe");
+        succeeding.args(["/D", "/C", "exit 0"]);
+        let output = command_output_with_timeout(succeeding, Duration::from_secs(10))
+            .expect("명령이 실행돼야 합니다");
+        assert_eq!(exit_detail(output.status), None);
+    }
+
+    #[test]
+    fn missing_cli_probe_explains_why_it_could_not_check() {
+        let probe = probe_auth_command(None, &["login", "status"], Duration::from_secs(1));
+        assert_eq!(probe.state, AuthState::Unavailable);
+        assert!(probe.detail.is_some(), "확인하지 못한 이유를 남겨야 합니다");
     }
 
     #[test]
