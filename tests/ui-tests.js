@@ -31,7 +31,7 @@ const tauriConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tau
 const tauriCiConfig = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.ci.conf.json"), "utf8"));
 const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
 const capabilities = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8"));
-assert.strictEqual(packageJson.version, "1.2.11");
+assert.strictEqual(packageJson.version, "1.2.12");
 assert.strictEqual(packageJson.productName, "Codex Claude Usage");
 assert.strictEqual(tauriConfig.version, packageJson.version);
 // Cargo.toml 버전은 앱이 스스로 보고하는 버전에 섞여 들어간다.

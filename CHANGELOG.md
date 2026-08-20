@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 1.2.12 - 2026-08-20
+
+### Fixed
+
+- Windows에서 npm으로 설치한 Codex CLI나 Claude Code의 확장자 없는 Unix shim을 실행해 `os error 193`으로 로그인 상태를 확인하지 못하던 문제를 고쳤습니다. 이제 `.exe`, `.cmd`, `.bat` Windows 런처만 선택합니다.
+
 ## 1.2.11 - 2026-08-19
 
 ### Fixed

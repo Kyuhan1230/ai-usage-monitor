@@ -98,15 +98,37 @@ fn path_candidate_names(name: &str) -> Vec<String> {
     if Path::new(name).extension().is_some() {
         vec![name.to_string()]
     } else {
-        [
-            name.to_string(),
+        // Windows npm 설치는 Unix용 확장자 없는 shim과 .cmd 런처를 함께 둔다.
+        // 확장자 없는 shim을 Command::new로 실행하면 ERROR_BAD_EXE_FORMAT(193)이 난다.
+        #[cfg(windows)]
+        let names = [
             format!("{name}.exe"),
             format!("{name}.cmd"),
             format!("{name}.bat"),
-        ]
-        .into_iter()
-        .collect()
+        ];
+        #[cfg(not(windows))]
+        let names = [name.to_string()];
+
+        names.into_iter().collect()
     }
+}
+
+/// Windows에서는 실제 실행 가능한 런처만 선택한다.
+/// `where.exe`가 npm의 확장자 없는 Unix shim을 함께 반환할 수 있기 때문이다.
+#[cfg(windows)]
+fn is_launchable_command_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["exe", "com", "cmd", "bat"]
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+}
+
+#[cfg(not(windows))]
+fn is_launchable_command_path(_path: &Path) -> bool {
+    true
 }
 
 fn fresh_path_candidates(name: &str) -> Vec<PathBuf> {
@@ -153,9 +175,11 @@ fn is_protected_codex_desktop_resource(path: &Path) -> bool {
 }
 
 pub fn resolve_command(name: &str) -> Option<PathBuf> {
-    command_candidates(name)
-        .into_iter()
-        .find(|path| path.exists() && !is_protected_codex_desktop_resource(path))
+    command_candidates(name).into_iter().find(|path| {
+        path.exists()
+            && is_launchable_command_path(path)
+            && !is_protected_codex_desktop_resource(path)
+    })
 }
 
 pub fn resolve_codex_command() -> Option<PathBuf> {
@@ -690,13 +714,30 @@ mod tests {
         assert!(!is_protected_codex_desktop_resource(standalone));
     }
 
+    #[cfg(windows)]
     #[test]
-    fn extensionless_command_checks_windows_launchers() {
+    fn windows_command_search_prefers_real_launchers() {
         assert_eq!(
             path_candidate_names("codex"),
-            ["codex", "codex.exe", "codex.cmd", "codex.bat"]
+            ["codex.exe", "codex.cmd", "codex.bat"]
         );
         assert_eq!(path_candidate_names("codex.exe"), ["codex.exe"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_search_skips_extensionless_npm_shims() {
+        let npm_bin = Path::new(r"C:\Users\tester\AppData\Roaming\npm");
+        for command in ["codex", "claude"] {
+            assert!(
+                !is_launchable_command_path(&npm_bin.join(command)),
+                "{command}의 확장자 없는 Unix shim은 Windows에서 실행하면 안 됩니다.",
+            );
+            assert!(
+                is_launchable_command_path(&npm_bin.join(format!("{command}.cmd"))),
+                "{command}.cmd Windows 런처를 사용해야 합니다.",
+            );
+        }
     }
 
     #[test]
