@@ -37,7 +37,7 @@ windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_UI_Window
 winreg = "0.56.0"
 
 [dev-dependencies]
-base64 = "0.22.1"
+base64 = "0.23.0"
 minisign-verify = "0.2.5"
 
 [profile.release]
