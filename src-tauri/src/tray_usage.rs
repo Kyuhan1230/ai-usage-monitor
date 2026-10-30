@@ -170,7 +170,7 @@ mod tests {
         for percent in [0, 100] {
             let image = render_percent(percent);
             assert_eq!(image.len(), 32 * 32 * 4);
-            assert!(image.chunks_exact(4).any(|pixel| pixel[3] > 0));
+            assert!(image.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0));
         }
         assert_ne!(render_percent(0), render_percent(100));
     }

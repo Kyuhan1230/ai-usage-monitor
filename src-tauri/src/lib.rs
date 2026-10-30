@@ -1098,8 +1098,8 @@ fn update_usage_tray(app: &AppHandle) {
     if let Some(percent) = usage.percent {
         let mut pixels = tray_usage::render_percent(percent);
         if usage.stale {
-            for pixel in pixels.chunks_exact_mut(4) {
-                if pixel == [255, 255, 255, 255] {
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                if *pixel == [255, 255, 255, 255] {
                     pixel[..3].copy_from_slice(&[170, 170, 170]);
                 }
             }
