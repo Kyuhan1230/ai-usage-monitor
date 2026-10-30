@@ -1,0 +1,8 @@
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+body { display: flex; align-items: center; justify-content: center; gap: clamp(2px, 4vw, 4px); font: 700 clamp(12px, 21vw, 20px)/1 "Segoe UI", Arial, sans-serif; font-variant-numeric: tabular-nums; }
+.provider-icon { width: clamp(12px, 18vw, 18px); height: clamp(12px, 18vw, 18px); flex: none; }
+body.dark .provider-icon { filter: invert(1); }
+#usage { color: #15191d; background: transparent; white-space: nowrap; letter-spacing: -0.5px; transform: translateY(-1px); }
+#usage.stale { color: #505860; }
+body.dark #usage { color: #fff; }
+body.dark #usage.stale { color: #d3d7df; }
