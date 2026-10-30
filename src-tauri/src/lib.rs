@@ -2,6 +2,8 @@ mod analytics;
 mod collector;
 mod hook;
 mod storage;
+mod taskbar_widget;
+mod tray_usage;
 mod update;
 mod usage;
 
@@ -559,6 +561,7 @@ fn refresh_all(app: &AppHandle) -> Value {
         .last_collection_ms
         .lock()
         .expect("collection state lock") = chrono::Utc::now().timestamp_millis();
+    update_usage_tray(app);
     snapshot_value(app)
 }
 
@@ -1069,13 +1072,70 @@ fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
 
 /// 이 앱의 표시에서만 공급자를 빼거나 되돌린다. CLI 로그아웃은 하지 않는다.
 #[tauri::command]
-fn set_provider_hidden(provider: String, hidden: bool) -> Result<Vec<String>, String> {
-    update_hidden_provider(&provider, hidden)
+fn set_provider_hidden(
+    app: AppHandle,
+    provider: String,
+    hidden: bool,
+) -> Result<Vec<String>, String> {
+    let result = update_hidden_provider(&provider, hidden)?;
+    update_usage_tray(&app);
+    Ok(result)
 }
 
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+fn update_usage_tray(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("usage") else {
+        return;
+    };
+    let directory = data_dir();
+    let codex = read_json(&directory.join("status.json"));
+    let claude = read_json(&directory.join("claude-status.json"));
+    let usage = tray_usage::select_usage(codex.as_ref(), claude.as_ref(), &hidden_providers());
+    if let Some(percent) = usage.percent {
+        let mut pixels = tray_usage::render_percent(percent);
+        if usage.stale {
+            for pixel in pixels.chunks_exact_mut(4) {
+                if pixel == [255, 255, 255, 255] {
+                    pixel[..3].copy_from_slice(&[170, 170, 170]);
+                }
+            }
+        }
+        let _ = tray.set_icon(Some(tauri::image::Image::new_owned(pixels, 32, 32)));
+    } else if let Some(icon) = app.default_window_icon() {
+        let _ = tray.set_icon(Some(icon.clone()));
+    }
+    let tooltip: String = usage.tooltip.chars().take(120).collect();
+    let _ = tray.set_tooltip(Some(tooltip));
+}
+
+#[tauri::command]
+fn taskbar_usage() -> Value {
+    let directory = data_dir();
+    let codex = read_json(&directory.join("status.json"));
+    let usage = tray_usage::select_codex_usage(codex.as_ref(), &hidden_providers());
+    #[cfg(windows)]
+    let light = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize")
+        .ok()
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme").ok())
+        .unwrap_or(1)
+        != 0;
+    #[cfg(not(windows))]
+    let light = true;
+    json!({"percent": usage.percent, "stale": usage.stale, "tooltip": usage.tooltip, "light": light})
+}
+
+fn start_usage_tray_monitor(app: AppHandle) {
+    thread::spawn(move || {
+        loop {
+            update_usage_tray(&app);
+            thread::sleep(Duration::from_secs(30));
+        }
+    });
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
@@ -1105,7 +1165,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             &quit,
         ],
     )?;
-    let mut builder = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::with_id("usage")
         .tooltip("Codex, Claude Usage")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -1159,6 +1219,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             build_tray(app)?;
+            start_usage_tray_monitor(app.handle().clone());
+            taskbar_widget::start(app.handle().clone());
             start_activity_monitor(app.handle().clone());
             start_update_monitor(app.handle().clone());
             if !std::env::args().any(|argument| argument == "--background") {
@@ -1185,6 +1247,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            taskbar_usage,
             refresh_snapshot,
             setup_snapshot,
             refresh_setup_snapshot,

@@ -145,7 +145,7 @@ Tools such as [ccusage](https://github.com/ryoppippi/ccusage) are better when br
 
 ## Measured footprint
 
-Reference measurements from the 2026-07-18 Windows release build:
+Reference measurements from the 2026-07-18 Windows release build, before the taskbar percentage widget was added:
 
 | State | Result |
 | --- | --- |
@@ -156,7 +156,7 @@ Reference measurements from the 2026-07-18 Windows release build:
 | Compact UI open | 427.05 MB; app plus seven system WebView2 processes |
 | All idle states | No Codex/Claude CLI process; no listening network port |
 
-The open-UI number is intentionally disclosed: WebView2 is expensive while a window exists. The app therefore creates a WebView only when a tray window is opened and destroys it when the window closes.
+The taskbar percentage widget now keeps a small WebView2 window open, including while the main UI is closed. The historical idle measurements above do not represent this version's memory use; WebView2 memory use depends on the system and runtime version.
 
 ## How it works
 
