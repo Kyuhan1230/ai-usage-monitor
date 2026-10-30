@@ -36,8 +36,9 @@ pub fn start(app: tauri::AppHandle) {
     use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
     use windows::Win32::Foundation::RECT;
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowExW, FindWindowW, GetClassNameW, GetForegroundWindow, GetWindowRect,
-        HWND_TOPMOST, IsZoomed, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        FindWindowExW, FindWindowW, GW_HWNDPREV, GetClassNameW, GetForegroundWindow, GetWindow,
+        GetWindowRect, HWND_TOPMOST, IsZoomed, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos,
     };
     use windows::core::{PCWSTR, w};
 
@@ -121,26 +122,41 @@ pub fn start(app: tauri::AppHandle) {
                 if !shown {
                     shown = window.show().is_ok();
                 }
-                // Explorer can move its taskbar above other topmost windows.
-                if let Ok(hwnd) = window.hwnd() {
-                    let _ = unsafe {
-                        SetWindowPos(
-                            hwnd,
-                            Some(HWND_TOPMOST),
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                        )
-                    };
-                }
             } else if shown {
                 let _ = window.hide();
                 shown = false;
                 last_bounds = None;
             }
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            // Explorer may raise the taskbar at any time, even above a topmost
+            // window. Restore the order promptly, but only when it is wrong.
+            for _ in 0..10 {
+                if shown && let Ok(widget) = window.hwnd() {
+                    unsafe {
+                        if let Ok(shell) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) {
+                            let mut current = widget;
+                            while let Ok(previous) = GetWindow(current, GW_HWNDPREV) {
+                                if previous == shell {
+                                    let _ = SetWindowPos(
+                                        widget,
+                                        Some(HWND_TOPMOST),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                                    );
+                                    break;
+                                }
+                                if previous == current {
+                                    break;
+                                }
+                                current = previous;
+                            }
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
             if app.get_webview_window("taskbar-widget").is_none() {
                 break;
             }
