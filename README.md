@@ -5,8 +5,8 @@
 <h1 align="center">Codex Claude Usage</h1>
 
 <p align="center">
-  <strong>Keep Codex CLI and Claude Code usage limits visible on Windows.</strong><br>
-  See remaining quota and reset times at a glance, then get a cautious exhaustion forecast after enough local history exists.
+  <strong>See your Codex limit in the Windows taskbar and check Codex and Claude Code together in a compact window.</strong><br>
+  View remaining quota and reset times at a glance. With enough local history, see whether your limit may run out before it resets.
 </p>
 
 <p align="center">
@@ -81,13 +81,7 @@ Before running an unsigned beta:
 
 The installer does not bundle Codex CLI or Claude Code. In interactive mode it can offer to run each provider's official installer only after separate opt-in confirmation. It does not download WebView2 automatically.
 
-### What portable distribution would mean
-
-A portable release would be a ZIP archive containing an executable that can be run without an installer. It would reduce installation steps and would not require the NSIS setup wizard. It would still use the installed Microsoft Edge WebView2 Runtime and store local app data under `~/.codex-usage-wrapper`.
-
-Portable does **not** mean signed or automatically trusted. An unsigned portable executable can trigger the same Windows SmartScreen **Unknown publisher** warning as an unsigned installer.
-
-The project does **not currently publish a portable release**. Current release automation produces the NSIS `*-setup.exe` installer only. If a portable artifact is added later, it should be published on the same GitHub Release with its own SHA-256 digest and the same unsigned-binary disclosure.
+The project currently publishes an NSIS installer, not a portable ZIP.
 
 ## Privacy boundary
 
@@ -102,6 +96,8 @@ The project does **not currently publish a portable release**. Current release a
 See [PRIVACY.md](docs/PRIVACY.md) for the complete data and network inventory.
 
 ## Screens
+
+The taskbar widget shows the lowest remaining Codex limit on the primary monitor's horizontal taskbar. Hover over the tray icon to see Codex and Claude limits. Stale values and failed refreshes are indicated.
 
 <table>
   <tr>
@@ -143,20 +139,9 @@ The product is deliberately narrow: a Windows decision surface for two AI coding
 
 Tools such as [ccusage](https://github.com/ryoppippi/ccusage) are better when broad provider support, terminal automation, or JSON output is the priority. Codex Claude Usage instead connects Codex and Claude quotas with forecasting and action recommendations in a Windows tray app.
 
-## Measured footprint
+## Resource use
 
-Reference measurements from the 2026-07-18 Windows release build, before the taskbar percentage widget was added:
-
-| State | Result |
-| --- | --- |
-| Application executable | 4.41 MB |
-| NSIS installer | 1.47 MB |
-| Cold tray idle | 11.43 MB; one app process; no WebView |
-| Tray idle after closing UI | 25.28 MB; one app process; measured CPU 0%; no WebView |
-| Compact UI open | 427.05 MB; app plus seven system WebView2 processes |
-| All idle states | No Codex/Claude CLI process; no listening network port |
-
-The taskbar percentage widget now keeps a small WebView2 window open, including while the main UI is closed. The historical idle measurements above do not represent this version's memory use; WebView2 memory use depends on the system and runtime version.
+The taskbar widget keeps a small WebView2 window open when the main window is closed. Current-version memory use has not been measured. Earlier measurements and their context are in the [engineering story](docs/ENGINEERING_STORY.md).
 
 ## How it works
 
@@ -223,5 +208,7 @@ Do not attach raw session JSONL, authentication data, or unredacted home-directo
 ## License
 
 [MIT License](LICENSE) · Copyright © 2026 kyuhan1230
+
+Third-party components and trademarks are described in [third-party notices](THIRD_PARTY_NOTICES.md).
 
 This is an independent project and is not affiliated with or endorsed by OpenAI or Anthropic. OpenAI, Codex, Anthropic, and Claude names and marks belong to their respective owners.

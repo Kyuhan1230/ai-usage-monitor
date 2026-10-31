@@ -5,8 +5,8 @@
 <h1 align="center">Codex Claude Usage</h1>
 
 <p align="center">
-  <strong>리셋보다 먼저 AI 코딩 한도가 바닥날까?</strong><br>
-  Codex CLI와 Claude Code의 소진 시각·비용·다음 행동을 로컬에서 계산하는 Windows 앱입니다.
+  <strong>Windows 작업표시줄에서 Codex 한도를 확인하고, 작은 창에서 Codex와 Claude Code를 함께 보세요.</strong><br>
+  남은 한도와 리셋 시각을 한눈에 확인하고, 기록이 쌓이면 리셋 전 소진 여부도 예측합니다.
 </p>
 
 <p align="center">
@@ -122,20 +122,9 @@
 
 따라서 **많은 도구 지원이나 터미널 자동화가 우선이면 ccusage가 더 적합**합니다. 이 앱은 “오늘 이 속도로 쓰면 리셋 전에 막히는가, 그렇다면 지금 무엇을 바꿀까”가 필요한 Windows 사용자에게 맞습니다.
 
-### 측정된 경량성
+### 리소스 사용
 
-작업표시줄 퍼센트 위젯을 추가하기 전인 2026-07-18 Windows 릴리스 빌드의 참고 측정값입니다. 현재 버전의 대기 메모리 사용량과는 다를 수 있습니다.
-
-| 상태 | 결과 |
-| --- | --- |
-| 애플리케이션 EXE | 4.41MB |
-| NSIS 설치 파일 | 1.47MB |
-| 로그인 시작/콜드 트레이 대기 | 11.43MB, 앱 프로세스 1개, WebView 0개 |
-| UI를 닫은 뒤 트레이 대기 | 25.28MB, 앱 프로세스 1개, CPU 측정값 0%, WebView 0개 |
-| 간단 보기 화면 표시 중 | 427.05MB, 앱+시스템 WebView2 7개 프로세스 |
-| 모든 대기 상태 | Codex/Claude CLI 0개, 네트워크 대기 포트 0개 |
-
-작업표시줄 퍼센트 위젯은 메인 화면을 닫은 상태에서도 작은 WebView2 창을 유지합니다. 메모리 사용량은 시스템과 WebView2 버전에 따라 달라집니다.
+작업표시줄 위젯은 메인 화면을 닫은 상태에서도 작은 WebView2 창을 유지합니다. 현재 버전의 메모리 사용량은 아직 측정하지 않았습니다. 이전 버전의 측정값과 조건은 [개발기](ENGINEERING_STORY.md)에서 확인할 수 있습니다.
 
 ## 주요 기능
 
@@ -279,4 +268,4 @@ Codex 또는 Claude Code로 작업한 뒤 다시 계산합니다. 앱은 `~/.cod
 
 [MIT License](../LICENSE) · Copyright © 2026 kyuhan1230
 
-현재 공개 설치 파일에는 Windows Authenticode 게시자 서명이 없습니다. SignPath Foundation에는 공개 신뢰 신호를 쌓은 뒤 재신청할 계획입니다.
+외부 구성 요소와 상표에 관한 내용은 [제3자 고지](../THIRD_PARTY_NOTICES.md)를 확인하세요. 이 프로젝트는 OpenAI 또는 Anthropic의 공식 제품이 아닙니다.
