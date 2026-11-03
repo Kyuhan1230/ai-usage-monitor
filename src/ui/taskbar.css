@@ -6,3 +6,9 @@ body.dark .provider-icon { filter: invert(1); }
 #usage.stale { color: #505860; }
 body.dark #usage { color: #fff; }
 body.dark #usage.stale { color: #d3d7df; }
+#usage.caution { color: #805d00; }
+#usage.warning { color: #a84400; }
+#usage.critical { color: #b91c1c; }
+body.dark #usage.caution { color: #ffd15c; }
+body.dark #usage.warning { color: #ffad55; }
+body.dark #usage.critical { color: #ff6b6b; }

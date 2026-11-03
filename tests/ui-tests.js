@@ -590,3 +590,52 @@ assert(setupScript.includes("업데이트 열기"), "Setup은 이미 발견한 �
 assert(setupScript.includes("window.usageApp.checkForUpdate(true)"), "Setup의 수동 확인은 cooldown과 snooze를 우회해야 합니다.");
 
 process.stdout.write(`PASS ${scripts.length}개 UI 스크립트와 Tauri 로컬 전용 구성을 검증했습니다.\n`);
+
+async function testTaskbarQuotaColors() {
+  const classes = () => {
+    const values = new Set();
+    return {
+      toggle(name, enabled) { if (enabled) values.add(name); else values.delete(name); },
+      contains(name) { return values.has(name); },
+    };
+  };
+  const label = { textContent: '', title: '', classList: classes() };
+  const body = { classList: classes() };
+  let response = { percent: 16, stale: false, light: true, tooltip: 'usage' };
+  let fail = false;
+  const context = {
+    document: { getElementById: () => label, body },
+    window: { __TAURI__: { core: { invoke: async () => { if (fail) throw new Error('offline'); return response; } } } },
+    setInterval() {},
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(ui, 'taskbar.js'), 'utf8'), context);
+  const check = async (percent, expected, stale = false) => {
+    response = { percent, stale, light: false, tooltip: 'usage' };
+    fail = false;
+    await context.refresh();
+    assert.strictEqual(label.textContent, percent == null ? '--%' : `${percent}%`);
+    for (const level of ['caution', 'warning', 'critical']) {
+      assert.strictEqual(label.classList.contains(level), level === expected, `${percent}% ${level}`);
+    }
+    assert.strictEqual(label.classList.contains('stale'), stale);
+    assert.strictEqual(body.classList.contains('dark'), true);
+  };
+  await check(16, null);
+  await check(15, 'caution');
+  await check(11, 'caution');
+  await check(10, 'warning');
+  await check(7, 'warning');
+  await check(6, 'warning');
+  await check(5, 'critical');
+  await check(0, 'critical');
+  await check(7, null, true);
+  await check(null, null);
+  await check(5, 'critical');
+  fail = true;
+  await context.refresh();
+  assert.strictEqual(label.textContent, '--%');
+  for (const level of ['caution', 'warning', 'critical']) assert.strictEqual(label.classList.contains(level), false);
+  await check(80, null);
+}
+testTaskbarQuotaColors().then(() => process.stdout.write('PASS taskbar quota color behavior\n')).catch((error) => { console.error(error); process.exitCode = 1; });
