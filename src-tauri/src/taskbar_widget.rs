@@ -32,8 +32,37 @@ fn covers_taskbar(
 }
 
 #[cfg(windows)]
+fn restore_widget_position(
+    widget: windows::Win32::Foundation::HWND,
+    x: i32,
+    y: i32,
+) -> windows::core::Result<()> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+    };
+
+    unsafe {
+        let mut current = RECT::default();
+        GetWindowRect(widget, &mut current)?;
+        if (current.left, current.top) != (x, y) {
+            SetWindowPos(
+                widget,
+                None,
+                x,
+                y,
+                0,
+                0,
+                SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 pub fn start(app: tauri::AppHandle) {
-    use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+    use tauri::{Manager, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
     use windows::Win32::Foundation::RECT;
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowExW, FindWindowW, GW_HWNDPREV, GetClassNameW, GetForegroundWindow, GetWindow,
@@ -114,10 +143,13 @@ pub fn start(app: tauri::AppHandle) {
             if let Some((x, y, width, height)) = bounds {
                 if last_bounds != Some((x, y, width, height)) {
                     let size = window.set_size(PhysicalSize::new(width, height));
-                    let position = window.set_position(PhysicalPosition::new(x, y));
-                    if size.is_ok() && position.is_ok() {
+                    if size.is_ok() {
                         last_bounds = Some((x, y, width, height));
                     }
+                }
+                // Windows can move the window while the taskbar bounds stay unchanged.
+                if let Ok(widget) = window.hwnd() {
+                    let _ = restore_widget_position(widget, x, y);
                 }
                 if !shown {
                     shown = window.show().is_ok();
@@ -171,11 +203,117 @@ pub fn start(_app: tauri::AppHandle) {}
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn restores_a_widget_moved_away_from_its_taskbar_position() {
+        use windows::Win32::Foundation::{HWND, RECT};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, DispatchMessageW, GetWindowRect, MSG, PM_REMOVE,
+            PeekMessageW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, TranslateMessage,
+            WINDOW_EX_STYLE, WS_POPUP,
+        };
+        use windows::core::w;
+
+        struct TestWindow(HWND);
+        impl Drop for TestWindow {
+            fn drop(&mut self) {
+                let _ = unsafe { DestroyWindow(self.0) };
+            }
+        }
+
+        let widget = TestWindow(unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("taskbar position test"),
+                WS_POPUP,
+                100,
+                200,
+                116,
+                40,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("create hidden test window")
+        });
+
+        unsafe {
+            SetWindowPos(
+                widget.0,
+                None,
+                100,
+                130,
+                0,
+                0,
+                SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .expect("move the window away from its target");
+        }
+        restore_widget_position(widget.0, 100, 200).expect("restore the window position");
+
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(widget.0, &mut rect) }.expect("read the window position");
+        assert_eq!(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (100, 200, 216, 240)
+        );
+
+        unsafe {
+            SetWindowPos(
+                widget.0,
+                None,
+                120,
+                130,
+                0,
+                0,
+                SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .expect("move the window a second time");
+        }
+        let handle = widget.0.0 as isize;
+        let restored = std::thread::spawn(move || {
+            restore_widget_position(HWND(handle as *mut _), 100, 200).is_ok()
+        })
+        .join()
+        .expect("positioning thread did not panic");
+        assert!(restored);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let mut message = MSG::default();
+            unsafe {
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+                GetWindowRect(widget.0, &mut rect).expect("read the window position");
+            }
+            if (rect.left, rect.top) == (100, 200) || std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (100, 200, 216, 240)
+        );
+    }
+
     #[test]
     fn places_readable_widget_immediately_before_the_notification_area() {
         assert_eq!(
             widget_bounds((0, 1392, 2560, 1440), (2298, 1392, 2560, 1440)),
             Some((2178, 1396, 116, 40))
+        );
+    }
+
+    #[test]
+    fn places_widget_inside_a_scaled_taskbar() {
+        assert_eq!(
+            widget_bounds((0, 2088, 3840, 2160), (3303, 2088, 3840, 2160)),
+            Some((3183, 2104, 116, 40))
         );
     }
 
